@@ -1034,7 +1034,7 @@ export async function initVault(vaultPath: string): Promise<string[]> {
   // README for raw/
   await writeFile(
     "raw/README.md",
-    "# Raw Inbox\n\nDrop files here or use `ccs-code sync` to populate from sources.\nDo not edit files in this directory — they are managed by CCS Code.\n",
+    "# Raw Inbox\n\nDrop files here, use `/sync` for GitHub, or use `/harvest` to automatically mine AI conversation history from Cursor/VS Code/Claude.\n\nDo not edit files in this directory — they are managed by CCS Code.\n",
   );
 
   return created;

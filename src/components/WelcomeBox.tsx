@@ -24,16 +24,17 @@ export const LOGO_SMALL = [
 
 const PIPELINE: Array<{ step: string; cmd: string; desc: string }> = [
   { step: "1", cmd: "/vault init",  desc: "create your knowledge base" },
-  { step: "2", cmd: "/sync",        desc: "pull from GitHub repos" },
-  { step: "3", cmd: "/ingest",      desc: "process files into wiki pages" },
-  { step: "4", cmd: "/enrich",      desc: "add AI summaries + links" },
-  { step: "5", cmd: "/graph",       desc: "open visual knowledge graph" },
-  { step: "6", cmd: "/ask <q>",     desc: "ask questions about your wiki" },
+  { step: "2", cmd: "/harvest",    desc: "mine local AI/IDE histories" },
+  { step: "3", cmd: "/sync",        desc: "pull from GitHub repos" },
+  { step: "4", cmd: "/ingest",      desc: "process files into wiki pages" },
+  { step: "5", cmd: "/enrich",      desc: "add AI summaries + links" },
+  { step: "6", cmd: "/graph",       desc: "open visual knowledge graph" },
+  { step: "7", cmd: "/ask <q>",     desc: "ask questions about your wiki" },
 ];
 
 const QUICK_TIPS = [
+  "Run /vault audit to check for missing memories",
   "Drop any file into raw/uploads/ then run /ingest",
-  "After /enrich, run /graph to see connections",
   "Just type a question to chat without /ask",
 ];
 
@@ -125,11 +126,11 @@ function WideLayout({
         >
           {/* Pipeline */}
           <Text bold color="white">Pipeline</Text>
-          <Box marginTop={1} marginBottom={1} flexDirection="column">
+          <Box flexDirection="column" marginTop={1} marginBottom={1}>
             {PIPELINE.map(({ step, cmd, desc }) => (
               <Box key={step}>
                 <Text dimColor>{step}. </Text>
-                <Text color="green">{cmd.padEnd(14)}</Text>
+                <Text color="cyan" bold>{cmd.padEnd(14)}</Text>
                 <Text dimColor>{desc}</Text>
               </Box>
             ))}
@@ -151,15 +152,12 @@ function WideLayout({
             ))}
           </Box>
 
-          <Box marginTop={1}>
-            <Text dimColor>Type </Text>
-            <Text color="green">?</Text>
-            <Text dimColor> for help  ·  </Text>
-            <Text color="green">/guide</Text>
-            <Text dimColor> for the manual  ·  Type any message to start chatting</Text>
+          <Box marginTop={2} justifyContent="center">
+            <Text dimColor>
+              Type <Text color="cyan" bold>?</Text> for help  ·  <Text color="cyan" bold>/guide</Text> for manual  ·  Just type to chat
+            </Text>
           </Box>
         </Box>
-
       </Box>
     </Box>
   );
@@ -227,7 +225,7 @@ function CompactLayout({
         {PIPELINE.map(({ step, cmd, desc }) => (
           <Box key={step}>
             <Text dimColor>{step}. </Text>
-            <Text color="green">{cmd.padEnd(13)}</Text>
+            <Text color="cyan" bold>{cmd.padEnd(13)}</Text>
             <Text dimColor>{desc}</Text>
           </Box>
         ))}
@@ -238,10 +236,9 @@ function CompactLayout({
         <Text dimColor>{"─".repeat(Math.max(10, boxWidth - 6))}</Text>
       </Box>
 
-      {/* Hint */}
       <Box flexDirection="column" alignItems="center">
         <Text dimColor>
-          Type <Text color="green">?</Text> for help  ·  <Text color="green">/guide</Text> for manual  ·  Just type to chat
+          Type <Text color="cyan" bold>?</Text> for help  ·  <Text color="cyan" bold>/guide</Text> for manual  ·  Just type to chat
         </Text>
       </Box>
     </Box>

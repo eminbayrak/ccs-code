@@ -79,7 +79,7 @@ type SuggestionMode = "file" | "command" | null;
 
 const SLASH_COMMANDS: SuggestionItem[] = [
   // CCS Code vault commands
-  { id: "vault", label: "/vault <init|status>", description: "Initialize or inspect the CCS Code vault" },
+  { id: "vault", label: "/vault <init|status|audit>", description: "Initialize, inspect, or audit the CCS Code vault" },
   { id: "sync", label: "/sync", description: "Sync configured sources (GitHub, Confluence) into raw/" },
   { id: "ingest", label: "/ingest", description: "Process raw/ files into wiki pages" },
   { id: "graph", label: "/graph", description: "Build interactive knowledge graph (pyvis)" },

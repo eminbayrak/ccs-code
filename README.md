@@ -9,9 +9,9 @@
 You run `ccs-code` in your terminal. You have a set of commands that form a pipeline. Each time you run through the pipeline, your knowledge base grows and compounds.
 
 ```
-GitHub repos  +  local files  +  Claude conversations
+GitHub repos  +  IDE histories (Cursor, VS Code, Claude)  +  local files
         │
-        ▼ /sync + drop into raw/
+        ▼ /sync + /harvest + drop into raw/
         │
         ▼ /ingest  →  wiki/ pages (Markdown, auto-merged)
         │
@@ -48,6 +48,24 @@ Vault: /Users/you/vault
   wiki pages  — 24
   raw files   — 3 ready to ingest
   skills      — 5
+
+### `/vault audit`
+
+Runs a health check to ensure every harvested memory has been successfully ingested into your wiki.
+
+```
+> /vault audit
+[Raw Memories]
+Total Harvested: 117
+  › cursor: 97
+  › vscode: 11
+  › claude: 4
+  › antigravity: 5
+
+[Wiki State]
+Total Wiki Pages: 549
+✅ Knowledge base coverage looks good.
+```
 ```
 
 ---
@@ -71,6 +89,29 @@ sources:
 > /sync
   ✓ github:my-org/auth-svc — 4 file(s) written
   ✓ github:my-org/payment-svc — 4 file(s) written
+
+---
+
+### `/harvest`
+
+**Extreme Scraper** logic for the AI era. Automatically mines conversation history from your local development environment. Supports:
+- **Cursor**: generations (prompt logs) + composer histories
+- **VS Code**: Copilot chat sessions (.jsonl)
+- **Claude Code**: project-specific session logs
+- **Antigravity**: local brain memories
+
+```
+> /harvest
+Harvest Complete! 💎
+Gathered 117 total memories:
+  › Claude Code: 4
+  › VS Code Copilot: 11
+  › Cursor: 97
+  › Antigravity: 5
+
+Added 117 new memory files to `raw/memories/`.
+Run /ingest to integrate them into your wiki!
+```
 ```
 
 ---
