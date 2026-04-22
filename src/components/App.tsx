@@ -9,7 +9,7 @@ import { CCSSpinner } from "./animations/CCSSpinner";
 import { AgentProgressLine } from "./animations/AgentProgressLine";
 import { StatusBar } from "./StatusBar";
 import { HelpMenu } from "./HelpMenu";
-import { WelcomeBox } from "./WelcomeBox";
+import { WelcomeBox, LOGO_LARGE, LOGO_SMALL } from "./WelcomeBox";
 import { MarkdownText } from "./MarkdownText";
 import { SuggestionList, type SuggestionItem } from "./SuggestionList";
 import {
@@ -705,14 +705,37 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const dividerWidth = Math.max(1, terminalWidth - 4);
 
   if (isSetupMode) {
+    const boxWidth = Math.max(42, terminalWidth - 4);
+    const showLargeLogo = boxWidth >= 40;
+
     return (
-      <Box flexDirection="column" padding={2} borderStyle="round" borderColor="cyan">
-        <Box marginBottom={1}>
-          <Text bold color="cyan">Welcome to CCS Code!</Text>
+      <Box
+        flexDirection="column"
+        padding={2}
+        borderStyle="round"
+        borderColor="cyan"
+        width={boxWidth}
+        marginX={2}
+        marginTop={1}
+      >
+        {/* Logo */}
+        <Box flexDirection="column" alignItems="center" marginBottom={1}>
+          {(showLargeLogo ? LOGO_LARGE : LOGO_SMALL).map((line, i) => (
+            <Text key={i} color="cyan">{line}</Text>
+          ))}
         </Box>
-        <Text>Where should we store your knowledge base (vault)?</Text>
-        <Text dimColor>(e.g. ./vault or /Users/me/Documents/knowledge)</Text>
-        <Box marginTop={1} flexDirection="row" gap={1}>
+
+        <Box marginBottom={1} alignItems="center" flexDirection="column">
+          <Text bold color="cyan">Welcome to CCS Code!</Text>
+          <Text dimColor>Your AI-powered knowledge base</Text>
+        </Box>
+
+        <Box flexDirection="column" marginBottom={1}>
+          <Text>Where should we store your knowledge base (vault)?</Text>
+          <Text dimColor>(e.g. ./vault or /Users/me/Documents/knowledge)</Text>
+        </Box>
+
+        <Box flexDirection="row" gap={1}>
           <Text bold color="yellow">❯</Text>
           <TextInput
             value={setupInput}
@@ -721,7 +744,8 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             placeholder="Enter absolute or relative path..."
           />
         </Box>
-        <Box marginTop={1}>
+
+        <Box marginTop={1} borderStyle="single" borderTop={true} borderBottom={false} borderLeft={false} borderRight={false} borderColor="gray" paddingTop={1}>
           <Text dimColor>This path will be saved to ccsconfig.json</Text>
         </Box>
       </Box>

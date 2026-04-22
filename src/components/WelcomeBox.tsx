@@ -5,7 +5,7 @@ import { useTerminalSize } from "../hooks/useTerminalSize";
 
 // ─── Logo variants ────────────────────────────────────────────────────────────
 
-const LOGO_LARGE = [
+export const LOGO_LARGE = [
   " ██████╗ ██████╗███████╗",
   "██╔════╝██╔════╝██╔════╝",
   "██║     ██║     ███████╗",
@@ -14,7 +14,7 @@ const LOGO_LARGE = [
   " ╚═════╝ ╚═════╝╚══════╝",
 ];
 
-const LOGO_SMALL = [
+export const LOGO_SMALL = [
   "▄▀▀ ▄▀▀ ▄▀▀",
   "█   █   ▀▀▄",
   "▀▀▘ ▀▀▘ ▀▀▀",
