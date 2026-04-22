@@ -176,8 +176,11 @@ type LineKind =
   | { kind: "h1"; text: string }
   | { kind: "h2"; text: string }
   | { kind: "h3"; text: string }
+  | { kind: "h4"; text: string }
+  | { kind: "h5"; text: string }
   | { kind: "bullet"; indent: number; text: string }
   | { kind: "numbered"; n: string; text: string }
+  | { kind: "alert"; type: "NOTE" | "TIP" | "IMPORTANT" | "WARNING" | "CAUTION"; text: string }
   | { kind: "blockquote"; text: string }
   | { kind: "hr" }
   | { kind: "fence_open"; lang: string }
@@ -188,24 +191,33 @@ type LineKind =
   | { kind: "text"; text: string };
 
 function classifyLine(line: string): LineKind {
-  if (/^```/.test(line))           return line.trim() === "```" ? { kind: "fence_close" } : { kind: "fence_open", lang: line.slice(3).trim() };
-  if (/^#{3}\s/.test(line))        return { kind: "h3", text: line.slice(4) };
-  if (/^#{2}\s/.test(line))        return { kind: "h2", text: line.slice(3) };
-  if (/^#\s/.test(line))           return { kind: "h1", text: line.slice(2) };
+  const trimmed = line.trim();
+  if (trimmed.startsWith("```")) return trimmed === "```" ? { kind: "fence_close" } : { kind: "fence_open", lang: trimmed.slice(3).trim() };
+  if (/^#{5}\s/.test(trimmed))   return { kind: "h5", text: trimmed.slice(6) };
+  if (/^#{4}\s/.test(trimmed))   return { kind: "h4", text: trimmed.slice(5) };
+  if (/^#{3}\s/.test(trimmed))   return { kind: "h3", text: trimmed.slice(4) };
+  if (/^#{2}\s/.test(trimmed))   return { kind: "h2", text: trimmed.slice(3) };
+  if (/^#\s/.test(trimmed))      return { kind: "h1", text: trimmed.slice(2) };
+  
+  if (/^>\s?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/.test(trimmed)) {
+    const m = trimmed.match(/^>\s?\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](.*)/)!;
+    return { kind: "alert", type: m[1] as any, text: m[2]!.trim() };
+  }
+  if (/^>\s?/.test(trimmed))      return { kind: "blockquote", text: trimmed.replace(/^>\s?/, "") };
+  
   if (/^(\s*)[-*•]\s/.test(line))  {
     const m = line.match(/^(\s*)[-*•]\s(.*)/)!;
     return { kind: "bullet", indent: m[1]!.length, text: m[2]! };
   }
-  if (/^\d+\.\s/.test(line)) {
-    const m = line.match(/^(\d+)\.\s(.*)/)!;
+  if (/^\d+\.\s/.test(trimmed)) {
+    const m = trimmed.match(/^(\d+)\.\s(.*)/)!;
     return { kind: "numbered", n: m[1]!, text: m[2]! };
   }
-  if (/^>\s?/.test(line))          return { kind: "blockquote", text: line.replace(/^>\s?/, "") };
-  if (/^---+$/.test(line.trim()))  return { kind: "hr" };
-  if (line.trim() === "")          return { kind: "blank" };
-  if (/^\|/.test(line)) {
-    if (isTableSep(line)) return { kind: "table_sep" };
-    return { kind: "table_row", cells: parseTableRow(line) };
+  if (/^---+$/.test(trimmed))  return { kind: "hr" };
+  if (trimmed === "")          return { kind: "blank" };
+  if (/^\|/.test(trimmed)) {
+    if (isTableSep(trimmed)) return { kind: "table_sep" };
+    return { kind: "table_row", cells: parseTableRow(trimmed) };
   }
   return { kind: "text", text: line };
 }
@@ -221,12 +233,14 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
   let fenceLang = "";
   let fenceLines: string[] = [];
   let tableRows: string[][] = [];
+  let blockquoteLines: string[] = [];
+  let activeAlert: { type: string; lines: string[] } | null = null;
   let key = 0;
 
   const flushFence = () => {
     if (fenceLines.length === 0) return;
     elements.push(
-      <Box key={key++} flexDirection="column" marginBottom={1}>
+      <Box key={key++} flexDirection="column" marginBottom={1} width={w}>
         {fenceLang && (
           <Box paddingLeft={2}>
             <Text dimColor>{fenceLang}</Text>
@@ -241,9 +255,10 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
           borderTop={false}
           borderBottom={false}
           paddingLeft={1}
+          width={w - 2}
         >
           {fenceLines.map((l, i) => (
-            <Box key={i}>
+            <Box key={i} width={w - 4}>
               <HighlightedLine line={l || " "} lang={fenceLang} />
             </Box>
           ))}
@@ -257,16 +272,51 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
     if (tableRows.length === 0) return;
     const k = key++;
     elements.push(
-      <Box key={k} flexDirection="column" paddingLeft={1} marginBottom={1}>
+      <Box key={k} flexDirection="column" paddingLeft={1} marginBottom={1} width={w}>
         {renderTable(tableRows, k)}
       </Box>
     );
     tableRows = [];
   };
 
+  const flushBlockquote = () => {
+    if (blockquoteLines.length === 0) return;
+    elements.push(
+      <Box key={key++} flexDirection="column" paddingLeft={1} marginBottom={1} borderStyle="single" borderLeft borderRight={false} borderTop={false} borderBottom={false} borderColor="yellow" width={w}>
+        {blockquoteLines.map((l, i) => (
+          <Box key={i} width={w - 2}><InlineText line={l} /></Box>
+        ))}
+      </Box>
+    );
+    blockquoteLines = [];
+  };
+
+  const flushAlert = () => {
+    if (!activeAlert) return;
+    const colorMap: Record<string, string> = {
+      NOTE: "blue",
+      TIP: "green",
+      IMPORTANT: "magenta",
+      WARNING: "yellow",
+      CAUTION: "red",
+    };
+    const color = colorMap[activeAlert.type] || "white";
+    elements.push(
+      <Box key={key++} flexDirection="column" paddingX={1} marginY={1} borderStyle="round" borderColor={color} width={w}>
+        <Box marginBottom={1}>
+          <Text bold color={color}>{activeAlert.type}</Text>
+        </Box>
+        {activeAlert.lines.map((l, i) => (
+          <Box key={i} width={w - 4}><InlineText line={l} /></Box>
+        ))}
+      </Box>
+    );
+    activeAlert = null;
+  };
+
   for (const raw of rawLines) {
     if (inFence) {
-      if (raw.trimEnd() === "```") {
+      if (raw.trim() === "```") {
         flushFence();
         inFence = false;
       } else {
@@ -281,6 +331,27 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
     if (cl.kind === "table_sep") { continue; }
     if (tableRows.length > 0) flushTable();
 
+    if (cl.kind === "blockquote") {
+      if (activeAlert) { activeAlert.lines.push(cl.text); continue; }
+      blockquoteLines.push(cl.text); 
+      continue; 
+    }
+    if (blockquoteLines.length > 0) flushBlockquote();
+
+    if (cl.kind === "alert") {
+      if (activeAlert) flushAlert();
+      activeAlert = { type: cl.type, lines: cl.text ? [cl.text] : [] };
+      continue;
+    }
+    // If it's a blank line and we are in an alert, it might just be a spacer
+    if (cl.kind === "blank" && activeAlert) {
+      activeAlert.lines.push("");
+      continue;
+    }
+    if (cl.kind !== "alert" && cl.kind !== "blockquote" && cl.kind !== "blank" && activeAlert) {
+      flushAlert();
+    }
+
     switch (cl.kind) {
       case "fence_open":
         inFence = true;
@@ -289,7 +360,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "h1":
         elements.push(
-          <Box key={key++} flexDirection="column" marginTop={1}>
+          <Box key={key++} flexDirection="column" marginTop={1} width={w}>
             <Text bold color="green">{cl.text}</Text>
             <Text dimColor>{"─".repeat(Math.min(cl.text.length + 2, w - 4))}</Text>
           </Box>
@@ -298,7 +369,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "h2":
         elements.push(
-          <Box key={key++} marginTop={1}>
+          <Box key={key++} marginTop={1} width={w}>
             <Text bold color="cyan">{cl.text}</Text>
           </Box>
         );
@@ -306,54 +377,61 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "h3":
         elements.push(
-          <Box key={key++} marginTop={1}>
+          <Box key={key++} marginTop={1} width={w}>
             <Text bold color="white">{cl.text}</Text>
+          </Box>
+        );
+        break;
+
+      case "h4":
+        elements.push(
+          <Box key={key++} marginTop={1} width={w}>
+            <Text bold color="yellow">{cl.text}</Text>
+          </Box>
+        );
+        break;
+
+      case "h5":
+        elements.push(
+          <Box key={key++} marginTop={1} width={w}>
+            <Text bold color="magenta">{cl.text}</Text>
           </Box>
         );
         break;
 
       case "bullet":
         elements.push(
-          <Box key={key++} flexDirection="row" paddingLeft={cl.indent > 0 ? cl.indent + 2 : 2}>
+          <Box key={key++} flexDirection="row" paddingLeft={cl.indent > 0 ? cl.indent + 2 : 2} width={w}>
             <Text color="green">{"› "}</Text>
-            <InlineText line={cl.text} />
+            <Box width={w - (cl.indent + 4)}><InlineText line={cl.text} /></Box>
           </Box>
         );
         break;
 
       case "numbered":
         elements.push(
-          <Box key={key++} flexDirection="row" paddingLeft={2}>
+          <Box key={key++} flexDirection="row" paddingLeft={2} width={w}>
             <Text color="cyan" dimColor>{`${cl.n}. `}</Text>
-            <InlineText line={cl.text} />
-          </Box>
-        );
-        break;
-
-      case "blockquote":
-        elements.push(
-          <Box key={key++} flexDirection="row" paddingLeft={1}>
-            <Text color="yellow">{"▎ "}</Text>
-            <InlineText line={cl.text} />
+            <Box width={w - 6}><InlineText line={cl.text} /></Box>
           </Box>
         );
         break;
 
       case "hr":
         elements.push(
-          <Box key={key++} marginY={0}>
+          <Box key={key++} marginY={0} width={w}>
             <Text dimColor>{"─".repeat(Math.min(w - 4, 72))}</Text>
           </Box>
         );
         break;
 
       case "blank":
-        elements.push(<Box key={key++}><Text>{" "}</Text></Box>);
+        elements.push(<Box key={key++} width={w}><Text>{" "}</Text></Box>);
         break;
 
       case "text":
         elements.push(
-          <Box key={key++}>
+          <Box key={key++} width={w}>
             <InlineText line={cl.text} />
           </Box>
         );
@@ -363,6 +441,9 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
   if (inFence && fenceLines.length > 0) flushFence();
   if (tableRows.length > 0) flushTable();
+  if (blockquoteLines.length > 0) flushBlockquote();
+  if (activeAlert) flushAlert();
 
-  return <Box flexDirection="column">{elements}</Box>;
+  return <Box flexDirection="column" width={w}>{elements}</Box>;
 }
+
