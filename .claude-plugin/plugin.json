@@ -1,9 +1,9 @@
 {
-  "name": "knowledgeforge",
+  "name": "ccs-code",
   "version": "1.0.0",
   "description": "Obsidian RAG knowledge base for microservice rewrites. Auto-ingests from GitHub, Confluence, VSCode. Karpathy LLM Wiki pattern.",
   "skills_dir": "../skills",
   "activation": {
-    "auto_activate_on_directory": [".obsidian", "kforge.yaml"]
+    "auto_activate_on_directory": [".obsidian", "ccs-code.yaml"]
   }
 }

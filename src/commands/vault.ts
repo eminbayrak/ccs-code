@@ -34,7 +34,7 @@ async function writeGlobalConfig(cfg: GlobalConfig): Promise<void> {
 
 // ---------------------------------------------------------------------------
 // Vault path resolution — checks (in order):
-//   1. kforge.yaml in cwd
+//   1. ccs.yaml in cwd
 //   2. Global ~/.ccs/config.json active vault
 //   3. Falls back to <cwd>/vault
 // ---------------------------------------------------------------------------
@@ -43,28 +43,34 @@ type SourceConfig =
   | { type: "github"; repos: string[]; include?: string[]; token_env?: string }
   | { type: "folder"; path: string };
 
-type KforgeConfig = {
+type CcsConfig = {
   vault?: { path?: string };
   sources?: SourceConfig[];
 };
 
-async function loadKforgeConfig(vaultPath: string): Promise<KforgeConfig> {
-  const configPath = join(vaultPath, "kforge.yaml");
-  try {
-    const raw = await fs.readFile(configPath, "utf-8");
-    return parseSimpleYaml(raw) as KforgeConfig;
-  } catch {
-    return {};
+async function loadCcsConfig(vaultPath: string): Promise<CcsConfig> {
+  const possiblePaths = [join(vaultPath, "ccs.yaml"), join(vaultPath, "ccs.yaml")];
+  for (const configPath of possiblePaths) {
+    try {
+      const raw = await fs.readFile(configPath, "utf-8");
+      return parseSimpleYaml(raw) as CcsConfig;
+    } catch {
+      continue;
+    }
   }
+  return {};
 }
 
 async function resolveVaultPath(cwd: string): Promise<string> {
-  // 1. kforge.yaml in cwd
-  try {
-    const raw = await fs.readFile(join(cwd, "kforge.yaml"), "utf-8");
-    const cfg = parseSimpleYaml(raw) as KforgeConfig;
-    if (cfg.vault?.path) return resolve(cwd, cfg.vault.path);
-  } catch {}
+  // 1. ccs.yaml or ccs.yaml in cwd
+  const possibleRoots = [join(cwd, "ccs.yaml"), join(cwd, "ccs.yaml")];
+  for (const rootPath of possibleRoots) {
+    try {
+      const raw = await fs.readFile(rootPath, "utf-8");
+      const cfg = parseSimpleYaml(raw) as CcsConfig;
+      if (cfg.vault?.path) return resolve(cwd, cfg.vault.path);
+    } catch { }
+  }
 
   // 2. Global active vault
   const global = await readGlobalConfig();
@@ -147,7 +153,7 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
           "  2. Run /ingest            convert files → wiki pages",
           "  3. Run /enrich            add AI summaries + links",
           "  4. Run /graph             open visual knowledge graph",
-          "  (or /sync first if you have GitHub repos in kforge.yaml)",
+          "  (or /sync first if you have GitHub repos in ccs.yaml)",
         ].join("\n");
       } catch (e) {
         return `Error initializing vault: ${e instanceof Error ? e.message : String(e)}`;
@@ -183,7 +189,7 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
 
 export async function handleSyncCommand(args: string[], cwd: string): Promise<string> {
   const vaultPath = await resolveVaultPath(cwd);
-  const config = await loadKforgeConfig(vaultPath);
+  const config = await loadCcsConfig(vaultPath);
   const rawDir = join(vaultPath, "raw");
 
   const sources = Array.isArray(config.sources) ? config.sources : [];
@@ -191,12 +197,12 @@ export async function handleSyncCommand(args: string[], cwd: string): Promise<st
     return [
       `Vault: ${vaultPath}`,
       "",
-      "No sources configured. Edit kforge.yaml to add sources:",
+      "No sources configured. Edit ccs.yaml to add sources:",
       "  sources:",
       "    - type: github",
       "      repos: [my-org/my-service]",
       "      include: [commits, prs, issues, readme]",
-      "      token_env: GH_TOKEN",
+      "      token_env: GITHUB_PRIVATE_TOKEN",
     ].join("\n");
   }
 

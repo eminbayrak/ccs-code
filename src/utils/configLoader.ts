@@ -119,7 +119,7 @@ async function discoverSkillsInDir(
 /**
  * Discovers skills from two locations:
  *   1. .ccs/skills/  — project-level CCS skills
- *   2. vault/skills/ — KnowledgeForge vault skills (if vault exists in cwd)
+ *   2. vault/skills/ — CCS Code vault skills (if vault exists in cwd)
  *   3. skills/       — vault skills when cwd IS the vault
  */
 export async function loadSkills(cwd: string): Promise<ConfigFile[]> {

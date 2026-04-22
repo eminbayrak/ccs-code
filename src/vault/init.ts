@@ -206,7 +206,7 @@ For "what order should I rewrite in?":
 
 const BUILD_GRAPH_PY = `#!/usr/bin/env python3
 """
-KnowledgeForge — Graph Build Script
+CCS Code — Graph Build Script
 Parses the vault with obsidiantools and renders an interactive pyvis graph.
 
 Usage:
@@ -355,7 +355,7 @@ if __name__ == "__main__":
 
 const ANALYZE_REWRITE_PY = `#!/usr/bin/env python3
 """
-KnowledgeForge — Rewrite Analysis Script
+CCS Code — Rewrite Analysis Script
 Computes rewrite order and risk scores for microservices using graph analytics.
 
 Usage:
@@ -549,7 +549,7 @@ if __name__ == "__main__":
 
 const LINT_WIKI_PY = `#!/usr/bin/env python3
 """
-KnowledgeForge — Wiki Lint Script
+CCS Code — Wiki Lint Script
 Runs health checks on the vault and produces a severity-annotated report.
 
 Checks:
@@ -726,7 +726,7 @@ if __name__ == "__main__":
 
 const EXTRACT_ENTITIES_PY = `#!/usr/bin/env python3
 """
-KnowledgeForge — Entity Extraction Script
+CCS Code — Entity Extraction Script
 Extracts named entities (services, patterns, people, concepts) from a raw document
 using pattern matching + optional LLM classification.
 
@@ -793,7 +793,7 @@ if __name__ == "__main__":
 
 const MERGE_PAGE_PY = `#!/usr/bin/env python3
 """
-KnowledgeForge — Safe Page Merge Script
+CCS Code — Safe Page Merge Script
 Merges new content into an existing wiki page without overwriting.
 Appends new sections and updates frontmatter timestamps.
 
@@ -864,7 +864,7 @@ def merge_pages(target_path: str, source_content: str) -> dict:
 
     final_body = existing_body
     if added_sections:
-        final_body += "\\n\\n---\\n_Merged by KnowledgeForge_\\n\\n" + "".join(added_sections)
+        final_body += "\\n\\n---\\n_Merged by CCS Code_\\n\\n" + "".join(added_sections)
 
     # Rebuild frontmatter
     yaml_lines = "\\n".join(f"{k}: {v}" for k, v in merged_fm.items())
@@ -896,7 +896,7 @@ if __name__ == "__main__":
 
 const PLUGIN_JSON = JSON.stringify(
   {
-    name: "knowledgeforge",
+    name: "ccs-code",
     version: "1.0.0",
     description:
       "Obsidian RAG knowledge base for microservice rewrites. Auto-ingests from GitHub, Confluence, VSCode. Karpathy LLM Wiki pattern.",
@@ -909,9 +909,9 @@ const PLUGIN_JSON = JSON.stringify(
   2,
 );
 
-const CLAUDE_MD = `# KnowledgeForge Vault
+const CLAUDE_MD = `# CCS Code Vault
 
-This directory is a KnowledgeForge vault. The knowledge base follows Karpathy's LLM Wiki pattern.
+This directory is a CCS Code vault. The knowledge base follows Karpathy's LLM Wiki pattern.
 
 ## Rules for the Agent
 
@@ -931,10 +931,10 @@ People: \`wiki/people/{github-username}.md\`
 ## Tooling
 
 Python packages: obsidiantools, pyvis, networkx, python-frontmatter.
-CLI: \`kforge {command}\` — see \`kforge --help\`.
+CLI: \`ccs-code {command}\` — see \`ccs-code --help\`.
 `;
 
-const KFORGE_YAML = `vault:
+const CCS_YAML = `vault:
   path: ./vault
   auto_sync: true
   sync_interval: 6h
@@ -1019,8 +1019,8 @@ export async function initVault(vaultPath: string): Promise<string[]> {
   // CLAUDE.md
   await writeFile("CLAUDE.md", CLAUDE_MD);
 
-  // kforge.yaml
-  await writeFile("kforge.yaml", KFORGE_YAML);
+  // ccs.yaml
+  await writeFile("ccs.yaml", CCS_YAML);
 
   // Wiki master index placeholder
   await writeFile("wiki/_master-index.md", MASTER_INDEX_INITIAL);
@@ -1029,7 +1029,7 @@ export async function initVault(vaultPath: string): Promise<string[]> {
   // README for raw/
   await writeFile(
     "raw/README.md",
-    "# Raw Inbox\n\nDrop files here or use `kforge sync` to populate from sources.\nDo not edit files in this directory — they are managed by KnowledgeForge.\n",
+    "# Raw Inbox\n\nDrop files here or use `ccs-code sync` to populate from sources.\nDo not edit files in this directory — they are managed by CCS Code.\n",
   );
 
   return created;

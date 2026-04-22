@@ -5,107 +5,107 @@ import type { ConnectorAdapter } from "./base.js";
 import type { ToolDescriptor } from "../capabilities/types.js";
 
 // ---------------------------------------------------------------------------
-// Vault sync helpers (KnowledgeForge)
+// Vault sync helpers (CCS Code)
 // ---------------------------------------------------------------------------
 
 export type GitHubSyncConfig = {
-  repos: string[];
-  include: Array<"commits" | "prs" | "issues" | "readme" | "file_tree">;
-  token?: string;
+    repos: string[];
+    include: Array<"commits" | "prs" | "issues" | "readme" | "file_tree">;
+    token?: string;
 };
 
 function ghHeaders(token?: string): Record<string, string> {
-  const h: Record<string, string> = {
-    Accept: "application/vnd.github+json",
-    "User-Agent": "KnowledgeForge/1.0",
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  const t = token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.CCS_GITHUB_TOKEN;
-  if (t) h.Authorization = `Bearer ${t}`;
-  return h;
+    const h: Record<string, string> = {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "CCS-Code/1.0",
+        "X-GitHub-Api-Version": "2022-11-28",
+    };
+    const t = token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN;
+    if (t) h.Authorization = `Bearer ${t}`;
+    return h;
 }
 
 async function ghFetch<T>(path: string, token?: string): Promise<T> {
-  const res = await fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
-  if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return res.json() as Promise<T>;
+    const res = await fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
+    if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    return res.json() as Promise<T>;
 }
 
 export async function syncRepo(repo: string, rawDir: string, cfg: GitHubSyncConfig): Promise<string[]> {
-  const repoDir = join(rawDir, "github", repo.replace("/", "__"));
-  await fs.mkdir(repoDir, { recursive: true });
-  const written: string[] = [];
-  const token = cfg.token;
+    const repoDir = join(rawDir, "github", repo.replace("/", "__"));
+    await fs.mkdir(repoDir, { recursive: true });
+    const written: string[] = [];
+    const token = cfg.token;
 
-  if (cfg.include.includes("readme")) {
-    try {
-      const data = await ghFetch<{ content: string; encoding: string }>(`/repos/${repo}/readme`, token);
-      const content = data.encoding === "base64"
-        ? Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf-8")
-        : data.content;
-      const p = join(repoDir, "README.md");
-      await fs.writeFile(p, content, "utf-8");
-      written.push(p);
-    } catch { /* no readme */ }
-  }
+    if (cfg.include.includes("readme")) {
+        try {
+            const data = await ghFetch<{ content: string; encoding: string }>(`/repos/${repo}/readme`, token);
+            const content = data.encoding === "base64"
+                ? Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf-8")
+                : data.content;
+            const p = join(repoDir, "README.md");
+            await fs.writeFile(p, content, "utf-8");
+            written.push(p);
+        } catch { /* no readme */ }
+    }
 
-  if (cfg.include.includes("issues")) {
-    try {
-      const issues = await ghFetch<Array<{ number: number; title: string; body: string | null; state: string; labels: Array<{ name: string }>; assignees: Array<{ login: string }>; created_at: string }>>(`/repos/${repo}/issues?state=open&per_page=50`, token);
-      const lines = [`# Open Issues — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
-      for (const i of issues) {
-        lines.push(`## #${i.number}: ${i.title}`, `- State: ${i.state}`, `- Labels: ${i.labels.map((l) => l.name).join(", ") || "none"}`, `- Assignees: ${i.assignees.map((a) => a.login).join(", ") || "none"}`, "", i.body?.slice(0, 500) ?? "_No body_", "", "---", "");
-      }
-      const p = join(repoDir, "issues.md");
-      await fs.writeFile(p, lines.join("\n"), "utf-8");
-      written.push(p);
-    } catch { /* unavailable */ }
-  }
+    if (cfg.include.includes("issues")) {
+        try {
+            const issues = await ghFetch<Array<{ number: number; title: string; body: string | null; state: string; labels: Array<{ name: string }>; assignees: Array<{ login: string }>; created_at: string }>>(`/repos/${repo}/issues?state=open&per_page=50`, token);
+            const lines = [`# Open Issues — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
+            for (const i of issues) {
+                lines.push(`## #${i.number}: ${i.title}`, `- State: ${i.state}`, `- Labels: ${i.labels.map((l) => l.name).join(", ") || "none"}`, `- Assignees: ${i.assignees.map((a) => a.login).join(", ") || "none"}`, "", i.body?.slice(0, 500) ?? "_No body_", "", "---", "");
+            }
+            const p = join(repoDir, "issues.md");
+            await fs.writeFile(p, lines.join("\n"), "utf-8");
+            written.push(p);
+        } catch { /* unavailable */ }
+    }
 
-  if (cfg.include.includes("prs")) {
-    try {
-      const prs = await ghFetch<Array<{ number: number; title: string; body: string | null; user: { login: string }; created_at: string; head: { ref: string } }>>(`/repos/${repo}/pulls?state=open&per_page=30`, token);
-      const lines = [`# Open Pull Requests — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
-      for (const pr of prs) {
-        lines.push(`## PR #${pr.number}: ${pr.title}`, `- Author: @${pr.user.login}`, `- Branch: ${pr.head.ref}`, `- Created: ${pr.created_at}`, "", pr.body?.slice(0, 500) ?? "_No description_", "", "---", "");
-      }
-      const p = join(repoDir, "pull-requests.md");
-      await fs.writeFile(p, lines.join("\n"), "utf-8");
-      written.push(p);
-    } catch { /* unavailable */ }
-  }
+    if (cfg.include.includes("prs")) {
+        try {
+            const prs = await ghFetch<Array<{ number: number; title: string; body: string | null; user: { login: string }; created_at: string; head: { ref: string } }>>(`/repos/${repo}/pulls?state=open&per_page=30`, token);
+            const lines = [`# Open Pull Requests — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
+            for (const pr of prs) {
+                lines.push(`## PR #${pr.number}: ${pr.title}`, `- Author: @${pr.user.login}`, `- Branch: ${pr.head.ref}`, `- Created: ${pr.created_at}`, "", pr.body?.slice(0, 500) ?? "_No description_", "", "---", "");
+            }
+            const p = join(repoDir, "pull-requests.md");
+            await fs.writeFile(p, lines.join("\n"), "utf-8");
+            written.push(p);
+        } catch { /* unavailable */ }
+    }
 
-  if (cfg.include.includes("commits")) {
-    try {
-      const commits = await ghFetch<Array<{ sha: string; commit: { message: string; author: { name: string; date: string } } }>>(`/repos/${repo}/commits?per_page=30`, token);
-      const lines = [`# Recent Commits — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
-      for (const c of commits) {
-        lines.push(`- \`${c.sha.slice(0, 8)}\` ${c.commit.message.split("\n")[0]} — _${c.commit.author.name}_ (${c.commit.author.date})`);
-      }
-      const p = join(repoDir, "commits.md");
-      await fs.writeFile(p, lines.join("\n"), "utf-8");
-      written.push(p);
-    } catch { /* unavailable */ }
-  }
+    if (cfg.include.includes("commits")) {
+        try {
+            const commits = await ghFetch<Array<{ sha: string; commit: { message: string; author: { name: string; date: string } } }>>(`/repos/${repo}/commits?per_page=30`, token);
+            const lines = [`# Recent Commits — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
+            for (const c of commits) {
+                lines.push(`- \`${c.sha.slice(0, 8)}\` ${c.commit.message.split("\n")[0]} — _${c.commit.author.name}_ (${c.commit.author.date})`);
+            }
+            const p = join(repoDir, "commits.md");
+            await fs.writeFile(p, lines.join("\n"), "utf-8");
+            written.push(p);
+        } catch { /* unavailable */ }
+    }
 
-  if (cfg.include.includes("file_tree")) {
-    try {
-      const tree = await ghFetch<{ tree: Array<{ path: string; type: string }> }>(`/repos/${repo}/git/trees/HEAD?recursive=1`, token);
-      const paths = tree.tree.filter((n) => n.type === "blob").map((n) => n.path).slice(0, 500);
-      const lines = [`# File Tree — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, "", "```", ...paths, "```"];
-      const p = join(repoDir, "file-tree.md");
-      await fs.writeFile(p, lines.join("\n"), "utf-8");
-      written.push(p);
-    } catch { /* unavailable */ }
-  }
+    if (cfg.include.includes("file_tree")) {
+        try {
+            const tree = await ghFetch<{ tree: Array<{ path: string; type: string }> }>(`/repos/${repo}/git/trees/HEAD?recursive=1`, token);
+            const paths = tree.tree.filter((n) => n.type === "blob").map((n) => n.path).slice(0, 500);
+            const lines = [`# File Tree — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, "", "```", ...paths, "```"];
+            const p = join(repoDir, "file-tree.md");
+            await fs.writeFile(p, lines.join("\n"), "utf-8");
+            written.push(p);
+        } catch { /* unavailable */ }
+    }
 
-  return written;
+    return written;
 }
 
 const syncRepoInputSchema = z.object({
-  repo: z.string().describe("Repository in org/name format"),
-  rawDir: z.string().describe("Path to the vault raw/ directory"),
-  include: z.array(z.enum(["commits", "prs", "issues", "readme", "file_tree"])).default(["commits", "prs", "issues", "readme"]),
+    repo: z.string().describe("Repository in org/name format"),
+    rawDir: z.string().describe("Path to the vault raw/ directory"),
+    include: z.array(z.enum(["commits", "prs", "issues", "readme", "file_tree"])).default(["commits", "prs", "issues", "readme"]),
 });
 
 const searchCodeInputSchema = z.object({
@@ -133,7 +133,7 @@ export const githubConnector: ConnectorAdapter = {
                 id: "github.sync_repo",
                 name: "github_sync_repo",
                 kind: "tool",
-                description: "Sync a GitHub repository into the KnowledgeForge vault raw/ directory (commits, PRs, issues, README, file tree).",
+                description: "Sync a GitHub repository into the CCS Code vault raw/ directory (commits, PRs, issues, README, file tree).",
                 riskClass: "read",
                 inputSchema: syncRepoInputSchema,
                 async handler(input) {
@@ -161,11 +161,11 @@ export const githubConnector: ConnectorAdapter = {
                         return { status: "error", error: parsed.error.message };
                     }
 
-                    const token = process.env.CCS_GITHUB_TOKEN;
+                    const token = process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN;
                     if (!token) {
                         return {
                             status: "error",
-                            error: "Missing CCS_GITHUB_TOKEN in environment.",
+                            error: "Missing GitHub token (CCS_GITHUB_TOKEN, GITHUB_TOKEN, or GITHUB_PRIVATE_TOKEN) in environment.",
                         };
                     }
 
@@ -209,11 +209,11 @@ export const githubConnector: ConnectorAdapter = {
                         return { status: "error", error: parsed.error.message };
                     }
 
-                    const token = process.env.CCS_GITHUB_TOKEN;
+                    const token = process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN;
                     if (!token) {
                         return {
                             status: "error",
-                            error: "Missing CCS_GITHUB_TOKEN in environment.",
+                            error: "Missing GitHub token (CCS_GITHUB_TOKEN, GITHUB_TOKEN, or GITHUB_PRIVATE_TOKEN) in environment.",
                         };
                     }
 
@@ -259,11 +259,11 @@ export const githubConnector: ConnectorAdapter = {
                         return { status: "error", error: parsed.error.message };
                     }
 
-                    const token = process.env.CCS_GITHUB_TOKEN;
+                    const token = process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN;
                     if (!token) {
                         return {
                             status: "error",
-                            error: "Missing CCS_GITHUB_TOKEN in environment.",
+                            error: "Missing GitHub token (CCS_GITHUB_TOKEN, GITHUB_TOKEN, or GITHUB_PRIVATE_TOKEN) in environment.",
                         };
                     }
 
