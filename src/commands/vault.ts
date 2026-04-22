@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
 import { homedir } from "os";
-import { initVault } from "../vault/init.js";
+export { initVault } from "../vault/init.js";
 import { rebuildMasterIndex } from "../vault/masterIndex.js";
 import { syncRepo, type GitHubSyncConfig } from "../connectors/github.js";
 import { generateGraphHtml } from "../vault/graphBuilder.js";
@@ -11,38 +11,28 @@ import { askWiki } from "../vault/wikiAsk.js";
 import { createProvider } from "../llm/index.js";
 import yaml from "js-yaml";
 import { formatErrorDump } from "../utils/errorFormatter.js";
+import { initVault } from "../vault/init.js";
 
 // ---------------------------------------------------------------------------
 // Global vault config — remembers active vault across sessions
 // ---------------------------------------------------------------------------
 
 const LOCAL_CONFIG_PATH = join(process.cwd(), "ccsconfig.json");
-const GLOBAL_CONFIG_PATH = join(homedir(), ".ccs", "config.json");
 
 export type VaultConfig = { activeVault?: string };
 
 export async function readVaultConfig(): Promise<VaultConfig> {
-  // Try local first (as requested)
   try {
     const raw = await fs.readFile(LOCAL_CONFIG_PATH, "utf-8");
     return JSON.parse(raw);
   } catch {
-    // Fallback to global
-    try {
-      const raw = await fs.readFile(GLOBAL_CONFIG_PATH, "utf-8");
-      return JSON.parse(raw);
-    } catch {
-      return {};
-    }
+    return {};
   }
 }
 
 export async function saveVaultConfig(cfg: VaultConfig): Promise<void> {
-  // Save both locally and globally for convenience
   const json = JSON.stringify(cfg, null, 2);
-  await fs.writeFile(LOCAL_CONFIG_PATH, json, "utf-8").catch(() => {});
-  await fs.mkdir(join(homedir(), ".ccs"), { recursive: true });
-  await fs.writeFile(GLOBAL_CONFIG_PATH, json, "utf-8").catch(() => {});
+  await fs.writeFile(LOCAL_CONFIG_PATH, json, "utf-8").catch(() => { });
 }
 
 // ---------------------------------------------------------------------------

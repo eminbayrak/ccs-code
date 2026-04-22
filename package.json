@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "start": "bun run src/main.tsx",
+    "build": "bun build ./src/main.tsx --compile --outfile ccs",
     "test": "bun test"
   },
   "devDependencies": {

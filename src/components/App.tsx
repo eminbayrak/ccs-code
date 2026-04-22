@@ -43,6 +43,7 @@ import {
   handleGuideCommand,
   readVaultConfig,
   saveVaultConfig,
+  initVault,
 } from "../commands/vault";
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const [vaultPath, setVaultPath] = useState<string | null>(null);
   const [isSetupMode, setIsSetupMode] = useState(false);
   const [setupInput, setSetupInput] = useState("");
+  const [setupStep, setSetupStep] = useState<"input" | "success">("input");
 
   // Environment
   const [instructions, setInstructions] = useState<ConfigFile[]>([]);
@@ -199,49 +201,48 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   // Boot
   // ---------------------------------------------------------------------------
 
-  useEffect(() => {
-    async function bootEngine() {
-      const cwd = process.cwd();
+  const triggerBoot = useCallback(async () => {
+    const cwd = process.cwd();
 
-      // Check for vault configuration
-      const vaultCfg = await readVaultConfig();
-      if (!vaultCfg.activeVault) {
-        setIsSetupMode(true);
-        setActiveModel("Waiting for setup...");
-        return;
-      }
-      setVaultPath(vaultCfg.activeVault);
-
-      const [loadedInstructions, loadedSkills, systemPrompt, projectFiles] =
-        await Promise.all([
-          loadInstructions(cwd),
-          loadSkills(cwd),
-          buildSystemPrompt(cwd),
-          getProjectFiles(cwd),
-        ]);
-
-      setInstructions(loadedInstructions);
-      setSkills(loadedSkills);
-      systemPromptRef.current = systemPrompt;
-      allFilesRef.current = projectFiles;
-
-      try {
-        const provider = await createProvider();
-        providerRef.current = provider;
-        orchestratorRef.current = new Orchestrator(provider);
-        setActiveModel(provider.name);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setActiveModel("Not connected");
-        setMessages([
-          createUIMessage("assistant", `⚠️  No LLM provider configured.\n\nError: ${msg}`),
-        ]);
-      } finally {
-        // (welcome box is set synchronously in useState — no setter needed here)
-      }
+    // Check for vault configuration
+    const vaultCfg = await readVaultConfig();
+    if (!vaultCfg.activeVault) {
+      setIsSetupMode(true);
+      setActiveModel("Waiting for setup...");
+      return;
     }
-    bootEngine();
+    setVaultPath(vaultCfg.activeVault);
+
+    const [loadedInstructions, loadedSkills, systemPrompt, projectFiles] =
+      await Promise.all([
+        loadInstructions(cwd),
+        loadSkills(cwd),
+        buildSystemPrompt(cwd),
+        getProjectFiles(cwd),
+      ]);
+
+    setInstructions(loadedInstructions);
+    setSkills(loadedSkills);
+    systemPromptRef.current = systemPrompt;
+    allFilesRef.current = projectFiles;
+
+    try {
+      const provider = await createProvider();
+      providerRef.current = provider;
+      orchestratorRef.current = new Orchestrator(provider);
+      setActiveModel(provider.name);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setActiveModel("Not connected");
+      setMessages([
+        createUIMessage("assistant", `⚠️  No LLM provider configured.\n\nError: ${msg}`),
+      ]);
+    }
   }, []);
+
+  useEffect(() => {
+    triggerBoot();
+  }, [triggerBoot]);
 
   // ---------------------------------------------------------------------------
   // Input change — detect @ and / triggers
@@ -568,16 +569,27 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   };
 
   const handleSetupSubmit = async (path: string) => {
-    const resolvedPath = resolve(process.cwd(), path.trim());
+    const cleanPath = path.trim().replace(/^['"]|['"]$/g, "");
+    const resolvedPath = resolve(process.cwd(), cleanPath);
+
+    // 1. Initialize the vault folders immediately
+    try {
+      await initVault(resolvedPath);
+    } catch (e) {
+      // If we can't create the folder, we'll still save the config but the user might see errors later
+    }
+
+    // 2. Save as active vault
     await saveVaultConfig({ activeVault: resolvedPath });
     setVaultPath(resolvedPath);
+
+    // 3. Show success guidance
+    setSetupStep("success");
+  };
+
+  const handleSetupDone = () => {
     setIsSetupMode(false);
-    // Trigger a full boot now that we have a path
-    if (typeof window !== "undefined" && window.location) {
-      window.location.reload();
-    } else {
-      process.exit(0);
-    }
+    triggerBoot();
   };
 
   // ---------------------------------------------------------------------------
@@ -711,6 +723,62 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   if (isSetupMode) {
     const boxWidth = Math.max(42, terminalWidth - 4);
     const showLargeLogo = boxWidth >= 40;
+
+    if (setupStep === "success") {
+      return (
+        <Box
+          flexDirection="column"
+          padding={2}
+          borderStyle="round"
+          borderColor="green"
+          width={boxWidth}
+          marginX={2}
+          marginTop={1}
+        >
+          <Box marginBottom={1} alignItems="center" flexDirection="column">
+            <Text bold color="green">✓ Vault Initialized!</Text>
+            <Text dimColor>{vaultPath}</Text>
+          </Box>
+
+          <Box flexDirection="column" marginBottom={1}>
+            <Text>I've created the folder structure for your knowledge base.</Text>
+            
+            <Box marginTop={1} flexDirection="column">
+              <Text bold>Next Step:</Text>
+              <Box marginLeft={2} flexDirection="column">
+                <Text color="cyan">1. Drop your files into: raw/uploads/</Text>
+                <Text dimColor>2. Restart the app</Text>
+                <Text dimColor>3. Run /ingest to build your wiki</Text>
+              </Box>
+            </Box>
+          </Box>
+
+          <Box
+            marginTop={1}
+            borderStyle="single"
+            borderTop={true}
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+            borderColor="gray"
+            paddingTop={1}
+            flexDirection="row"
+            gap={1}
+          >
+            <Text dimColor>Press </Text>
+            <Box>
+              <TextInput
+                value=""
+                onChange={() => {}}
+                onSubmit={handleSetupDone}
+                placeholder="Enter"
+              />
+            </Box>
+            <Text dimColor> to continue to chat...</Text>
+          </Box>
+        </Box>
+      );
+    }
 
     return (
       <Box
