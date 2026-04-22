@@ -28,6 +28,7 @@ const GROUP_COLORS: Record<string, { fill: string; glow: string }> = {
   learning:     { fill: "#ff6b6b", glow: "#ff6b6b" },   // coral red
   concept:      { fill: "#c77dff", glow: "#c77dff" },   // violet
   conversation: { fill: "#48cae4", glow: "#48cae4" },   // cyan
+  memory:       { fill: "#4d96ff", glow: "#4d96ff" },   // electric blue
   unknown:      { fill: "#8892a4", glow: "#8892a4" },   // neutral
 };
 
@@ -100,11 +101,12 @@ export async function buildGraphData(wikiDir: string): Promise<{ nodes: Node[]; 
     const id = basename(fpath, ".md").toLowerCase().replace(/\s+/g, "-");
     const { type, title, summary, tags } = parseMeta(raw);
 
-    const body = raw.replace(/^---[\s\S]*?---\n/, "").slice(0, 400);
+    const body = raw.replace(/^---[\s\S]*?---\n/, "").slice(0, 1000);
     const fullText = `${title} ${summary} ${body} ${tags.join(" ")}`;
 
     const group = type !== "unknown" ? type : detectGroup(fullText);
-    const keywords = extractKeywords(`${title} ${summary} ${tags.join(" ")}`);
+    // Deep scan: Extract keywords from body as well to ensure orphan memories get linked
+    const keywords = extractKeywords(`${title} ${summary} ${body} ${tags.join(" ")}`);
     const label = title || basename(fpath, extname(fpath));
 
     nodes.push({ id, label, group, title: summary || label, keywords });

@@ -34,6 +34,49 @@ function updateFrontmatterField(raw: string, key: string, value: string): string
   return raw.replace(fmRe, `---\n${updated}\n---\n`);
 }
 
+/**
+ * Markdown → wiki page. 
+ * If it's already a memory file from /harvest, we just wrap it with metadata.
+ */
+async function ingestMarkdown(filePath: string, vaultPath: string): Promise<WikiPage[]> {
+  const raw = await fs.readFile(filePath, "utf-8");
+  const name = basename(filePath, extname(filePath));
+  const slug = slugify(name);
+  
+  // Determine if this is a harvested memory
+  const relativePath = filePath.replace(vaultPath + "/", "");
+  let dest = `wiki/pages/${slug}.md`;
+  let type = "page";
+  let source = relativePath;
+
+  if (relativePath.includes("raw/memories/")) {
+    const parts = relativePath.split("/");
+    const tool = parts[parts.indexOf("memories") + 1];
+    dest = `wiki/memories/${tool}/${slug}.md`;
+    type = "memory";
+    source = tool || "unknown";
+  }
+
+  // If it already has frontmatter, just update it. Otherwise add new.
+  let content: string;
+  if (raw.startsWith("---")) {
+    content = updateFrontmatterField(raw, "last_synced", TODAY);
+  } else {
+    content = [
+      "---",
+      `title: "${name.replace(/-|_/g, " ")}"`,
+      `type: ${type}`,
+      `source: ${source}`,
+      `last_synced: ${TODAY}`,
+      "---",
+      "",
+      raw
+    ].join("\n");
+  }
+
+  return [{ filename: dest, content }];
+}
+
 // ---------------------------------------------------------------------------
 // HTML → wiki page (merge if exists)
 // ---------------------------------------------------------------------------
@@ -190,7 +233,7 @@ export async function ingestAll(vaultPath: string): Promise<{
   const updated: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
-  const INGESTABLE = new Set([".html", ".json"]);
+  const INGESTABLE = new Set([".html", ".json", ".md"]);
 
   const allFiles: string[] = [];
   async function walk(dir: string) {
@@ -207,21 +250,26 @@ export async function ingestAll(vaultPath: string): Promise<{
 
   for (const filePath of allFiles) {
     const ext = extname(filePath).toLowerCase();
-    if (!INGESTABLE.has(ext)) { skipped.push(basename(filePath)); continue; }
+    if (!INGESTABLE.has(ext)) { 
+      console.log(`[Ingestor] Skipping ${basename(filePath)}: Extension ${ext} not in INGESTABLE`);
+      skipped.push(basename(filePath)); 
+      continue; 
+    }
 
     try {
+      console.log(`[Ingestor] Processing: ${basename(filePath)}`);
       if (ext === ".html") {
         const pages = await ingestHtml(filePath, vaultPath);
         for (const page of pages) {
           const fullPath = join(vaultPath, page.filename);
           await fs.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
-          // If file existed, ingestHtml already merged — this is an update
           let existed = false;
           try { await fs.access(fullPath); existed = true; } catch {}
           await fs.writeFile(fullPath, page.content, "utf-8");
           (existed ? updated : written).push(page.filename);
         }
-      } else if (ext === ".json" && basename(filePath) === "conversations.json") {
+      } else if (ext === ".json" && (basename(filePath) === "conversations.json" || filePath.includes("raw/memories"))) {
+        // Support memories even if they are JSON (though we mostly use .md now)
         const { pages, updated: mergedPaths } = await ingestConversationsJson(filePath, vaultPath);
         for (const page of pages) {
           const fullPath = join(vaultPath, page.filename);
@@ -230,10 +278,23 @@ export async function ingestAll(vaultPath: string): Promise<{
           written.push(page.filename);
         }
         updated.push(...mergedPaths);
+      } else if (ext === ".md") {
+        const pages = await ingestMarkdown(filePath, vaultPath);
+        console.log(`[Ingestor]   -> Generated ${pages.length} wiki pages from MD`);
+        for (const page of pages) {
+          const fullPath = join(vaultPath, page.filename);
+          await fs.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+          let existed = false;
+          try { await fs.access(fullPath); existed = true; } catch {}
+          await fs.writeFile(fullPath, page.content, "utf-8");
+          (existed ? updated : written).push(page.filename);
+        }
       } else {
+        console.log(`[Ingestor] Skipping ${basename(filePath)}: No handler for this type/name.`);
         skipped.push(basename(filePath));
       }
     } catch (e) {
+      console.error(`[Ingestor] ERROR processing ${basename(filePath)}:`, e);
       errors.push(`${basename(filePath)}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }

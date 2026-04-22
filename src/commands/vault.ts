@@ -12,6 +12,7 @@ import { createProvider } from "../llm/index.js";
 import yaml from "js-yaml";
 import { formatErrorDump } from "../utils/errorFormatter.js";
 import { initVault } from "../vault/init.js";
+import { readdir, stat, readFile } from "fs/promises";
 
 // ---------------------------------------------------------------------------
 // Global vault config — remembers active vault across sessions
@@ -159,6 +160,11 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
         `  raw files   — ${rawFiles.length} ready to ingest`,
         `  skills      — ${skillDirs.length}`,
       ].join("\n");
+    }
+
+    case "audit": {
+      const vaultPath = await resolveVaultPath(cwd);
+      return await runVaultAudit(vaultPath);
     }
 
     default:
@@ -544,3 +550,72 @@ Type \`?\` for all commands.`;
 }
 
 
+
+/**
+ * Runs a comprehensive health check on the vault.
+ */
+async function runVaultAudit(vaultPath: string): Promise<string> {
+  const reports: string[] = [`Vault Audit Report for: ${vaultPath}\n`];
+  
+  try {
+    const memoriesPath = join(vaultPath, "raw", "memories");
+    const wikiPath = join(vaultPath, "wiki");
+    
+    // 1. Check Harvested Memories
+    const tools = ["claude", "vscode", "cursor", "antigravity", "windsurf"];
+    let totalMemories = 0;
+    const toolCounts: Record<string, number> = {};
+    
+    for (const tool of tools) {
+      const toolDir = join(memoriesPath, tool);
+      const files = await walkRecursive(toolDir);
+      const mdFiles = files.filter(f => f.endsWith(".md"));
+      toolCounts[tool] = mdFiles.length;
+      totalMemories += mdFiles.length;
+    }
+    
+    reports.push(`[Raw Memories]`);
+    reports.push(`Total Harvested: ${totalMemories}`);
+    for (const [tool, count] of Object.entries(toolCounts)) {
+      reports.push(`  › ${tool}: ${count}`);
+    }
+    reports.push("");
+    
+    // 2. Check Wiki Ingestion
+    const wikiMarkdownFiles = await walkRecursive(wikiPath);
+    const totalWiki = wikiMarkdownFiles.filter(f => f.endsWith(".md")).length;
+    reports.push(`[Wiki State]`);
+    reports.push(`Total Wiki Pages: ${totalWiki}`);
+    
+    // Simple heuristic: If wiki count is much lower than memories, something is wrong
+    if (totalWiki < totalMemories && totalMemories > 0) {
+      reports.push(`⚠️ WARNING: Some memories might be missing from the wiki.`);
+      reports.push(`   Memories: ${totalMemories}, Wiki: ${totalWiki}`);
+    } else {
+      reports.push(`✅ Knowledge base coverage looks good.`);
+    }
+    
+    return reports.join("\n");
+  } catch (e: any) {
+    return `Audit failed: ${e.message}`;
+  }
+}
+
+/**
+ * Helper for recursive file listing
+ */
+async function walkRecursive(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  try {
+    const list = await readdir(dir, { withFileTypes: true });
+    for (const file of list) {
+      const res = join(dir, file.name);
+      if (file.isDirectory()) {
+        results.push(...(await walkRecursive(res)));
+      } else {
+        results.push(res);
+      }
+    }
+  } catch (e) {}
+  return results;
+}
