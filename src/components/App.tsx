@@ -3,7 +3,7 @@ import { Text, Box, useApp, useInput, Static } from "ink";
 import TextInput from "ink-text-input";
 import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { useTerminalSize } from "../hooks/useTerminalSize";
 import { CCSSpinner } from "./animations/CCSSpinner";
 import { AgentProgressLine } from "./animations/AgentProgressLine";
@@ -573,7 +573,11 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     setVaultPath(resolvedPath);
     setIsSetupMode(false);
     // Trigger a full boot now that we have a path
-    window.location?.reload?.() || process.exit(0); // Simplest way to re-run boot logic in CLI
+    if (typeof window !== "undefined" && window.location) {
+      window.location.reload();
+    } else {
+      process.exit(0);
+    }
   };
 
   // ---------------------------------------------------------------------------
