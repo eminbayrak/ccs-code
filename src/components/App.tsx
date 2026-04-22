@@ -41,6 +41,8 @@ import {
   handleEnrichCommand,
   handleAskCommand,
   handleGuideCommand,
+  readVaultConfig,
+  saveVaultConfig,
 } from "../commands/vault";
 
 // ---------------------------------------------------------------------------
@@ -166,6 +168,11 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const [completionLabel, setCompletionLabel] = useState<string | null>(null);
   const processingStartRef = useRef<number>(0);
 
+  // Vault state
+  const [vaultPath, setVaultPath] = useState<string | null>(null);
+  const [isSetupMode, setIsSetupMode] = useState(false);
+  const [setupInput, setSetupInput] = useState("");
+
   // Environment
   const [instructions, setInstructions] = useState<ConfigFile[]>([]);
   const [skills, setSkills] = useState<ConfigFile[]>([]);
@@ -195,6 +202,15 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   useEffect(() => {
     async function bootEngine() {
       const cwd = process.cwd();
+
+      // Check for vault configuration
+      const vaultCfg = await readVaultConfig();
+      if (!vaultCfg.activeVault) {
+        setIsSetupMode(true);
+        setActiveModel("Waiting for setup...");
+        return;
+      }
+      setVaultPath(vaultCfg.activeVault);
 
       const [loadedInstructions, loadedSkills, systemPrompt, projectFiles] =
         await Promise.all([
@@ -551,6 +567,15 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     }
   };
 
+  const handleSetupSubmit = async (path: string) => {
+    const resolvedPath = resolve(process.cwd(), path.trim());
+    await saveVaultConfig({ activeVault: resolvedPath });
+    setVaultPath(resolvedPath);
+    setIsSetupMode(false);
+    // Trigger a full boot now that we have a path
+    window.location?.reload?.() || process.exit(0); // Simplest way to re-run boot logic in CLI
+  };
+
   // ---------------------------------------------------------------------------
   // Submit
   // ---------------------------------------------------------------------------
@@ -678,6 +703,30 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   // ---------------------------------------------------------------------------
 
   const dividerWidth = Math.max(1, terminalWidth - 4);
+
+  if (isSetupMode) {
+    return (
+      <Box flexDirection="column" padding={2} borderStyle="round" borderColor="cyan">
+        <Box marginBottom={1}>
+          <Text bold color="cyan">Welcome to CCS Code!</Text>
+        </Box>
+        <Text>Where should we store your knowledge base (vault)?</Text>
+        <Text dimColor>(e.g. ./vault or /Users/me/Documents/knowledge)</Text>
+        <Box marginTop={1} flexDirection="row" gap={1}>
+          <Text bold color="yellow">❯</Text>
+          <TextInput
+            value={setupInput}
+            onChange={setSetupInput}
+            onSubmit={handleSetupSubmit}
+            placeholder="Enter absolute or relative path..."
+          />
+        </Box>
+        <Box marginTop={1}>
+          <Text dimColor>This path will be saved to ccsconfig.json</Text>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column">

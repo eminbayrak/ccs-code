@@ -9,27 +9,40 @@ import { ingestAll } from "../vault/ingestor.js";
 import { enrichWiki } from "../vault/enricher.js";
 import { askWiki } from "../vault/wikiAsk.js";
 import { createProvider } from "../llm/index.js";
+import yaml from "js-yaml";
+import { formatErrorDump } from "../utils/errorFormatter.js";
 
 // ---------------------------------------------------------------------------
 // Global vault config — remembers active vault across sessions
 // ---------------------------------------------------------------------------
 
+const LOCAL_CONFIG_PATH = join(process.cwd(), "ccsconfig.json");
 const GLOBAL_CONFIG_PATH = join(homedir(), ".ccs", "config.json");
 
-type GlobalConfig = { activeVault?: string };
+export type VaultConfig = { activeVault?: string };
 
-async function readGlobalConfig(): Promise<GlobalConfig> {
+export async function readVaultConfig(): Promise<VaultConfig> {
+  // Try local first (as requested)
   try {
-    const raw = await fs.readFile(GLOBAL_CONFIG_PATH, "utf-8");
+    const raw = await fs.readFile(LOCAL_CONFIG_PATH, "utf-8");
     return JSON.parse(raw);
   } catch {
-    return {};
+    // Fallback to global
+    try {
+      const raw = await fs.readFile(GLOBAL_CONFIG_PATH, "utf-8");
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
   }
 }
 
-async function writeGlobalConfig(cfg: GlobalConfig): Promise<void> {
+export async function saveVaultConfig(cfg: VaultConfig): Promise<void> {
+  // Save both locally and globally for convenience
+  const json = JSON.stringify(cfg, null, 2);
+  await fs.writeFile(LOCAL_CONFIG_PATH, json, "utf-8").catch(() => {});
   await fs.mkdir(join(homedir(), ".ccs"), { recursive: true });
-  await fs.writeFile(GLOBAL_CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf-8");
+  await fs.writeFile(GLOBAL_CONFIG_PATH, json, "utf-8").catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -49,11 +62,11 @@ type CcsConfig = {
 };
 
 async function loadCcsConfig(vaultPath: string): Promise<CcsConfig> {
-  const possiblePaths = [join(vaultPath, "ccs.yaml"), join(vaultPath, "ccs.yaml")];
+  const possiblePaths = [join(vaultPath, "ccs.yaml"), join(vaultPath, "kforge.yaml")];
   for (const configPath of possiblePaths) {
     try {
       const raw = await fs.readFile(configPath, "utf-8");
-      return parseSimpleYaml(raw) as CcsConfig;
+      return yaml.load(raw) as CcsConfig;
     } catch {
       continue;
     }
@@ -62,41 +75,25 @@ async function loadCcsConfig(vaultPath: string): Promise<CcsConfig> {
 }
 
 async function resolveVaultPath(cwd: string): Promise<string> {
-  // 1. ccs.yaml or ccs.yaml in cwd
-  const possibleRoots = [join(cwd, "ccs.yaml"), join(cwd, "ccs.yaml")];
+  // 1. ccs.yaml or kforge.yaml in cwd
+  const possibleRoots = [join(cwd, "ccs.yaml"), join(cwd, "kforge.yaml")];
   for (const rootPath of possibleRoots) {
     try {
       const raw = await fs.readFile(rootPath, "utf-8");
-      const cfg = parseSimpleYaml(raw) as CcsConfig;
+      const cfg = yaml.load(raw) as CcsConfig;
       if (cfg.vault?.path) return resolve(cwd, cfg.vault.path);
     } catch { }
   }
 
-  // 2. Global active vault
-  const global = await readGlobalConfig();
-  if (global.activeVault) return global.activeVault;
+  // 2. Local/Global active vault (ccsconfig.json)
+  const config = await readVaultConfig();
+  if (config.activeVault) return config.activeVault;
 
   // 3. Default
   return join(cwd, "vault");
 }
 
-function parseSimpleYaml(yaml: string): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  let currentKey = "";
-
-  for (const line of yaml.split("\n")) {
-    if (!line.trim() || line.trim().startsWith("#")) continue;
-    if (!line.startsWith(" ") && !line.startsWith("\t")) {
-      const colonIdx = line.indexOf(":");
-      if (colonIdx === -1) continue;
-      currentKey = line.slice(0, colonIdx).trim();
-      const val = line.slice(colonIdx + 1).trim();
-      if (val) result[currentKey] = val;
-      else result[currentKey] = {};
-    }
-  }
-  return result;
-}
+// parseSimpleYaml removed in favor of js-yaml
 
 // ---------------------------------------------------------------------------
 // /vault command handler
@@ -113,7 +110,7 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
         const created = await initVault(vaultPath);
 
         // Save as active vault so all other commands find it
-        await writeGlobalConfig({ activeVault: vaultPath });
+        await saveVaultConfig({ activeVault: vaultPath });
 
         if (created.length === 0) {
           const wikiFiles = await fs.readdir(join(vaultPath, "wiki")).catch(() => []);
@@ -208,24 +205,27 @@ export async function handleSyncCommand(args: string[], cwd: string): Promise<st
 
   const results: string[] = [`Syncing to ${rawDir}`, ""];
 
-  for (const source of sources) {
-    if (source.type === "github") {
-      const token = source.token_env ? process.env[source.token_env] : undefined;
-      const include = (source.include ?? ["commits", "prs", "issues", "readme"]) as GitHubSyncConfig["include"];
-      for (const repo of source.repos) {
-        try {
-          const written = await syncRepo(repo, rawDir, { repos: [repo], include, token });
-          results.push(`  ✓ github:${repo} — ${written.length} file(s) written`);
-        } catch (e) {
-          results.push(`  ✗ github:${repo} — ${e instanceof Error ? e.message : String(e)}`);
+  try {
+    for (const source of sources) {
+      if (source.type === "github") {
+        const token = source.token_env ? process.env[source.token_env] : undefined;
+        const include = (source.include ?? ["commits", "prs", "issues", "readme"]) as GitHubSyncConfig["include"];
+        for (const repo of source.repos) {
+          try {
+            const written = await syncRepo(repo, rawDir, { repos: [repo], include, token });
+            results.push(`  ✓ github:${repo} — ${written.length} file(s) written`);
+          } catch (e) {
+            results.push(`  ✗ github:${repo} — ${e instanceof Error ? e.message : String(e)}`);
+          }
         }
+      } else if (source.type === "folder") {
+        results.push(`  ⚠ folder sources: drop files into raw/uploads/ manually`);
       }
-    } else if (source.type === "folder") {
-      results.push(`  ⚠ folder sources: drop files into raw/uploads/ manually`);
     }
+    return results.join("\n");
+  } catch (e) {
+    return formatErrorDump(e, "Sync failed");
   }
-
-  return results.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,13 @@ export async function handleIngestCommand(args: string[], cwd: string): Promise<
     ].join("\n");
   }
 
-  const { written, updated, skipped, errors } = await ingestAll(vaultPath);
+  let result;
+  try {
+    result = await ingestAll(vaultPath);
+  } catch (e) {
+    return formatErrorDump(e, "Ingest failed");
+  }
+  const { written, updated, skipped, errors } = result;
 
   const lines = [`Vault: ${vaultPath}`, ""];
 
@@ -503,13 +509,17 @@ export async function handleAskCommand(question: string, cwd: string): Promise<s
     return `No LLM provider configured.\nError: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  const { answer, sources, wikiPageCount } = await askWiki(vaultPath, question, provider);
+  try {
+    const { answer, sources, wikiPageCount } = await askWiki(vaultPath, question, provider);
 
-  const header = wikiPageCount > 0
-    ? `*Searching wiki… found ${wikiPageCount} relevant page(s)*\n\n`
-    : `*No relevant wiki pages found — answering from model knowledge*\n\n`;
+    const header = wikiPageCount > 0
+      ? `*Searching wiki… found ${wikiPageCount} relevant page(s)*\n\n`
+      : `*No relevant wiki pages found — answering from model knowledge*\n\n`;
 
-  return header + answer;
+    return header + answer;
+  } catch (e) {
+    return formatErrorDump(e, "Ask failed");
+  }
 }
 
 // ---------------------------------------------------------------------------

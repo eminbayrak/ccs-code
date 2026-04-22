@@ -40,7 +40,14 @@ async function getAccessToken(): Promise<string> {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`[UHG Provider] OAuth2 token request failed (${response.status}): ${text}`);
+    throw new Error(`[UHG Provider] OAuth2 token request failed (401: Unauthorized). 
+
+Possible reasons:
+1. CCS_UHG_CLIENT_ID or CCS_UHG_CLIENT_SECRET are incorrect in your .env file.
+2. Your client registration has expired or hasn't been approved yet.
+3. You are not on the corporate VPN.
+
+Original Error: ${text}`);
   }
 
   const json = (await response.json()) as { access_token: string };
