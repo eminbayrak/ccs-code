@@ -45,6 +45,7 @@ import {
   saveVaultConfig,
   initVault,
 } from "../commands/vault";
+import { handleHarvestCommand } from "../commands/harvest";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,6 +88,7 @@ const SLASH_COMMANDS: SuggestionItem[] = [
   { id: "index", label: "/index", description: "Rebuild wiki/_master-index.md" },
   { id: "enrich", label: "/enrich", description: "Use AI to add summaries, tags, and links to wiki pages" },
   { id: "ask", label: "/ask <question>", description: "Ask a question answered from your wiki knowledge base" },
+  { id: "harvest", label: "/harvest", description: "Mine AI chat logs (Claude, Cursor, Copilot) into the vault" },
   { id: "guide", label: "/guide", description: "Open interactive how-to guide with diagrams in browser" },
   // Core commands
   { id: "clear", label: "/clear", description: "Clear conversation history" },
@@ -444,6 +446,13 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           setIsProcessing(false);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         });
+        break;
+      }
+      case "harvest": {
+        handleHarvestCommand(args, process.cwd()).then((output) => {
+          setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+        });
+        setMessages((prev) => [...prev, createUIMessage("assistant", "Mining local AI histories (Claude, Cursor, VS Code)...")]);
         break;
       }
       case "guide": {

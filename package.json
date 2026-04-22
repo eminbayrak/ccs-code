@@ -15,7 +15,8 @@
     "@types/gradient-string": "^1.1.6",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.5.2",
-    "@types/react": "^19.2.14"
+    "@types/react": "^19.2.14",
+    "react-devtools-core": "^7.0.1"
   },
   "peerDependencies": {
     "typescript": "^5"
