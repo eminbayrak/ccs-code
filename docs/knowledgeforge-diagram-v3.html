@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCS Code — Features</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #f8f9fc;
+      color: #1e293b;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      min-height: 100vh;
+    }
+    code, pre {
+      font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    // ─── Colors ───────────────────────────────────────────────────────────────
+    const C = {
+      bg: "#f8f9fc",
+      card: "#ffffff",
+      border: "#e2e8f0",
+      borderHover: "#cbd5e1",
+      text: "#1e293b",
+      muted: "#64748b",
+      faint: "#94a3b8",
+      codeBg: "#f1f5f9",
+
+      indigo: "#4f46e5",
+      indigoBg: "#eef2ff",
+      indigoBorder: "#c7d2fe",
+
+      blue: "#0284c7",
+      blueBg: "#e0f2fe",
+      blueBorder: "#bae6fd",
+
+      orange: "#ea580c",
+      orangeBg: "#fff7ed",
+      orangeBorder: "#fed7aa",
+
+      violet: "#7c3aed",
+      violetBg: "#f5f3ff",
+      violetBorder: "#ddd6fe",
+
+      green: "#16a34a",
+      greenBg: "#f0fdf4",
+      greenBorder: "#bbf7d0",
+
+      amber: "#d97706",
+      amberBg: "#fffbeb",
+      amberBorder: "#fde68a",
+
+      teal: "#0d9488",
+      tealBg: "#f0fdfa",
+      tealBorder: "#99f6e4",
+    };
+
+    // ─── Data ─────────────────────────────────────────────────────────────────
+
+    const PIPELINE = [
+      {
+        cmd: "/sync",
+        color: C.blue, bg: C.blueBg, border: C.blueBorder,
+        icon: "⬇",
+        title: "Pull from GitHub",
+        desc: "Pulls commits, PRs, issues, and README from your configured GitHub repos into the vault's raw/ inbox.",
+        example: "/sync",
+        output: "Syncing to vault/raw\n\n  ✓ github:my-org/auth-svc — 4 file(s) written\n  ✓ github:my-org/payment-svc — 4 file(s) written",
+      },
+      {
+        cmd: "/ingest",
+        color: C.orange, bg: C.orangeBg, border: C.orangeBorder,
+        icon: "⚙",
+        title: "Build Wiki Pages",
+        desc: "Converts raw files into structured wiki pages. Merges new content into existing pages — never overwrites. Supports HTML files and Claude conversation exports.",
+        example: "/ingest",
+        output: "✓ Created 12 new wiki page(s)\n↻ Merged new content into 3 existing page(s)\n\nRun /enrich to add AI summaries.",
+      },
+      {
+        cmd: "/enrich",
+        color: C.violet, bg: C.violetBg, border: C.violetBorder,
+        icon: "✦",
+        title: "AI Enrichment",
+        desc: "Sends each wiki page to your AI provider. Gets back a summary, tags, and related page links. Automatically connects related pages together.",
+        example: "/enrich",
+        output: "Provider: claude-sonnet-4-6\n\n✓ Enriched 12 page(s) with summaries,\n  tags, and [[wikilinks]]\n\nRun /graph to visualize.",
+      },
+      {
+        cmd: "/graph",
+        color: C.green, bg: C.greenBg, border: C.greenBorder,
+        icon: "◉",
+        title: "Knowledge Graph",
+        desc: "Generates an interactive graph of all your wiki pages. Pages are connected by shared topics. Opens in your browser — click any node to explore.",
+        example: "/graph",
+        output: "Graph built: 24 nodes, 41 edges\nSaved to: output/graph.html\n\nOpening in browser…",
+      },
+      {
+        cmd: "/ask",
+        color: C.amber, bg: C.amberBg, border: C.amberBorder,
+        icon: "?",
+        title: "Ask Your Wiki",
+        desc: "Ask any question in plain English. CCS Code searches your wiki for relevant pages and answers using your actual knowledge — not just generic AI knowledge.",
+        example: "/ask what does auth-svc depend on?",
+        output: '*Searching wiki… found 3 relevant page(s)*\n\nBased on [[auth-svc]] and [[dependency-map]],\nauth-svc depends on notification-svc\nand user-svc for session validation…\n\n## Sources\n- auth-svc\n- dependency-map',
+      },
+    ];
+
+    const COMMANDS = [
+      {
+        cmd: "/vault init",
+        color: C.indigo, bg: C.indigoBg, border: C.indigoBorder,
+        args: "[path]",
+        desc: "Create a new vault. CCS Code remembers it — all other commands automatically use this vault.",
+        examples: [
+          { label: "Default location (./vault)", code: "/vault init" },
+          { label: "Custom path", code: "/vault init ~/my-knowledge-base" },
+        ],
+        output: "✓ Vault initialized at: /Users/you/vault\n\nNext steps:\n  1. Drop files into raw/uploads/\n     or configure GitHub in ccs.yaml\n  2. Run /ingest\n  3. Run /graph",
+      },
+      {
+        cmd: "/vault status",
+        color: C.indigo, bg: C.indigoBg, border: C.indigoBorder,
+        args: "",
+        desc: "See what's in your active vault — page count, files waiting to be ingested, and loaded skills.",
+        examples: [{ label: "", code: "/vault status" }],
+        output: "Vault: /Users/you/vault\n  wiki pages  — 24\n  raw files   — 3 ready to ingest\n  skills      — 5",
+      },
+      {
+        cmd: "/sync",
+        color: C.blue, bg: C.blueBg, border: C.blueBorder,
+        args: "",
+        desc: "Pull the latest commits, PRs, issues, and README from GitHub repos listed in ccs.yaml.",
+        examples: [{ label: "", code: "/sync" }],
+        output: "Syncing to vault/raw\n\n  ✓ github:my-org/auth-svc — 4 file(s)\n  ✓ github:my-org/payment-svc — 4 file(s)",
+      },
+      {
+        cmd: "/ingest",
+        color: C.orange, bg: C.orangeBg, border: C.orangeBorder,
+        args: "",
+        desc: "Process everything in raw/ into wiki pages. HTML files become concept pages. conversations.json becomes one page per conversation. Re-running merges new content in.",
+        examples: [{ label: "", code: "/ingest" }],
+        output: "✓ Created 8 new wiki page(s):\n  + wiki/concepts/auth-svc.md\n  + wiki/conversations/react-hooks.md\n\n↻ Merged new content into 2 existing page(s)\n\nRun /enrich to add AI summaries.",
+      },
+      {
+        cmd: "/enrich",
+        color: C.violet, bg: C.violetBg, border: C.violetBorder,
+        args: "",
+        desc: "Run AI enrichment over all wiki pages that don't have summaries yet. Uses whichever AI provider you've configured — Azure OpenAI, Anthropic, or OpenAI.",
+        examples: [{ label: "", code: "/enrich" }],
+        output: "Provider: anthropic/claude-sonnet-4-6\n\n✓ Enriched 8 page(s) with summaries,\n  tags, and [[wikilinks]]\n\nRun /graph to rebuild the graph.",
+      },
+      {
+        cmd: "/graph",
+        color: C.green, bg: C.greenBg, border: C.greenBorder,
+        args: "",
+        desc: "Build a visual map of your knowledge base. Pages cluster by topic. The more connections a page has, the bigger it appears. Click any node to see its summary.",
+        examples: [{ label: "", code: "/graph" }],
+        output: "Graph built: 24 nodes, 41 edges\nSaved to: output/graph.html\n\nOpening in browser…",
+      },
+      {
+        cmd: "/ask",
+        color: C.amber, bg: C.amberBg, border: C.amberBorder,
+        args: "<question>",
+        desc: "Ask anything. CCS Code finds the most relevant wiki pages and answers your question using that context. Answers cite the pages they came from.",
+        examples: [
+          { label: "Architecture question", code: "/ask what does auth-svc depend on?" },
+          { label: "Search conversations", code: "/ask what did I discuss about React hooks?" },
+          { label: "Concept lookup", code: "/ask how does the payment flow work?" },
+        ],
+        output: "*Searching wiki… found 3 relevant page(s)*\n\n[[auth-svc]] depends on [[notification-svc]]\nand [[user-svc]] for session validation…\n\n## Sources\n- auth-svc\n- dependency-map\n- architecture-decisions",
+      },
+      {
+        cmd: "/index",
+        color: C.teal, bg: C.tealBg, border: C.tealBorder,
+        args: "",
+        desc: "Rebuild the master index — a single file that lists every wiki page with its title, type, and tags.",
+        examples: [{ label: "", code: "/index" }],
+        output: "Master index rebuilt: 24 pages indexed\nWritten to: wiki/_master-index.md",
+      },
+      {
+        cmd: "/lint",
+        color: C.muted, bg: "#f8fafc", border: C.border,
+        args: "",
+        desc: "Wiki health check. Find orphan pages, broken links, missing frontmatter, and stale content.",
+        examples: [{ label: "", code: "/lint" }],
+        output: "Run the wiki health check:\n  python3 skills/wiki-lint/scripts/lint_wiki.py",
+      },
+    ];
+
+    const AI_TOOLS = [
+      { name: "Claude Code", desc: "Add vault to project, ask questions — wiki pages are read as context files" },
+      { name: "GitHub Copilot", desc: "Open vault as workspace folder — Copilot uses wiki pages for inline suggestions" },
+      { name: "Cursor", desc: "Point at vault directory — @-reference any wiki page in chat" },
+      { name: "Windsurf", desc: "Same as Cursor — wiki pages become available as context" },
+      { name: "ChatGPT", desc: "Upload wiki pages or paste content — your compiled knowledge, ready to use" },
+      { name: "Any AI Agent", desc: "Index wiki/ in your vector store — clean frontmatter maps to document metadata" },
+    ];
+
+    const PROVIDERS = [
+      {
+        name: "Azure OpenAI",
+        sub: "UHG enterprise endpoint",
+        color: "#0078d4",
+        envVars: ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT"],
+        yaml: `llm:\n  provider: azure_openai\n  model: gpt-4o`,
+      },
+      {
+        name: "Anthropic Claude",
+        sub: "claude-sonnet-4-6 recommended",
+        color: "#c2760c",
+        envVars: ["ANTHROPIC_API_KEY"],
+        yaml: `llm:\n  provider: anthropic\n  model: claude-sonnet-4-6`,
+      },
+      {
+        name: "OpenAI",
+        sub: "gpt-4o or gpt-4o-mini",
+        color: "#16a34a",
+        envVars: ["OPENAI_API_KEY"],
+        yaml: `llm:\n  provider: openai\n  model: gpt-4o`,
+      },
+    ];
+
+    // ─── Sub-components ───────────────────────────────────────────────────────
+
+    function Tag({ children, color, bg, border }) {
+      return (
+        <span style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: 0.5,
+          color, background: bg, border: `1px solid ${border}`,
+          padding: "2px 8px", borderRadius: 4,
+        }}>{children}</span>
+      );
+    }
+
+    function SectionLabel({ children, color = C.muted }) {
+      return (
+        <div style={{ fontSize: 11, letterSpacing: 2, color, fontWeight: 700, marginBottom: 10, textTransform: "uppercase" }}>
+          {children}
+        </div>
+      );
+    }
+
+    function CodeBlock({ children, color = C.text }) {
+      return (
+        <pre style={{
+          margin: 0, fontSize: 13, color, lineHeight: 1.7,
+          fontFamily: "'JetBrains Mono','Fira Code','Courier New',monospace",
+          whiteSpace: "pre-wrap",
+          background: C.codeBg, border: `1px solid ${C.border}`,
+          borderRadius: 8, padding: "14px 16px",
+        }}>{children}</pre>
+      );
+    }
+
+    function Card({ children, style = {} }) {
+      return (
+        <div style={{
+          background: C.card, border: `1px solid ${C.border}`,
+          borderRadius: 12, padding: 20,
+          ...style,
+        }}>{children}</div>
+      );
+    }
+
+    // ─── Tab: Pipeline ────────────────────────────────────────────────────────
+
+    function PipelineTab() {
+      const [active, setActive] = useState(null);
+      return (
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <p style={{ color: C.muted, fontSize: 14, textAlign: "center", marginBottom: 28 }}>
+            Five commands, one pipeline. Run them in order to turn raw files into a searchable, visual knowledge base.
+          </p>
+
+          {/* Step cards */}
+          <div style={{ display: "flex", alignItems: "stretch", gap: 0, marginBottom: 28, overflowX: "auto", paddingBottom: 4 }}>
+            {PIPELINE.map((step, i) => (
+              <React.Fragment key={step.cmd}>
+                <div
+                  onClick={() => setActive(active === step.cmd ? null : step.cmd)}
+                  style={{
+                    background: active === step.cmd ? step.bg : C.card,
+                    border: `1px solid ${active === step.cmd ? step.color : C.border}`,
+                    borderRadius: 10, padding: "16px 18px", cursor: "pointer",
+                    textAlign: "center", minWidth: 130, flexShrink: 0,
+                    transition: "all 0.15s",
+                    boxShadow: active === step.cmd ? `0 0 0 3px ${step.color}22` : "none",
+                  }}
+                >
+                  <div style={{ fontSize: 22, color: step.color, marginBottom: 6 }}>{step.icon}</div>
+                  <code style={{ fontSize: 14, color: step.color, fontWeight: 700, display: "block" }}>{step.cmd}</code>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 5, lineHeight: 1.4 }}>{step.title}</div>
+                </div>
+                {i < PIPELINE.length - 1 && (
+                  <div style={{ color: C.faint, fontSize: 20, flexShrink: 0, alignSelf: "center", padding: "0 6px" }}>→</div>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Detail panel */}
+          {active && (() => {
+            const step = PIPELINE.find(s => s.cmd === active);
+            return (
+              <Card style={{ border: `1px solid ${step.border}`, background: step.bg, marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+                  <span style={{ fontSize: 26, color: step.color }}>{step.icon}</span>
+                  <div>
+                    <code style={{ fontSize: 18, color: step.color, fontWeight: 700 }}>{step.cmd}</code>
+                    <span style={{ fontSize: 14, color: C.muted, marginLeft: 10 }}>— {step.title}</span>
+                  </div>
+                </div>
+                <p style={{ fontSize: 14, color: C.text, lineHeight: 1.8, marginBottom: 18 }}>{step.desc}</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div>
+                    <SectionLabel color={step.color}>EXAMPLE</SectionLabel>
+                    <CodeBlock color={step.color}>{step.example}</CodeBlock>
+                  </div>
+                  <div>
+                    <SectionLabel color={C.green}>OUTPUT</SectionLabel>
+                    <CodeBlock>{step.output}</CodeBlock>
+                  </div>
+                </div>
+              </Card>
+            );
+          })()}
+
+          {/* What you get */}
+          <Card>
+            <SectionLabel>WHAT YOU GET</SectionLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              {[
+                { icon: "📄", title: "Wiki Pages", desc: "Auto-generated Markdown pages in wiki/ — one per concept, service, or conversation." },
+                { icon: "🔗", title: "Cross-Links", desc: "Pages reference each other with [[wikilinks]] so context flows naturally between topics." },
+                { icon: "🗺️", title: "Visual Graph", desc: "An interactive map of everything in your vault. See how topics cluster and connect." },
+                { icon: "🔍", title: "Smart Search", desc: "Ask questions in plain English. Get answers sourced from your own knowledge." },
+                { icon: "♻️", title: "Auto-Merge", desc: "Re-run /ingest any time. New content merges in — existing pages are never overwritten." },
+                { icon: "🤖", title: "Any AI Tool", desc: "Your wiki works with Claude Code, Copilot, Cursor, and any agent that reads Markdown." },
+              ].map(item => (
+                <div key={item.title} style={{ background: C.bg, borderRadius: 8, padding: "14px 16px", border: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 22, marginBottom: 6 }}>{item.icon}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>{item.title}</div>
+                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>{item.desc}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // ─── Tab: Commands ────────────────────────────────────────────────────────
+
+    function CommandsTab() {
+      const [open, setOpen] = useState(null);
+      return (
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <p style={{ color: C.muted, fontSize: 14, textAlign: "center", marginBottom: 24 }}>
+            Start the app with <code style={{ background: C.codeBg, padding: "2px 6px", borderRadius: 4, fontSize: 13 }}>ccs-code</code> and type any command below, or just chat naturally.
+          </p>
+          {COMMANDS.map(cmd => {
+            const isOpen = open === cmd.cmd;
+            return (
+              <div key={cmd.cmd} style={{ marginBottom: 8 }}>
+                <div
+                  onClick={() => setOpen(isOpen ? null : cmd.cmd)}
+                  style={{
+                    background: isOpen ? cmd.bg : C.card,
+                    border: `1px solid ${isOpen ? cmd.color : C.border}`,
+                    borderRadius: isOpen ? "10px 10px 0 0" : 10,
+                    padding: "14px 18px", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    transition: "all 0.12s",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <code style={{ fontSize: 15, color: cmd.color, fontWeight: 700 }}>{cmd.cmd}</code>
+                    {cmd.args && <span style={{ fontSize: 13, color: C.faint }}>{cmd.args}</span>}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: C.faint }}>{isOpen ? "collapse" : "show details"}</span>
+                    <span style={{ color: C.faint, fontSize: 18, lineHeight: 1 }}>{isOpen ? "−" : "+"}</span>
+                  </div>
+                </div>
+                {isOpen && (
+                  <div style={{
+                    background: C.card, border: `1px solid ${cmd.color}`,
+                    borderTop: `1px solid ${cmd.border}`,
+                    borderRadius: "0 0 10px 10px", padding: 20,
+                  }}>
+                    <p style={{ fontSize: 14, color: C.text, lineHeight: 1.8, marginBottom: 18 }}>{cmd.desc}</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                      <div>
+                        <SectionLabel color={cmd.color}>USAGE</SectionLabel>
+                        {cmd.examples.map((ex, i) => (
+                          <div key={i} style={{ marginBottom: 10 }}>
+                            {ex.label && <div style={{ fontSize: 11, color: C.faint, marginBottom: 4 }}>{ex.label}</div>}
+                            <CodeBlock color={cmd.color}>{ex.code}</CodeBlock>
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <SectionLabel color={C.green}>SAMPLE OUTPUT</SectionLabel>
+                        <CodeBlock>{cmd.output}</CodeBlock>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // ─── Tab: /ask ────────────────────────────────────────────────────────────
+
+    function AskTab() {
+      return (
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <p style={{ color: C.muted, fontSize: 14, textAlign: "center", marginBottom: 28 }}>
+            Ask questions in plain English. CCS Code searches your wiki and answers from your own knowledge base.
+          </p>
+
+          {/* Example questions */}
+          <Card style={{ marginBottom: 20 }}>
+            <SectionLabel color={C.amber}>EXAMPLE QUESTIONS</SectionLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {[
+                "/ask what does auth-svc depend on?",
+                "/ask what did I discuss about React hooks?",
+                "/ask how does the payment flow work?",
+                "/ask summarize my architecture decisions",
+                "/ask which services have open issues?",
+                "/ask what patterns do we use for error handling?",
+              ].map(q => (
+                <div key={q} style={{
+                  background: C.amberBg, border: `1px solid ${C.amberBorder}`,
+                  borderRadius: 8, padding: "10px 14px",
+                  fontSize: 13, color: C.amber, fontFamily: "'JetBrains Mono','Fira Code',monospace",
+                }}>{q}</div>
+              ))}
+            </div>
+          </Card>
+
+          {/* How it works */}
+          <Card style={{ marginBottom: 20 }}>
+            <SectionLabel>HOW IT WORKS</SectionLabel>
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {[
+                { step: "1", color: C.indigo, title: "You ask a question", desc: 'Type /ask followed by anything — "what does payment-svc depend on?" or "summarize my React discussions"' },
+                { step: "2", color: C.blue, title: "CCS Code searches your wiki", desc: "Every wiki page is scored by how well it matches your question. Title matches score highest, then tags, then body text." },
+                { step: "3", color: C.violet, title: "Top pages become context", desc: "The 6 most relevant pages are sent to your AI provider along with your question." },
+                { step: "4", color: C.green, title: "You get a sourced answer", desc: 'The AI answers using your wiki — not just generic knowledge. Every claim is cited as [[page-name]] so you can trace it back.' },
+              ].map((item, i) => (
+                <div key={item.step} style={{ display: "flex", gap: 16, paddingBottom: i < 3 ? 20 : 0, marginBottom: i < 3 ? 20 : 0, borderBottom: i < 3 ? `1px solid ${C.border}` : "none" }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                    background: item.color + "15", border: `1px solid ${item.color}44`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 15, fontWeight: 700, color: item.color,
+                  }}>{item.step}</div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 4 }}>{item.title}</div>
+                    <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.7 }}>{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Sample output */}
+          <Card>
+            <SectionLabel color={C.green}>SAMPLE ANSWER</SectionLabel>
+            <CodeBlock>{`> /ask what does auth-svc depend on?
+
+*Searching wiki… found 3 relevant page(s)*
+
+Based on the wiki:
+
+[[auth-svc]] depends on two services:
+
+1. [[user-svc]] — used for session token validation on every request
+2. [[notification-svc]] — called when sending verification emails
+
+It is depended on by [[api-gateway]] and [[payment-svc]].
+
+## Sources
+- auth-svc
+- dependency-map
+- architecture-decisions`}</CodeBlock>
+          </Card>
+        </div>
+      );
+    }
+
+    // ─── Tab: Vault ───────────────────────────────────────────────────────────
+
+    function VaultTab() {
+      const TREE = [
+        { indent: 0, text: "vault/", bold: true, color: C.text },
+        { indent: 1, text: "ccs.yaml", color: C.indigo, tag: "config" },
+        { indent: 1, text: "raw/", color: C.orange, tag: "sync inbox" },
+        { indent: 2, text: "github/          ← /sync writes here", color: C.muted },
+        { indent: 2, text: "uploads/         ← drop files here manually", color: C.muted },
+        { indent: 1, text: "wiki/", color: C.violet, tag: "auto-maintained" },
+        { indent: 2, text: "_master-index.md ← rebuilt by /index", color: C.violet },
+        { indent: 2, text: "concepts/        ← pages from HTML + text", color: C.muted },
+        { indent: 2, text: "conversations/   ← pages from conversations.json", color: C.muted },
+        { indent: 1, text: "output/", color: C.green, tag: "artifacts" },
+        { indent: 2, text: "graph.html       ← interactive graph", color: C.blue },
+        { indent: 1, text: "skills/", color: C.violet, tag: "AI plugins" },
+        { indent: 2, text: "wiki-ingest/   wiki-query/   wiki-lint/", color: C.muted },
+        { indent: 2, text: "graph-build/   rewrite-plan/", color: C.muted },
+        { indent: 1, text: ".claude-plugin/plugin.json", color: C.muted, tag: "Claude Code" },
+      ];
+
+      const YAML = `vault:
+  path: ./vault
+
+sources:
+  - type: github
+    repos:
+      - my-org/auth-svc
+      - my-org/payment-svc
+    include: [commits, prs, issues, readme]
+    token_env: GH_TOKEN
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6`;
+
+      return (
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <p style={{ color: C.muted, fontSize: 14, textAlign: "center", marginBottom: 28 }}>
+            Your vault is a folder of plain Markdown files. Everything CCS Code creates is readable by any AI tool.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+            <Card>
+              <SectionLabel>FOLDER STRUCTURE</SectionLabel>
+              {TREE.map((line, i) => (
+                <div key={i} style={{
+                  paddingLeft: line.indent * 20,
+                  fontSize: 13, lineHeight: 2.1, color: line.color,
+                  fontWeight: line.bold ? 700 : 400,
+                  display: "flex", alignItems: "center", gap: 8,
+                  fontFamily: "'JetBrains Mono','Fira Code',monospace",
+                }}>
+                  {line.indent > 0 && <span style={{ color: C.faint }}>├─</span>}
+                  <span>{line.text}</span>
+                  {line.tag && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, color: line.color,
+                      background: line.color + "15", border: `1px solid ${line.color}33`,
+                      padding: "1px 6px", borderRadius: 3, letterSpacing: 0.5,
+                    }}>{line.tag}</span>
+                  )}
+                </div>
+              ))}
+            </Card>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Card>
+                <SectionLabel>ccs.yaml</SectionLabel>
+                <CodeBlock>{YAML}</CodeBlock>
+              </Card>
+              <Card style={{ background: C.indigoBg, border: `1px solid ${C.indigoBorder}` }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.indigo, marginBottom: 6 }}>~/.ccs/config.json</div>
+                <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.7 }}>
+                  Remembers your active vault path between sessions. Set automatically by <code style={{ background: C.card, padding: "1px 5px", borderRadius: 3 }}>/vault init</code>.
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+            {[
+              { title: "raw/", color: C.orange, bg: C.orangeBg, border: C.orangeBorder, desc: "/sync writes here automatically. You can also drop files manually into raw/uploads/." },
+              { title: "wiki/", color: C.violet, bg: C.violetBg, border: C.violetBorder, desc: "Never edit manually. /ingest and /enrich keep it up to date with summaries, tags, and wikilinks." },
+              { title: "output/", color: C.green, bg: C.greenBg, border: C.greenBorder, desc: "graph.html is a self-contained interactive graph — open it in any browser, no server needed." },
+            ].map(item => (
+              <div key={item.title} style={{ background: item.bg, border: `1px solid ${item.border}`, borderRadius: 10, padding: 16 }}>
+                <code style={{ fontSize: 14, fontWeight: 700, color: item.color }}>{item.title}</code>
+                <p style={{ fontSize: 13, color: C.muted, marginTop: 8, lineHeight: 1.7 }}>{item.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Tab: Providers ───────────────────────────────────────────────────────
+
+    function ProvidersTab() {
+      return (
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <p style={{ color: C.muted, fontSize: 14, textAlign: "center", marginBottom: 28 }}>
+            CCS Code works with the AI provider you already have. Configure once, used by <code style={{ background: C.codeBg, padding: "2px 6px", borderRadius: 4 }}>/enrich</code> and <code style={{ background: C.codeBg, padding: "2px 6px", borderRadius: 4 }}>/ask</code>.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+            {PROVIDERS.map(p => (
+              <Card key={p.name}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: C.faint }}>{p.sub}</div>
+                  </div>
+                </div>
+                <SectionLabel>ENV VARS</SectionLabel>
+                {p.envVars.map(e => (
+                  <div key={e} style={{ marginBottom: 5 }}>
+                    <code style={{ fontSize: 12, color: C.blue, background: C.blueBg, padding: "2px 6px", borderRadius: 4 }}>{e}</code>
+                  </div>
+                ))}
+                <div style={{ marginTop: 14 }}>
+                  <SectionLabel>ccs.yaml</SectionLabel>
+                  <CodeBlock>{p.yaml}</CodeBlock>
+                </div>
+              </Card>
+            ))}
+          </div>
+
+          <Card style={{ marginBottom: 16 }}>
+            <SectionLabel>QUICK START</SectionLabel>
+            <CodeBlock>{`# Set your key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Add to ccs.yaml
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-6
+
+# Run it
+ccs-code
+> /vault init
+> /enrich       ← AI will enrich your wiki pages
+> /ask what did I work on this week?`}</CodeBlock>
+          </Card>
+
+          <Card>
+            <SectionLabel>USE CCS CODE WITH ANY AI TOOL</SectionLabel>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+              {AI_TOOLS.map(tool => (
+                <div key={tool.name} style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>{tool.name}</div>
+                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>{tool.desc}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
+      );
+    }
+
+    // ─── Main App ─────────────────────────────────────────────────────────────
+
+    const TABS = [
+      { id: "pipeline", label: "How It Works" },
+      { id: "commands", label: "Commands" },
+      { id: "ask",      label: "/ask" },
+      { id: "vault",    label: "Vault" },
+      { id: "providers",label: "AI Providers" },
+    ];
+
+    function App() {
+      const [tab, setTab] = useState("pipeline");
+
+      return (
+        <div style={{ background: C.bg, minHeight: "100vh", color: C.text, fontFamily: "'Inter','Segoe UI',system-ui,sans-serif", padding: "40px 20px 80px" }}>
+
+          {/* Header */}
+          <div style={{ textAlign: "center", marginBottom: 36 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 10, background: C.indigoBg, border: `1px solid ${C.indigoBorder}`, borderRadius: 100, padding: "6px 16px", marginBottom: 16 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: C.indigo }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: C.indigo, letterSpacing: 1 }}>PERSONAL KNOWLEDGE BASE CLI</span>
+            </div>
+            <h1 style={{ fontSize: 40, fontWeight: 800, margin: 0, color: C.text, letterSpacing: -1 }}>
+              CCS Code
+            </h1>
+            <p style={{ color: C.muted, fontSize: 16, marginTop: 10, maxWidth: 500, margin: "10px auto 0" }}>
+              Sync, ingest, and query your knowledge — GitHub repos, conversations, and documents — from the command line.
+            </p>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 4, justifyContent: "center", marginBottom: 36, flexWrap: "wrap", borderBottom: `1px solid ${C.border}`, paddingBottom: 0 }}>
+            {TABS.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{
+                background: "transparent",
+                color: tab === t.id ? C.indigo : C.muted,
+                border: "none",
+                borderBottom: `2px solid ${tab === t.id ? C.indigo : "transparent"}`,
+                padding: "10px 20px", fontSize: 14,
+                cursor: "pointer", fontFamily: "inherit",
+                fontWeight: tab === t.id ? 700 : 400,
+                transition: "all 0.12s",
+                marginBottom: -1,
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {/* Content */}
+          {tab === "pipeline"  && <PipelineTab />}
+          {tab === "commands"  && <CommandsTab />}
+          {tab === "ask"       && <AskTab />}
+          {tab === "vault"     && <VaultTab />}
+          {tab === "providers" && <ProvidersTab />}
+
+          <div style={{ textAlign: "center", marginTop: 60, color: C.faint, fontSize: 12 }}>
+            CCS Code — Personal Knowledge Base CLI
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

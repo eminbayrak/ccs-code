@@ -1,0 +1,396 @@
+import { promises as fs } from "fs";
+import { join } from "path";
+import { z } from "zod";
+import type { ConnectorAdapter } from "./base.js";
+import type { ToolDescriptor } from "../capabilities/types.js";
+
+// ---------------------------------------------------------------------------
+// Vault sync helpers (KnowledgeForge)
+// ---------------------------------------------------------------------------
+
+export type GitHubSyncConfig = {
+  repos: string[];
+  include: Array<"commits" | "prs" | "issues" | "readme" | "file_tree">;
+  token?: string;
+};
+
+function ghHeaders(token?: string): Record<string, string> {
+  const h: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "KnowledgeForge/1.0",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const t = token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.CCS_GITHUB_TOKEN;
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
+}
+
+async function ghFetch<T>(path: string, token?: string): Promise<T> {
+  const res = await fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
+  if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return res.json() as Promise<T>;
+}
+
+export async function syncRepo(repo: string, rawDir: string, cfg: GitHubSyncConfig): Promise<string[]> {
+  const repoDir = join(rawDir, "github", repo.replace("/", "__"));
+  await fs.mkdir(repoDir, { recursive: true });
+  const written: string[] = [];
+  const token = cfg.token;
+
+  if (cfg.include.includes("readme")) {
+    try {
+      const data = await ghFetch<{ content: string; encoding: string }>(`/repos/${repo}/readme`, token);
+      const content = data.encoding === "base64"
+        ? Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf-8")
+        : data.content;
+      const p = join(repoDir, "README.md");
+      await fs.writeFile(p, content, "utf-8");
+      written.push(p);
+    } catch { /* no readme */ }
+  }
+
+  if (cfg.include.includes("issues")) {
+    try {
+      const issues = await ghFetch<Array<{ number: number; title: string; body: string | null; state: string; labels: Array<{ name: string }>; assignees: Array<{ login: string }>; created_at: string }>>(`/repos/${repo}/issues?state=open&per_page=50`, token);
+      const lines = [`# Open Issues — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
+      for (const i of issues) {
+        lines.push(`## #${i.number}: ${i.title}`, `- State: ${i.state}`, `- Labels: ${i.labels.map((l) => l.name).join(", ") || "none"}`, `- Assignees: ${i.assignees.map((a) => a.login).join(", ") || "none"}`, "", i.body?.slice(0, 500) ?? "_No body_", "", "---", "");
+      }
+      const p = join(repoDir, "issues.md");
+      await fs.writeFile(p, lines.join("\n"), "utf-8");
+      written.push(p);
+    } catch { /* unavailable */ }
+  }
+
+  if (cfg.include.includes("prs")) {
+    try {
+      const prs = await ghFetch<Array<{ number: number; title: string; body: string | null; user: { login: string }; created_at: string; head: { ref: string } }>>(`/repos/${repo}/pulls?state=open&per_page=30`, token);
+      const lines = [`# Open Pull Requests — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
+      for (const pr of prs) {
+        lines.push(`## PR #${pr.number}: ${pr.title}`, `- Author: @${pr.user.login}`, `- Branch: ${pr.head.ref}`, `- Created: ${pr.created_at}`, "", pr.body?.slice(0, 500) ?? "_No description_", "", "---", "");
+      }
+      const p = join(repoDir, "pull-requests.md");
+      await fs.writeFile(p, lines.join("\n"), "utf-8");
+      written.push(p);
+    } catch { /* unavailable */ }
+  }
+
+  if (cfg.include.includes("commits")) {
+    try {
+      const commits = await ghFetch<Array<{ sha: string; commit: { message: string; author: { name: string; date: string } } }>>(`/repos/${repo}/commits?per_page=30`, token);
+      const lines = [`# Recent Commits — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, ""];
+      for (const c of commits) {
+        lines.push(`- \`${c.sha.slice(0, 8)}\` ${c.commit.message.split("\n")[0]} — _${c.commit.author.name}_ (${c.commit.author.date})`);
+      }
+      const p = join(repoDir, "commits.md");
+      await fs.writeFile(p, lines.join("\n"), "utf-8");
+      written.push(p);
+    } catch { /* unavailable */ }
+  }
+
+  if (cfg.include.includes("file_tree")) {
+    try {
+      const tree = await ghFetch<{ tree: Array<{ path: string; type: string }> }>(`/repos/${repo}/git/trees/HEAD?recursive=1`, token);
+      const paths = tree.tree.filter((n) => n.type === "blob").map((n) => n.path).slice(0, 500);
+      const lines = [`# File Tree — ${repo}`, `_Fetched: ${new Date().toISOString()}_`, "", "```", ...paths, "```"];
+      const p = join(repoDir, "file-tree.md");
+      await fs.writeFile(p, lines.join("\n"), "utf-8");
+      written.push(p);
+    } catch { /* unavailable */ }
+  }
+
+  return written;
+}
+
+const syncRepoInputSchema = z.object({
+  repo: z.string().describe("Repository in org/name format"),
+  rawDir: z.string().describe("Path to the vault raw/ directory"),
+  include: z.array(z.enum(["commits", "prs", "issues", "readme", "file_tree"])).default(["commits", "prs", "issues", "readme"]),
+});
+
+const searchCodeInputSchema = z.object({
+    query: z.string().min(1),
+});
+
+const listPullRequestsInputSchema = z.object({
+    owner: z.string().min(1),
+    repo: z.string().min(1),
+    state: z.enum(["open", "closed", "all"]).default("open"),
+    perPage: z.number().int().positive().max(100).default(10),
+});
+
+const summarizeOrgReposInputSchema = z.object({
+    org: z.string().min(1),
+    maxRepos: z.number().int().positive().max(1000).default(200),
+    includeArchived: z.boolean().default(false),
+});
+
+export const githubConnector: ConnectorAdapter = {
+    name: "github",
+    getTools() {
+        const tools: ToolDescriptor[] = [
+            {
+                id: "github.sync_repo",
+                name: "github_sync_repo",
+                kind: "tool",
+                description: "Sync a GitHub repository into the KnowledgeForge vault raw/ directory (commits, PRs, issues, README, file tree).",
+                riskClass: "read",
+                inputSchema: syncRepoInputSchema,
+                async handler(input) {
+                    const parsed = syncRepoInputSchema.safeParse(input);
+                    if (!parsed.success) return { status: "error", error: parsed.error.message };
+                    const { repo, rawDir, include } = parsed.data;
+                    try {
+                        const written = await syncRepo(repo, rawDir, { repos: [repo], include });
+                        return { status: "success", output: { repo, filesWritten: written.length, paths: written } };
+                    } catch (e) {
+                        return { status: "error", error: e instanceof Error ? e.message : String(e) };
+                    }
+                },
+            },
+            {
+                id: "github.search_code",
+                name: "github_search_code",
+                kind: "tool",
+                description: "Search code in GitHub using the authenticated user token.",
+                riskClass: "read",
+                inputSchema: searchCodeInputSchema,
+                async handler(input) {
+                    const parsed = searchCodeInputSchema.safeParse(input);
+                    if (!parsed.success) {
+                        return { status: "error", error: parsed.error.message };
+                    }
+
+                    const token = process.env.CCS_GITHUB_TOKEN;
+                    if (!token) {
+                        return {
+                            status: "error",
+                            error: "Missing CCS_GITHUB_TOKEN in environment.",
+                        };
+                    }
+
+                    const url = new URL("https://api.github.com/search/code");
+                    url.searchParams.set("q", parsed.data.query);
+                    url.searchParams.set("per_page", "5");
+
+                    const response = await fetch(url, {
+                        headers: {
+                            Accept: "application/vnd.github+json",
+                            Authorization: `Bearer ${token}`,
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                    });
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        return {
+                            status: "error",
+                            error: `GitHub search failed (${response.status}): ${text}`,
+                        };
+                    }
+
+                    const json = await response.json();
+                    return {
+                        status: "success",
+                        output: json,
+                    };
+                },
+            },
+            {
+                id: "github.list_pull_requests",
+                name: "github_list_pull_requests",
+                kind: "tool",
+                description: "List pull requests for a GitHub repository.",
+                riskClass: "read",
+                inputSchema: listPullRequestsInputSchema,
+                async handler(input) {
+                    const parsed = listPullRequestsInputSchema.safeParse(input);
+                    if (!parsed.success) {
+                        return { status: "error", error: parsed.error.message };
+                    }
+
+                    const token = process.env.CCS_GITHUB_TOKEN;
+                    if (!token) {
+                        return {
+                            status: "error",
+                            error: "Missing CCS_GITHUB_TOKEN in environment.",
+                        };
+                    }
+
+                    const { owner, repo, state, perPage } = parsed.data;
+                    const url = new URL(`https://api.github.com/repos/${owner}/${repo}/pulls`);
+                    url.searchParams.set("state", state);
+                    url.searchParams.set("per_page", String(perPage));
+
+                    const response = await fetch(url, {
+                        headers: {
+                            Accept: "application/vnd.github+json",
+                            Authorization: `Bearer ${token}`,
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                    });
+
+                    if (!response.ok) {
+                        const text = await response.text();
+                        return {
+                            status: "error",
+                            error: `GitHub pull request list failed (${response.status}): ${text}`,
+                        };
+                    }
+
+                    const json = await response.json();
+                    return {
+                        status: "success",
+                        output: json,
+                    };
+                },
+            },
+            {
+                id: "github.summarize_org_repos",
+                name: "github_summarize_org_repos",
+                kind: "tool",
+                description:
+                    "Scan repositories in a GitHub organization and return an aggregated portfolio summary.",
+                riskClass: "read",
+                inputSchema: summarizeOrgReposInputSchema,
+                async handler(input) {
+                    const parsed = summarizeOrgReposInputSchema.safeParse(input);
+                    if (!parsed.success) {
+                        return { status: "error", error: parsed.error.message };
+                    }
+
+                    const token = process.env.CCS_GITHUB_TOKEN;
+                    if (!token) {
+                        return {
+                            status: "error",
+                            error: "Missing CCS_GITHUB_TOKEN in environment.",
+                        };
+                    }
+
+                    const headers = {
+                        Accept: "application/vnd.github+json",
+                        Authorization: `Bearer ${token}`,
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    };
+
+                    const { org, maxRepos, includeArchived } = parsed.data;
+                    const repos: any[] = [];
+                    let page = 1;
+                    const perPage = 100;
+
+                    while (repos.length < maxRepos) {
+                        const url = new URL(`https://api.github.com/orgs/${org}/repos`);
+                        url.searchParams.set("type", "all");
+                        url.searchParams.set("sort", "updated");
+                        url.searchParams.set("direction", "desc");
+                        url.searchParams.set("per_page", String(perPage));
+                        url.searchParams.set("page", String(page));
+
+                        const response = await fetch(url, { headers });
+                        if (!response.ok) {
+                            const text = await response.text();
+                            return {
+                                status: "error",
+                                error: `GitHub org repo scan failed (${response.status}): ${text}`,
+                            };
+                        }
+
+                        const batch = await response.json();
+                        if (!Array.isArray(batch) || batch.length === 0) {
+                            break;
+                        }
+
+                        repos.push(...batch);
+                        if (batch.length < perPage) {
+                            break;
+                        }
+                        page += 1;
+                    }
+
+                    const limitedRepos = repos.slice(0, maxRepos);
+                    const filteredRepos = includeArchived
+                        ? limitedRepos
+                        : limitedRepos.filter((repo) => !repo.archived);
+
+                    const languageCounts: Record<string, number> = {};
+                    const topicCounts: Record<string, number> = {};
+                    const visibilityCounts: Record<string, number> = {};
+
+                    for (const repo of filteredRepos) {
+                        const language = repo.language || "Unknown";
+                        languageCounts[language] = (languageCounts[language] ?? 0) + 1;
+
+                        const visibility = repo.visibility || (repo.private ? "private" : "public");
+                        visibilityCounts[visibility] = (visibilityCounts[visibility] ?? 0) + 1;
+
+                        for (const topic of repo.topics || []) {
+                            topicCounts[topic] = (topicCounts[topic] ?? 0) + 1;
+                        }
+                    }
+
+                    const topLanguages = Object.entries(languageCounts)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 10)
+                        .map(([name, count]) => ({ name, count }));
+
+                    const topTopics = Object.entries(topicCounts)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 15)
+                        .map(([name, count]) => ({ name, count }));
+
+                    const normalizedRepos = filteredRepos.map((repo) => ({
+                        name: repo.name,
+                        fullName: repo.full_name,
+                        private: Boolean(repo.private),
+                        visibility: repo.visibility || (repo.private ? "private" : "public"),
+                        archived: Boolean(repo.archived),
+                        fork: Boolean(repo.fork),
+                        language: repo.language || "Unknown",
+                        topics: Array.isArray(repo.topics) ? repo.topics : [],
+                        description: repo.description || "",
+                        defaultBranch: repo.default_branch,
+                        stars: Number(repo.stargazers_count ?? 0),
+                        forks: Number(repo.forks_count ?? 0),
+                        openIssues: Number(repo.open_issues_count ?? 0),
+                        updatedAt: repo.updated_at,
+                        pushedAt: repo.pushed_at,
+                        url: repo.html_url,
+                    }));
+
+                    const now = new Date();
+                    const thirtyDaysAgo = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+                    const activeLast30d = normalizedRepos.filter((repo) => {
+                        if (!repo.pushedAt) return false;
+                        const pushedAt = new Date(repo.pushedAt).getTime();
+                        return Number.isFinite(pushedAt) && pushedAt >= thirtyDaysAgo;
+                    }).length;
+
+                    return {
+                        status: "success",
+                        output: {
+                            organization: org,
+                            scannedAt: now.toISOString(),
+                            scanLimits: {
+                                maxRepos,
+                                includeArchived,
+                            },
+                            totals: {
+                                reposReturnedByApi: repos.length,
+                                reposAnalyzed: normalizedRepos.length,
+                                activeLast30d,
+                                archived: normalizedRepos.filter((repo) => repo.archived).length,
+                                forks: normalizedRepos.filter((repo) => repo.fork).length,
+                            },
+                            visibility: visibilityCounts,
+                            topLanguages,
+                            topTopics,
+                            repos: normalizedRepos,
+                        },
+                    };
+                },
+            },
+        ];
+
+        return tools;
+    },
+};

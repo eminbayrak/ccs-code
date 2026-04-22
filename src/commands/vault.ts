@@ -1,0 +1,540 @@
+import { promises as fs } from "fs";
+import { join, resolve } from "path";
+import { homedir } from "os";
+import { initVault } from "../vault/init.js";
+import { rebuildMasterIndex } from "../vault/masterIndex.js";
+import { syncRepo, type GitHubSyncConfig } from "../connectors/github.js";
+import { generateGraphHtml } from "../vault/graphBuilder.js";
+import { ingestAll } from "../vault/ingestor.js";
+import { enrichWiki } from "../vault/enricher.js";
+import { askWiki } from "../vault/wikiAsk.js";
+import { createProvider } from "../llm/index.js";
+
+// ---------------------------------------------------------------------------
+// Global vault config — remembers active vault across sessions
+// ---------------------------------------------------------------------------
+
+const GLOBAL_CONFIG_PATH = join(homedir(), ".ccs", "config.json");
+
+type GlobalConfig = { activeVault?: string };
+
+async function readGlobalConfig(): Promise<GlobalConfig> {
+  try {
+    const raw = await fs.readFile(GLOBAL_CONFIG_PATH, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+async function writeGlobalConfig(cfg: GlobalConfig): Promise<void> {
+  await fs.mkdir(join(homedir(), ".ccs"), { recursive: true });
+  await fs.writeFile(GLOBAL_CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf-8");
+}
+
+// ---------------------------------------------------------------------------
+// Vault path resolution — checks (in order):
+//   1. kforge.yaml in cwd
+//   2. Global ~/.ccs/config.json active vault
+//   3. Falls back to <cwd>/vault
+// ---------------------------------------------------------------------------
+
+type SourceConfig =
+  | { type: "github"; repos: string[]; include?: string[]; token_env?: string }
+  | { type: "folder"; path: string };
+
+type KforgeConfig = {
+  vault?: { path?: string };
+  sources?: SourceConfig[];
+};
+
+async function loadKforgeConfig(vaultPath: string): Promise<KforgeConfig> {
+  const configPath = join(vaultPath, "kforge.yaml");
+  try {
+    const raw = await fs.readFile(configPath, "utf-8");
+    return parseSimpleYaml(raw) as KforgeConfig;
+  } catch {
+    return {};
+  }
+}
+
+async function resolveVaultPath(cwd: string): Promise<string> {
+  // 1. kforge.yaml in cwd
+  try {
+    const raw = await fs.readFile(join(cwd, "kforge.yaml"), "utf-8");
+    const cfg = parseSimpleYaml(raw) as KforgeConfig;
+    if (cfg.vault?.path) return resolve(cwd, cfg.vault.path);
+  } catch {}
+
+  // 2. Global active vault
+  const global = await readGlobalConfig();
+  if (global.activeVault) return global.activeVault;
+
+  // 3. Default
+  return join(cwd, "vault");
+}
+
+function parseSimpleYaml(yaml: string): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  let currentKey = "";
+
+  for (const line of yaml.split("\n")) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    if (!line.startsWith(" ") && !line.startsWith("\t")) {
+      const colonIdx = line.indexOf(":");
+      if (colonIdx === -1) continue;
+      currentKey = line.slice(0, colonIdx).trim();
+      const val = line.slice(colonIdx + 1).trim();
+      if (val) result[currentKey] = val;
+      else result[currentKey] = {};
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// /vault command handler
+// ---------------------------------------------------------------------------
+
+export async function handleVaultCommand(args: string[], cwd: string): Promise<string> {
+  const subcommand = args[0];
+
+  switch (subcommand) {
+    case "init": {
+      const rawArg = args[1]?.replace(/^['"]|['"]$/g, "") ?? null;
+      const vaultPath = rawArg ? resolve(cwd, rawArg) : join(cwd, "vault");
+      try {
+        const created = await initVault(vaultPath);
+
+        // Save as active vault so all other commands find it
+        await writeGlobalConfig({ activeVault: vaultPath });
+
+        if (created.length === 0) {
+          const wikiFiles = await fs.readdir(join(vaultPath, "wiki")).catch(() => []);
+          const rawFiles = await walkIngestable(join(vaultPath, "raw"));
+          const skillDirs = await fs.readdir(join(vaultPath, "skills")).catch(() => []);
+          return [
+            `Vault at: ${vaultPath}`,
+            `  wiki/   — ${wikiFiles.length} items`,
+            `  raw/    — ${rawFiles.length} file(s) ready to ingest`,
+            `  skills  — ${skillDirs.length} skills loaded`,
+            "",
+            "Commands:",
+            "  /ingest        process files in raw/",
+            "  /sync          pull from GitHub sources",
+            "  /graph         build knowledge graph",
+            "  /lint          check wiki health",
+          ].join("\n");
+        }
+        return [
+          `✓ Vault initialized at: ${vaultPath}`,
+          `  ${created.length} files created`,
+          "",
+          "── Where to put your files ──────────────────────────",
+          `  ${join(vaultPath, "raw", "uploads")}`,
+          "  Drop any file here and run /ingest to process it.",
+          "",
+          "── Accepted formats ─────────────────────────────────",
+          "  .md   .txt   .html   .json   .csv   .pdf",
+          "",
+          "── Other raw/ inboxes (auto-populated by /sync) ─────",
+          "  raw/github/      ← GitHub commits, PRs, issues, README",
+          "  raw/confluence/  ← Confluence pages",
+          "  raw/vscode/      ← VS Code workspace exports",
+          "",
+          "── Next steps ───────────────────────────────────────",
+          "  1. Copy your files into:  raw/uploads/",
+          "  2. Run /ingest            convert files → wiki pages",
+          "  3. Run /enrich            add AI summaries + links",
+          "  4. Run /graph             open visual knowledge graph",
+          "  (or /sync first if you have GitHub repos in kforge.yaml)",
+        ].join("\n");
+      } catch (e) {
+        return `Error initializing vault: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+
+    case "status": {
+      const vaultPath = await resolveVaultPath(cwd);
+      const rawFiles = await walkIngestable(join(vaultPath, "raw"));
+      const wikiCount = await countMarkdownFiles(join(vaultPath, "wiki")).catch(() => 0);
+      const skillDirs = await fs.readdir(join(vaultPath, "skills")).catch(() => []);
+
+      return [
+        `Vault: ${vaultPath}`,
+        `  wiki pages  — ${wikiCount}`,
+        `  raw files   — ${rawFiles.length} ready to ingest`,
+        `  skills      — ${skillDirs.length}`,
+      ].join("\n");
+    }
+
+    default:
+      return [
+        "Usage: /vault <subcommand>",
+        "  /vault init [path]   create or point to a vault",
+        "  /vault status        show active vault",
+      ].join("\n");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /sync command handler
+// ---------------------------------------------------------------------------
+
+export async function handleSyncCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const config = await loadKforgeConfig(vaultPath);
+  const rawDir = join(vaultPath, "raw");
+
+  const sources = Array.isArray(config.sources) ? config.sources : [];
+  if (sources.length === 0) {
+    return [
+      `Vault: ${vaultPath}`,
+      "",
+      "No sources configured. Edit kforge.yaml to add sources:",
+      "  sources:",
+      "    - type: github",
+      "      repos: [my-org/my-service]",
+      "      include: [commits, prs, issues, readme]",
+      "      token_env: GH_TOKEN",
+    ].join("\n");
+  }
+
+  const results: string[] = [`Syncing to ${rawDir}`, ""];
+
+  for (const source of sources) {
+    if (source.type === "github") {
+      const token = source.token_env ? process.env[source.token_env] : undefined;
+      const include = (source.include ?? ["commits", "prs", "issues", "readme"]) as GitHubSyncConfig["include"];
+      for (const repo of source.repos) {
+        try {
+          const written = await syncRepo(repo, rawDir, { repos: [repo], include, token });
+          results.push(`  ✓ github:${repo} — ${written.length} file(s) written`);
+        } catch (e) {
+          results.push(`  ✗ github:${repo} — ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    } else if (source.type === "folder") {
+      results.push(`  ⚠ folder sources: drop files into raw/uploads/ manually`);
+    }
+  }
+
+  return results.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /ingest command handler
+// ---------------------------------------------------------------------------
+
+export async function handleIngestCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const rawDir = join(vaultPath, "raw");
+
+  const rawFiles = await walkIngestable(rawDir);
+  const nonReadme = rawFiles.filter(f => !f.endsWith("README.md"));
+
+  if (nonReadme.length === 0) {
+    return [
+      `Vault: ${vaultPath}`,
+      "",
+      "No files found in raw/.",
+      "Drop files into raw/uploads/ or run /sync to pull from GitHub.",
+    ].join("\n");
+  }
+
+  const { written, updated, skipped, errors } = await ingestAll(vaultPath);
+
+  const lines = [`Vault: ${vaultPath}`, ""];
+
+  if (written.length > 0) {
+    lines.push(`✓ Created ${written.length} new wiki page(s):`);
+    for (const f of written.slice(0, 15)) lines.push(`  + ${f}`);
+    if (written.length > 15) lines.push(`  ... and ${written.length - 15} more`);
+  }
+
+  if (updated.length > 0) {
+    lines.push(`↻ Merged new content into ${updated.length} existing page(s)`);
+  }
+
+  if (skipped.length > 0) {
+    lines.push(`  ${skipped.length} file(s) skipped (unsupported format)`);
+  }
+
+  if (errors.length > 0) {
+    lines.push("", "Errors:");
+    for (const e of errors) lines.push(`  ✗ ${e}`);
+  }
+
+  if (written.length === 0 && updated.length === 0 && errors.length === 0) {
+    lines.push("Wiki is up to date — no new content found.");
+  } else {
+    lines.push("", "Run /enrich to add AI summaries and links, then /graph to visualize.");
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /lint command handler
+// ---------------------------------------------------------------------------
+
+export async function handleLintCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const lintScript = join(vaultPath, "skills", "wiki-lint", "scripts", "lint_wiki.py");
+
+  try {
+    await fs.access(lintScript);
+  } catch {
+    return `Vault not found at: ${vaultPath}\nRun /vault init <path> first.`;
+  }
+
+  return [
+    `Vault: ${vaultPath}`,
+    "",
+    "Run the wiki health check:",
+    `  python3 ${lintScript} --vault ${vaultPath}`,
+    "",
+    "Or say: 'lint the wiki'",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /graph command handler
+// ---------------------------------------------------------------------------
+
+export async function handleGraphCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const wikiDir = join(vaultPath, "wiki");
+  const outputPath = join(vaultPath, "output", "graph.html");
+
+  try {
+    await fs.access(wikiDir);
+  } catch {
+    return `Vault not found at: ${vaultPath}\nRun /vault init <path> first.`;
+  }
+
+  try {
+    const { nodeCount, edgeCount } = await generateGraphHtml(wikiDir, outputPath);
+
+    if (nodeCount === 0) {
+      return [
+        `Vault: ${vaultPath}`,
+        "",
+        "Wiki is empty — no pages to graph yet.",
+        "Run /ingest first to process files into wiki pages.",
+      ].join("\n");
+    }
+
+    // Open the graph in the default browser
+    const { spawn } = await import("child_process");
+    spawn("open", [outputPath], { detached: true, stdio: "ignore" }).unref();
+
+    return [
+      `Vault: ${vaultPath}`,
+      `Graph built: ${nodeCount} nodes, ${edgeCount} edges`,
+      `Saved to: output/graph.html`,
+      "",
+      "Opening in browser…",
+    ].join("\n");
+  } catch (e) {
+    return `Error building graph: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /rewrite command handler
+// ---------------------------------------------------------------------------
+
+export async function handleRewriteCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const service = args.slice(1).join(" ").trim();
+  const rewriteScript = join(vaultPath, "skills", "rewrite-plan", "scripts", "analyze_rewrite.py");
+
+  try {
+    await fs.access(rewriteScript);
+  } catch {
+    return `Vault not found at: ${vaultPath}\nRun /vault init <path> first.`;
+  }
+
+  if (!service) {
+    return [
+      "Usage: /rewrite <service-name>",
+      "       /rewrite order",
+      "",
+      "Example: /rewrite payment-svc",
+    ].join("\n");
+  }
+
+  if (service === "order") {
+    return [
+      `Vault: ${vaultPath}`,
+      "",
+      `  python3 ${rewriteScript} --vault ${vaultPath} --order`,
+    ].join("\n");
+  }
+
+  return [
+    `Vault: ${vaultPath}`,
+    "",
+    `  python3 ${rewriteScript} --vault ${vaultPath} --service ${service}`,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /index command handler
+// ---------------------------------------------------------------------------
+
+export async function handleIndexCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const wikiDir = join(vaultPath, "wiki");
+
+  try {
+    const entries = await rebuildMasterIndex(wikiDir);
+    return `Master index rebuilt: ${entries.length} pages indexed\nWritten to: ${wikiDir}/_master-index.md`;
+  } catch (e) {
+    return `Error rebuilding index: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const INGESTABLE_EXTS = new Set([".md", ".html", ".txt", ".json", ".pdf", ".csv"]);
+
+async function walkIngestable(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  async function walk(d: string) {
+    let entries: import("fs").Dirent[];
+    try {
+      entries = await fs.readdir(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      if (e.isDirectory()) {
+        await walk(join(d, e.name));
+      } else {
+        const ext = e.name.slice(e.name.lastIndexOf(".")).toLowerCase();
+        if (INGESTABLE_EXTS.has(ext)) out.push(join(d, e.name));
+      }
+    }
+  }
+  await walk(dir);
+  return out;
+}
+
+async function countMarkdownFiles(dir: string): Promise<number> {
+  let count = 0;
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const e of entries) {
+    if (e.isDirectory()) count += await countMarkdownFiles(join(dir, e.name));
+    else if (e.name.endsWith(".md")) count++;
+  }
+  return count;
+}
+
+// ---------------------------------------------------------------------------
+// /enrich command handler
+// ---------------------------------------------------------------------------
+
+export async function handleEnrichCommand(args: string[], cwd: string): Promise<string> {
+  const vaultPath = await resolveVaultPath(cwd);
+  const wikiDir = `${vaultPath}/wiki`;
+
+  try {
+    await fs.access(wikiDir);
+  } catch {
+    return `Vault not found at: ${vaultPath}\nRun /vault init <path> first.`;
+  }
+
+  let provider;
+  try {
+    provider = await createProvider();
+  } catch (e) {
+    return `No LLM provider configured.\nError: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  const { enriched, errors } = await enrichWiki(vaultPath, provider);
+
+  if (enriched === 0 && errors === 0) {
+    return [
+      `Vault: ${vaultPath}`,
+      `Provider: ${provider.name}`,
+      "",
+      "All wiki pages already enriched.",
+      "Run /graph to rebuild the knowledge graph with semantic links.",
+    ].join("\n");
+  }
+
+  return [
+    `Vault: ${vaultPath}`,
+    `Provider: ${provider.name}`,
+    "",
+    `✓ Enriched ${enriched} page(s) with summaries, tags, and [[wikilinks]]`,
+    errors > 0 ? `  ${errors} error(s) — some pages may have been skipped` : "",
+    "",
+    "Run /graph to rebuild the knowledge graph.",
+  ].filter(l => l !== "").join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /ask command handler — RAG over wiki
+// ---------------------------------------------------------------------------
+
+export async function handleAskCommand(question: string, cwd: string): Promise<string> {
+  if (!question.trim()) {
+    return "Usage: /ask <question>\nExample: /ask what did I discuss about React hooks?";
+  }
+
+  const vaultPath = await resolveVaultPath(cwd);
+
+  let provider;
+  try {
+    provider = await createProvider();
+  } catch (e) {
+    return `No LLM provider configured.\nError: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  const { answer, sources, wikiPageCount } = await askWiki(vaultPath, question, provider);
+
+  const header = wikiPageCount > 0
+    ? `*Searching wiki… found ${wikiPageCount} relevant page(s)*\n\n`
+    : `*No relevant wiki pages found — answering from model knowledge*\n\n`;
+
+  return header + answer;
+}
+
+// ---------------------------------------------------------------------------
+// /guide command handler
+// ---------------------------------------------------------------------------
+
+export async function handleGuideCommand(): Promise<string> {
+  return `# CCS Code
+
+Sync repos + files → build a wiki → ask questions about it.
+
+## Pipeline
+
+1. \`/vault init\` — create your knowledge base
+2. \`/sync\` — pull from GitHub *(or drop files into \`raw/uploads/\`)*
+3. \`/ingest\` — convert files into wiki pages
+4. \`/enrich\` — add AI summaries + links
+5. \`/graph\` — open visual knowledge graph
+6. \`/ask <question>\` — query your wiki
+
+## Example
+
+\`\`\`bash
+/vault init
+/sync
+/ingest
+/enrich
+/ask what does auth-svc depend on?
+\`\`\`
+
+Type \`?\` for all commands.`;
+}
+
+

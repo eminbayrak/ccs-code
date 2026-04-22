@@ -1,0 +1,44 @@
+{
+    "hooks": [
+        {
+            "event": "pre_tool_use",
+            "matcher": {
+                "toolNames": [
+                    "write_file"
+                ],
+                "riskClasses": [
+                    "write"
+                ]
+            },
+            "handler": {
+                "type": "command",
+                "command": "echo",
+                "args": [
+                    "[Hook] About to write a file - confirm cautiously"
+                ],
+                "continueOnError": true
+            },
+            "priority": 10
+        },
+        {
+            "event": "session_start",
+            "handler": {
+                "type": "command",
+                "command": "echo",
+                "args": [
+                    "[CCS Session] Starting..."
+                ],
+                "continueOnError": true
+            }
+        },
+        {
+            "event": "permission_request",
+            "handler": {
+                "type": "http",
+                "url": "http://localhost:3000/hooks/permission",
+                "method": "POST",
+                "timeout": 5000
+            }
+        }
+    ]
+}
