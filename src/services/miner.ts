@@ -148,95 +148,52 @@ export class MinerService {
     try {
       const workspaces = await fs.readdir(cursorPath).catch(() => []);
       for (const workspace of workspaces) {
-        const dbPath = join(cursorPath, workspace, 'state.vscdb');
+        const dbPath = join(cursorPath, workspace, "state.vscdb");
         try {
           const stats = await fs.stat(dbPath).catch(() => null);
           if (!stats) continue;
 
           const db = new Database(dbPath);
-          // Cursor stores chat in ItemTable, usually key 'composer.composerData' or similar
-          // This is a heuristic, Cursor internal formats change
-          const rows = db.query("SELECT key, value FROM ItemTable WHERE key LIKE 'composer.composerData%'").all() as any[];
-
-          for (const row of rows) {
+          
+          // 1. Check aiService.generations (User prompts)
+          const genRows = db.query("SELECT value FROM ItemTable WHERE key = 'aiService.generations'").all() as any[];
+          for (const row of genRows) {
             try {
-              const data = JSON.parse(row.value);
-              if (data.allComposers) {
-                for (const comp of data.allComposers) {
-                  const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
-                  if (comp.conversation) {
-                    for (const msg of comp.conversation) {
-                      const role = msg.type === 1 ? 'user' : 'assistant';
-                      const content = msg.text || '';
-                      if (content) messages.push({ role, content });
-                    }
-                  }
-
-                  if (messages.length > 0) {
+              const gens = JSON.parse(row.value);
+              if (Array.isArray(gens)) {
+                for (const gen of gens) {
+                  if (gen.textDescription) {
                     memories.push({
-                      tool: 'cursor',
-                      sessionId: comp.composerId || workspace,
-                      timestamp: comp.createdAt ? new Date(comp.createdAt).toISOString() : new Date().toISOString(),
-                      messages
+                      tool: "cursor",
+                      sessionId: gen.generationUUID || workspace,
+                      timestamp: gen.unixMs ? new Date(gen.unixMs).toISOString() : new Date().toISOString(),
+                      messages: [{ role: "user", content: gen.textDescription }]
                     });
                   }
                 }
               }
-            } catch (e) { }
+            } catch (e) {}
           }
-          db.close();
-        } catch (e) { }
-      }
-    } catch (e) {
-      console.error('Error harvesting Cursor:', e);
-    }
 
-    return memories;
-  }
-
-  /**
-   * Harvests memories from VS Code Copilot
-   */
-  async harvestVSCode(): Promise<MemoryEntry[]> {
-    const memories: MemoryEntry[] = [];
-    const vscodePath = this.getVSCodePath();
-
-    try {
-      const workspaces = await fs.readdir(vscodePath).catch(() => []);
-      for (const workspace of workspaces) {
-        const dbPath = join(vscodePath, workspace, "state.vscdb");
-        try {
-          const stats = await fs.stat(dbPath).catch(() => null);
-          if (!stats) continue;
-
-          const db = new Database(dbPath);
-          const rows = db.query(
-            "SELECT key, value FROM ItemTable WHERE key = 'memento/github.copilot.chat.history'",
-          ).all() as any[];
-
-          for (const row of rows) {
+          // 2. Check composer.composerData
+          const compRows = db.query("SELECT value FROM ItemTable WHERE key = 'composer.composerData'").all() as any[];
+          for (const row of compRows) {
             try {
-              const history = JSON.parse(row.value);
-              if (Array.isArray(history)) {
-                for (const session of history) {
+              const data = JSON.parse(row.value);
+              if (data.allComposers) {
+                for (const comp of data.allComposers) {
                   const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
-                  if (session.requests) {
-                    for (const req of session.requests) {
-                      messages.push({ role: "user", content: req.message || "" });
-                      if (req.response) {
-                        const responseText = req.response
-                          .map((r: any) => r.value || "")
-                          .join("\n");
-                        messages.push({ role: "assistant", content: responseText });
-                      }
+                  if (comp.conversation) {
+                    for (const msg of comp.conversation) {
+                      const role = msg.type === 1 ? "user" : "assistant";
+                      if (msg.text) messages.push({ role, content: msg.text });
                     }
                   }
-
                   if (messages.length > 0) {
                     memories.push({
-                      tool: "vscode",
-                      sessionId: session.id || workspace,
-                      timestamp: new Date().toISOString(), // VSCode history doesn't always have timestamps per session
+                      tool: "cursor",
+                      sessionId: comp.composerId || workspace,
+                      timestamp: comp.createdAt ? new Date(comp.createdAt).toISOString() : new Date().toISOString(),
                       messages,
                     });
                   }
@@ -248,8 +205,69 @@ export class MinerService {
         } catch (e) {}
       }
     } catch (e) {
-      console.error("Error harvesting VS Code:", e);
+      console.error("Error harvesting Cursor:", e);
     }
+
+    return memories;
+  }
+
+  /**
+   * Harvests memories from VS Code Copilot
+   */
+  async harvestVSCode(): Promise<MemoryEntry[]> {
+    const memories: MemoryEntry[] = [];
+    const vscodePath = this.getVSCodePath();
+    const globalPath = join(homedir(), "Library", "Application Support", "Code", "User", "globalStorage");
+
+    console.log(`Scanning VSCode path: ${vscodePath}`);
+    console.log(`Scanning Global path: ${globalPath}`);
+
+    const scanJsonlDir = async (dir: string) => {
+      try {
+        const files = await fs.readdir(dir).catch(() => []);
+        for (const file of files) {
+          if (file.endsWith(".jsonl")) {
+            const content = await fs.readFile(join(dir, file), "utf-8");
+            const lines = content.trim().split("\n");
+            const messages: Array<{ role: "user" | "assistant"; content: string }> = [];
+            let timestamp = new Date().toISOString();
+            
+            for (const line of lines) {
+              try {
+                const entry = JSON.parse(line);
+                // Kind 2 often contains the message/response object
+                if (entry.kind === 2 && entry.v?.message?.text) {
+                  messages.push({ role: "user", content: entry.v.message.text });
+                } else if (entry.kind === 1 && entry.k?.includes("inputText") && entry.v) {
+                   // Some versions store input text as kind 1 updates
+                   messages.push({ role: "user", content: entry.v });
+                }
+              } catch (e) {}
+            }
+            if (messages.length > 0) {
+              memories.push({
+                tool: "vscode",
+                sessionId: file.replace(".jsonl", ""),
+                timestamp,
+                messages
+              });
+            }
+          }
+        }
+      } catch (e) {}
+    };
+
+    // 1. Scan workspace storage for chatSessions
+    try {
+      const workspaces = await fs.readdir(vscodePath).catch(() => []);
+      for (const workspace of workspaces) {
+        const chatSessionsPath = join(vscodePath, workspace, "chatSessions");
+        await scanJsonlDir(chatSessionsPath);
+      }
+    } catch (e) {}
+
+    // 2. Scan global storage for emptyWindowChatSessions
+    await scanJsonlDir(join(globalPath, "emptyWindowChatSessions"));
 
     return memories;
   }
