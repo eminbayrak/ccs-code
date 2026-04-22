@@ -14,21 +14,148 @@ export type GitHubSyncConfig = {
     token?: string;
 };
 
+// ---------------------------------------------------------------------------
+// GitHub API utilities — shared by vault sync and migration modules
+// ---------------------------------------------------------------------------
+
+export function resolveToken(token?: string): string | undefined {
+    return token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN;
+}
+
 function ghHeaders(token?: string): Record<string, string> {
     const h: Record<string, string> = {
         Accept: "application/vnd.github+json",
         "User-Agent": "CCS-Code/1.0",
         "X-GitHub-Api-Version": "2022-11-28",
     };
-    const t = token ?? process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN;
+    const t = resolveToken(token);
     if (t) h.Authorization = `Bearer ${t}`;
     return h;
 }
 
-async function ghFetch<T>(path: string, token?: string): Promise<T> {
-    const res = await fetch(`https://api.github.com${path}`, { headers: ghHeaders(token) });
-    if (!res.ok) throw new Error(`GitHub ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    return res.json() as Promise<T>;
+/** Build the API base URL — supports GitHub Enterprise Server */
+export function buildApiBase(host?: string): string {
+    if (!host || host === "github.com") return "https://api.github.com";
+    return `https://${host}/api/v3`;
+}
+
+/** Fetch with exponential backoff — handles rate limits and transient errors */
+async function ghFetchWithRetry<T>(
+    url: string,
+    token?: string,
+    maxRetries = 4
+): Promise<T> {
+    let attempt = 0;
+    while (true) {
+        const res = await fetch(url, { headers: ghHeaders(token) });
+
+        if (res.ok) return res.json() as Promise<T>;
+
+        // Rate limit — respect Retry-After or X-RateLimit-Reset
+        if (res.status === 429 || res.status === 403) {
+            const retryAfter = res.headers.get("Retry-After");
+            const resetAt = res.headers.get("X-RateLimit-Reset");
+            let waitMs = 60_000; // default 1 min
+
+            if (retryAfter) {
+                waitMs = parseInt(retryAfter, 10) * 1000;
+            } else if (resetAt) {
+                waitMs = Math.max(0, parseInt(resetAt, 10) * 1000 - Date.now()) + 1000;
+            }
+
+            if (attempt < maxRetries) {
+                await new Promise((r) => setTimeout(r, waitMs));
+                attempt++;
+                continue;
+            }
+        }
+
+        // Transient server error — exponential backoff
+        if (res.status >= 500 && attempt < maxRetries) {
+            const wait = Math.min(1000 * 2 ** attempt, 30_000);
+            await new Promise((r) => setTimeout(r, wait));
+            attempt++;
+            continue;
+        }
+
+        const body = await res.text();
+        throw new Error(`GitHub ${res.status}: ${body.slice(0, 200)}`);
+    }
+}
+
+async function ghFetch<T>(path: string, token?: string, host?: string): Promise<T> {
+    const base = buildApiBase(host);
+    return ghFetchWithRetry<T>(`${base}${path}`, token);
+}
+
+// ---------------------------------------------------------------------------
+// Migration helpers — fetch file content and file tree
+// ---------------------------------------------------------------------------
+
+/** Fetch the raw text content of a single file from a GitHub repo */
+export async function fetchFileContent(
+    owner: string,
+    repo: string,
+    path: string,
+    token?: string,
+    host?: string
+): Promise<string> {
+    const data = await ghFetch<{ content: string; encoding: string }>(
+        `/repos/${owner}/${repo}/contents/${path}`,
+        token,
+        host
+    );
+    if (data.encoding === "base64") {
+        return Buffer.from(data.content.replace(/\n/g, ""), "base64").toString("utf-8");
+    }
+    return data.content;
+}
+
+/** Fetch the full recursive file tree for a repo — returns all file paths */
+export async function fetchFileTree(
+    owner: string,
+    repo: string,
+    token?: string,
+    host?: string,
+    branch = "HEAD"
+): Promise<string[]> {
+    const data = await ghFetch<{ tree: Array<{ path: string; type: string }> }>(
+        `/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+        token,
+        host
+    );
+    return data.tree.filter((n) => n.type === "blob").map((n) => n.path);
+}
+
+/** Search code across the org — returns matches with repo and file path */
+export async function searchOrgCode(
+    org: string,
+    query: string,
+    token?: string,
+    host?: string
+): Promise<Array<{ repoFullName: string; filePath: string; htmlUrl: string }>> {
+    const encoded = encodeURIComponent(`${query} org:${org}`);
+    const data = await ghFetch<{
+        items: Array<{ repository: { full_name: string }; path: string; html_url: string }>;
+    }>(`/search/code?q=${encoded}&per_page=10`, token, host);
+
+    return data.items.map((item) => ({
+        repoFullName: item.repository.full_name,
+        filePath: item.path,
+        htmlUrl: item.html_url,
+    }));
+}
+
+/** Parse owner/repo from a full GitHub URL */
+export function parseRepoUrl(url: string): { host: string; owner: string; repo: string } | null {
+    try {
+        const u = new URL(url);
+        const parts = u.pathname.replace(/^\//, "").split("/");
+        if (parts.length < 2) return null;
+        return { host: u.host, owner: parts[0] ?? "", repo: parts[1] ?? "" };
+    } catch {
+        return null;
+    }
 }
 
 export async function syncRepo(repo: string, rawDir: string, cfg: GitHubSyncConfig): Promise<string[]> {

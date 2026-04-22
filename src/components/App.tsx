@@ -46,6 +46,7 @@ import {
   initVault,
 } from "../commands/vault";
 import { handleHarvestCommand } from "../commands/harvest";
+import { handleMigrateCommand } from "../commands/migrate";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +91,7 @@ const SLASH_COMMANDS: SuggestionItem[] = [
   { id: "ask", label: "/ask <question>", description: "Ask a question answered from your wiki knowledge base" },
   { id: "harvest", label: "/harvest", description: "Mine AI chat logs (Claude, Cursor, Copilot) into the vault" },
   { id: "guide", label: "/guide", description: "Open interactive how-to guide with diagrams in browser" },
+  { id: "migrate", label: "/migrate <scan|status|context|verify>", description: "Scan a legacy codebase and generate AI rewrite context" },
   // Core commands
   { id: "clear", label: "/clear", description: "Clear conversation history" },
   { id: "skills", label: "/skills", description: "List loaded skills" },
@@ -349,7 +351,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         }
       } else if (suggestionMode === "command") {
         // Commands that require arguments should populate the input for editing.
-        if (item.id === "approve" || item.id === "reject" || item.id === "mode" || item.id === "vault" || item.id === "rewrite" || item.id === "ask") {
+        if (item.id === "approve" || item.id === "reject" || item.id === "mode" || item.id === "vault" || item.id === "rewrite" || item.id === "ask" || item.id === "migrate") {
           setInput(`/${item.id} `);
           setInputKey((k) => k + 1);
         } else {
@@ -566,6 +568,19 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       case "hooks": {
         const output = hooksCommandHandler(args);
         setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+        break;
+      }
+      case "migrate": {
+        const subcommand = args[0] ?? "";
+        const startMsg = subcommand === "scan"
+          ? "Starting migration scan — this may take several minutes..."
+          : subcommand === "status"
+          ? "Loading migration status..."
+          : `Running /migrate ${subcommand}...`;
+        setMessages((prev) => [...prev, createUIMessage("assistant", startMsg)]);
+        handleMigrateCommand(args, process.cwd()).then((output) => {
+          setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+        });
         break;
       }
       case "exit":
