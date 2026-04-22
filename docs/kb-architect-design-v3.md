@@ -250,7 +250,7 @@ Configure in `ccs.yaml` + env variables. Used by `/enrich` and `/ask`.
 
 | Provider | env vars | yaml |
 |---|---|---|
-| Azure OpenAI (UHG) | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` | `provider: azure_openai` |
+| Enterprise (Azure OpenAI) | `CCS_ENTERPRISE_CLIENT_ID`, `CCS_ENTERPRISE_CLIENT_SECRET`, `CCS_ENTERPRISE_AUTH_URL`, `CCS_ENTERPRISE_SCOPE`, `CCS_ENTERPRISE_API_BASE` | `provider: enterprise` |
 | Anthropic Claude | `ANTHROPIC_API_KEY` | `provider: anthropic` |
 | OpenAI | `OPENAI_API_KEY` | `provider: openai` |
 

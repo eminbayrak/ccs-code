@@ -561,8 +561,8 @@ flowchart TD
     <div class="provider">
       <div class="provider-dot" style="background:#0078d4"></div>
       <div>
-        <div style="font-size:13px;font-weight:600">Azure OpenAI (UHG)</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT</div>
+        <div style="font-size:13px;font-weight:600">Enterprise Azure OpenAI</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">CCS_ENTERPRISE_CLIENT_ID + CCS_ENTERPRISE_CLIENT_SECRET</div>
       </div>
     </div>
     <div class="provider">

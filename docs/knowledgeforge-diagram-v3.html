@@ -214,10 +214,10 @@
     const PROVIDERS = [
       {
         name: "Azure OpenAI",
-        sub: "UHG enterprise endpoint",
+        sub: "Enterprise endpoint",
         color: "#0078d4",
-        envVars: ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT"],
-        yaml: `llm:\n  provider: azure_openai\n  model: gpt-4o`,
+        envVars: ["CCS_ENTERPRISE_CLIENT_ID", "CCS_ENTERPRISE_CLIENT_SECRET"],
+        yaml: `llm:\n  provider: enterprise\n  model: gpt-4o`,
       },
       {
         name: "Anthropic Claude",

@@ -52,7 +52,7 @@ What CCS Code does
   - Or use Copilot Chat: @workspace searches all open   
   files including your wiki                               
                                                           
-  3. OpenAI / Codex / API (your UHG Azure setup)
+  3. OpenAI / Codex / API (your Enterprise Azure setup)
   Add a /ask flow to CCS Code that does RAG — search the  
   wiki for relevant pages, inject them as context, then   
   call the model:                                         
