@@ -19,6 +19,7 @@ import { buildIndex } from "./indexBuilder.js";
 import * as status from "./statusTracker.js";
 import type { ServiceRecord, MigrationStatus } from "./statusTracker.js";
 import { estimateScanCost, formatCostPreview } from "./costEstimator.js";
+import { generateScanIntegration } from "./aiIntegration.js";
 
 export type TracerConfig = {
   entryRepoUrl: string;
@@ -403,6 +404,17 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     unresolved,
     errors
   );
+
+  // Generate Claude Code slash commands + AGENTS.md
+  if (analyzed.length > 0) {
+    try {
+      await generateScanIntegration(migrationDir, analyzed, targetLanguage, entryRepoUrl);
+      log(config, `✓ Claude Code commands written to .claude/commands/`);
+      log(config, `✓ AGENTS.md written for Codex`);
+    } catch (e) {
+      errors.push(`ai-integration: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   log(config, `\nScan complete. ${analyzed.length} services analyzed, ${unresolved.length} unresolved.`);
 

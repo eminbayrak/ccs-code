@@ -574,6 +574,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         const subcommand = args[0] ?? "";
         const startMsgMap: Record<string, string> = {
           scan:    "Starting migration scan — this may take several minutes...",
+          rewrite: "Analyzing codebase for migration — this may take several minutes...",
           status:  "Loading migration status...",
           context: "Loading context doc...",
           verify:  "Processing verification...",

@@ -1,17 +1,55 @@
 import { join } from "path";
+import os from "os";
 import { readVaultConfig } from "./vault.js";
 import { trace } from "../migration/tracer.js";
+import { analyze } from "../migration/rewriteTracer.js";
 import { loadPlugins, listPlugins } from "../migration/pluginLoader.js";
 import * as statusTracker from "../migration/statusTracker.js";
 
 // ---------------------------------------------------------------------------
-// Resolve the migration output directory from vault config
+// Resolve the migration output directory.
+// Uses the active vault if configured; falls back to ~/.ccs/migration.
 // ---------------------------------------------------------------------------
 
 async function getMigrationDir(): Promise<string> {
-  const cfg = await readVaultConfig();
-  if (!cfg.activeVault) throw new Error("No active vault. Run /vault init first.");
-  return join(cfg.activeVault, "migration");
+  try {
+    const cfg = await readVaultConfig();
+    if (cfg.activeVault) return join(cfg.activeVault, "migration");
+  } catch { /* no vault configured */ }
+  return join(os.homedir(), ".ccs", "migration");
+}
+
+// ---------------------------------------------------------------------------
+// Pre-flight validation — surface missing credentials before starting a scan
+// ---------------------------------------------------------------------------
+
+type SetupIssue = { severity: "error" | "warn"; message: string };
+
+function validateSetup(requireGithub: boolean): SetupIssue[] {
+  const issues: SetupIssue[] = [];
+
+  if (!process.env.CCS_ANTHROPIC_API_KEY) {
+    issues.push({
+      severity: "error",
+      message: "CCS_ANTHROPIC_API_KEY is not set. Add it to your .env file or environment.\n  Get a key at https://console.anthropic.com/",
+    });
+  }
+
+  if (requireGithub) {
+    const hasGithubToken =
+      process.env.CCS_GITHUB_TOKEN ||
+      process.env.GITHUB_TOKEN ||
+      process.env.GITHUB_PRIVATE_TOKEN;
+
+    if (!hasGithubToken) {
+      issues.push({
+        severity: "error",
+        message: "No GitHub token found. Set CCS_GITHUB_TOKEN (or GITHUB_TOKEN) in your environment.\n  Generate one at GitHub → Settings → Developer settings → Personal access tokens\n  Required scopes: repo, read:org",
+      });
+    }
+  }
+
+  return issues;
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +70,15 @@ async function handleScan(args: string[]): Promise<string> {
     if ((a === "--org"    || a === "-o") && args[i + 1]) org         = args[++i] ?? "";
     if ((a === "--plugin" || a === "-p") && args[i + 1]) pluginName  = args[++i] ?? "";
     if (a === "--yes" || a === "-y") autoConfirm = true;
+  }
+
+  const setupIssues = validateSetup(true);
+  if (setupIssues.length > 0) {
+    return [
+      "### Setup Required",
+      "",
+      ...setupIssues.map((i) => `${i.severity === "error" ? "✗" : "⚠"} ${i.message}`),
+    ].join("\n");
   }
 
   if (!repoUrl) {
@@ -274,6 +321,128 @@ async function handleDone(args: string[]): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// /migrate rewrite --repo <url> --to <language> [--from <framework>] [--yes]
+// ---------------------------------------------------------------------------
+
+async function handleRewrite(args: string[]): Promise<string> {
+  const setupIssues = validateSetup(true);
+  if (setupIssues.length > 0) {
+    return [
+      "### Setup Required",
+      "",
+      ...setupIssues.map((i) => `${i.severity === "error" ? "✗" : "⚠"} ${i.message}`),
+    ].join("\n");
+  }
+
+  let repoUrl = "";
+  let targetLanguage = "python";
+  let sourceFrameworkHint = "";
+  let autoConfirm = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === "--repo"   || a === "-r") && args[i + 1]) repoUrl             = args[++i] ?? "";
+    if ((a === "--to"     || a === "-t") && args[i + 1]) targetLanguage       = args[++i] ?? targetLanguage;
+    if ((a === "--from"   || a === "-f") && args[i + 1]) sourceFrameworkHint  = args[++i] ?? "";
+    if (a === "--yes" || a === "-y") autoConfirm = true;
+  }
+
+  if (!repoUrl) {
+    return [
+      "Usage: /migrate rewrite --repo <github-url> --to <language> [options]",
+      "",
+      "Analyzes a full codebase and generates per-component migration context docs.",
+      "Outputs Claude Code slash commands and an AGENTS.md for Codex — ready to use.",
+      "",
+      "Options:",
+      "  --to <language>     Target language: python, go, typescript, java (default: python)",
+      "  --from <framework>  Override auto-detected source framework: aspnet-core, spring-boot, express",
+      "  --yes               Skip cost confirmation and proceed immediately",
+      "",
+      "Examples:",
+      "  /migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --yes",
+      "  /migrate rewrite --repo https://github.com/myorg/SpringApp --to typescript --from spring-boot --yes",
+      "",
+      "Output (in migration/rewrite/):",
+      "  context/<Component>.md   — per-component migration context docs",
+      "  .claude/commands/        — Claude Code slash commands (copy to your new project)",
+      "  AGENTS.md                — Codex agent context file",
+      "  HOW-TO-MIGRATE.md        — step-by-step execution guide",
+      "  _index.md                — full migration knowledge base",
+    ].join("\n");
+  }
+
+  const migrationDir = await getMigrationDir();
+  const logs: string[] = [];
+
+  try {
+    const result = await analyze({
+      repoUrl,
+      targetLanguage,
+      sourceFrameworkHint: sourceFrameworkHint || undefined,
+      outputDir: migrationDir,
+      githubConfig: {
+        org: repoUrl.replace(/https?:\/\/[^/]+\//, "").split("/")[0] ?? "",
+        token: process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN,
+      },
+      onProgress: (msg) => logs.push(msg),
+      onCostPreview: async (preview) => {
+        logs.push(preview);
+        if (autoConfirm) { logs.push("Auto-confirmed (--yes)."); return true; }
+        return false;
+      },
+    });
+
+    // Cost-preview abort
+    if (!result.indexPath && !result.reportPath && result.components.length === 0 && result.errors.length === 0) {
+      return [
+        "### Cost Estimate",
+        "",
+        ...logs,
+        "",
+        `Add \`--yes\` to proceed:`,
+        `  /migrate rewrite --repo ${repoUrl} --to ${targetLanguage} --yes`,
+      ].join("\n");
+    }
+
+    const summary = [
+      `### Rewrite KB Complete`,
+      ``,
+      ...logs,
+      ``,
+      `**Framework:** ${result.frameworkInfo.sourceFramework} (${result.frameworkInfo.sourceLanguage}) → ${result.frameworkInfo.targetFramework} (${result.frameworkInfo.targetLanguage})`,
+      `**Components analyzed:** ${result.components.length}`,
+      `**Migration order:** ${result.migrationOrder.join(" → ")}`,
+    ];
+
+    if (result.unanalyzed.length > 0) {
+      summary.push(``, `⚠ Failed: ${result.unanalyzed.join(", ")}`);
+    }
+
+    const migDir = await getMigrationDir();
+    summary.push(
+      ``,
+      `**Generated files:**`,
+      `- Context docs:      \`${migDir}/rewrite/context/\``,
+      `- Claude Code cmds:  \`${migDir}/rewrite/.claude/commands/\`  ← copy to your new project`,
+      `- Codex context:     \`${migDir}/rewrite/AGENTS.md\``,
+      `- Execution guide:   \`${migDir}/rewrite/HOW-TO-MIGRATE.md\``,
+      `- Knowledge base:    \`${migDir}/rewrite/_index.md\``,
+      ``,
+      `**To start rewriting with Claude Code:**`,
+      `1. Scaffold your new ${result.frameworkInfo.targetLanguage} project`,
+      `2. Copy \`rewrite/.claude/\` into your new project root`,
+      `3. Open Claude Code there and run: \`/project:rewrite-${result.migrationOrder[0] ?? "FirstComponent"}\``,
+      `4. Continue in order: ${result.migrationOrder.slice(0, 4).join(" → ")}${result.migrationOrder.length > 4 ? "…" : ""}`,
+    );
+
+    return summary.join("\n");
+  } catch (e) {
+    return `### Rewrite Analysis Failed\n\n${e instanceof Error ? e.message : String(e)}\n\nLogs:\n${logs.join("\n")}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // /migrate plugin list
 // ---------------------------------------------------------------------------
 
@@ -326,6 +495,7 @@ export async function handleMigrateCommand(
 
   switch (subcommand) {
     case "scan":    return handleScan(rest);
+    case "rewrite": return handleRewrite(rest);
     case "status":  return handleStatus();
     case "context": return handleContext(rest);
     case "verify":  return handleVerify(rest);
@@ -334,23 +504,24 @@ export async function handleMigrateCommand(
     case "plugin":  return handlePlugin(rest);
     default:
       return [
-        "### /migrate — Migration Context Builder",
+        "### /migrate — Migration Intelligence Platform",
         "",
-        "Scans a legacy codebase and generates AI rewrite context documents.",
+        "Analyzes legacy codebases and generates AI rewrite context documents.",
+        "Actual rewriting is done by Claude Code / Codex using those docs.",
         "",
         "**Subcommands:**",
-        "  `/migrate scan --repo <url> --lang <language> [--yes]`  — scan a repo and build the knowledge base",
-        "  `/migrate status`                               — show migration progress table",
-        "  `/migrate context <ServiceName>`                — print a service context doc",
-        "  `/migrate verify <ServiceName> --by <name>`     — mark a service as human-verified",
-        "  `/migrate done <ServiceName>`                    — mark a verified service as fully rewritten",
-        "  `/migrate rescan <ServiceName>`                  — instructions to re-analyze a service",
-        "  `/migrate plugin list`                           — list installed scanner plugins",
+        "  `/migrate scan --repo <url> --lang <language> [--yes]`       — scan external SOAP services called by a Node.js repo",
+        "  `/migrate rewrite --repo <url> --to <language> [--yes]`      — analyze a full codebase for framework-to-framework migration",
+        "  `/migrate status`                                              — show migration progress table",
+        "  `/migrate context <ServiceName>`                               — print a service context doc",
+        "  `/migrate verify <ServiceName> --by <name>`                   — mark a service as human-verified",
+        "  `/migrate done <ServiceName>`                                  — mark a verified service as fully rewritten",
+        "  `/migrate rescan <ServiceName>`                                — instructions to re-analyze a service",
+        "  `/migrate plugin list`                                         — list installed scanner plugins",
         "",
-        "**Supported languages:** csharp, typescript, java, python, go",
-        "",
-        "**Example:**",
-        "  `/migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp`",
+        "**Examples:**",
+        "  `/migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp --yes`",
+        "  `/migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --yes`",
       ].join("\n");
   }
 }

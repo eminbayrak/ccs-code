@@ -1,10 +1,11 @@
 {
-  "name": "my-cli-app",
+  "name": "ccs-code",
   "module": "index.ts",
   "type": "module",
   "private": true,
   "scripts": {
     "start": "bun run src/main.tsx",
+    "dev": "bun --watch src/main.tsx",
     "build": "bun build ./src/main.tsx --compile --outfile ccs",
     "build:plugins": "bun build ./plugins/migrate-soap/index.ts --outfile ./plugins/migrate-soap/index.js --format esm",
     "build:all": "bun run build && bun run build:plugins",
