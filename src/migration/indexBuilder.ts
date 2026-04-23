@@ -47,12 +47,16 @@ Respond with ONLY the overview paragraph. No headers, no lists.`,
 // Find shared services — called by 2+ other services
 // ---------------------------------------------------------------------------
 
+const PLACEHOLDER_NS = new Set(["unknown", "none", "n/a", "null", "undefined"]);
+
 function findSharedServices(analyses: ServiceAnalysis[]): string[] {
   const calledBy = new Map<string, number>();
   for (const a of analyses) {
     for (const nested of a.nestedServiceCalls) {
       const ns = nested.split(".")[0];
-      if (ns) calledBy.set(ns, (calledBy.get(ns) ?? 0) + 1);
+      if (ns && !PLACEHOLDER_NS.has(ns.toLowerCase())) {
+        calledBy.set(ns, (calledBy.get(ns) ?? 0) + 1);
+      }
     }
   }
   return [...calledBy.entries()]
