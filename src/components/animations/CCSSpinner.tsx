@@ -21,6 +21,9 @@ const THINKING_LABELS = [
   "Osmosing…",
   "Ramening…",
   "Whatchamacalling…",
+  "Shenaniganning…",
+  "Razzmatazzing…",
+  "Optum-izing…",
 ];
 
 const STALLED_LABELS = [

@@ -343,7 +343,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       activeAlert.lines.push("");
       continue;
     }
-    if (cl.kind !== "alert" && cl.kind !== "blockquote" && cl.kind !== "blank" && activeAlert) {
+    if (activeAlert) {
       flushAlert();
     }
 

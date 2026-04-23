@@ -4,6 +4,7 @@ import React from "react";
 import { render } from "ink";
 import gradient from "gradient-string";
 import { App } from "./components/App";
+import { installPasteInterceptor } from "./hooks/pasteInterceptor.js";
 import { getGlobalHookEngine } from "./hooks/engine.js";
 import { loadHooksFromProject } from "./hooks/loader.js";
 import { resolve, join } from "path";
@@ -34,6 +35,9 @@ program
   .option("-p, --prompt <prompt>", "Initial prompt to start the session")
   .option("--compact", "Use a compact startup banner")
   .action((options) => {
+    // Must run before render() — wraps Ink's stdin listeners before they're registered
+    installPasteInterceptor();
+
     const hookEngine = getGlobalHookEngine();
     const projectRoot = resolve(process.cwd());
     loadHooksFromProject(projectRoot, hookEngine);
@@ -149,7 +153,7 @@ program
   .description("Ask a question about your knowledge base (non-interactive)")
   .action((questionParts: string[]) => {
     const question = questionParts.join(" ");
-    // Launch interactive mode with the question pre-filled
+    installPasteInterceptor();
     const hookEngine = getGlobalHookEngine();
     loadHooksFromProject(resolve(process.cwd()), hookEngine);
     console.clear();

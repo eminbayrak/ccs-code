@@ -1,27 +1,29 @@
 import { useEffect, useRef } from "react";
+import { setPasteHandler } from "./pasteInterceptor.js";
 
 /**
- * Disables bracketed paste mode so pasted text arrives as plain keystrokes.
+ * Register a paste handler with the module-level paste interceptor.
+ * The interceptor itself is installed in main.tsx BEFORE render(), which
+ * ensures it wraps Ink's stdin listeners before they're registered.
  *
- * Without this, modern terminals wrap paste in \x1b[200~...\x1b[201~.
- * Ink interprets the leading \x1b as an escape key press, and the trailing
- * [201~ lands as literal text in the input — breaking paste entirely.
- *
- * Disabling bracketed paste mode makes paste indistinguishable from typing,
- * which ink-text-input handles correctly via its normal onChange path.
- *
- * Returns a ref that is always false (kept for API compatibility so callers
- * don't need to change their useInput guards).
+ * Returns a ref that is always false (kept for API compatibility so the
+ * useInput guard in App.tsx doesn't need to change).
  */
 export function usePaste(
-  _onPaste: (text: string) => void,
+  onPaste: (text: string) => void,
   disabled = false,
 ): React.MutableRefObject<boolean> {
   const isPastingRef = useRef(false);
+  const onPasteRef   = useRef(onPaste);
+  useEffect(() => { onPasteRef.current = onPaste; });
 
   useEffect(() => {
-    if (disabled) return;
-    process.stdout.write("\x1b[?2004l");
+    if (disabled) {
+      setPasteHandler(null);
+      return;
+    }
+    setPasteHandler((text) => onPasteRef.current(text));
+    return () => setPasteHandler(null);
   }, [disabled]);
 
   return isPastingRef;

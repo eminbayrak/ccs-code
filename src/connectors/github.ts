@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import { promises as fs } from "fs";
 import { join } from "path";
 import { z } from "zod";
@@ -56,20 +57,112 @@ async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: nu
     }
 }
 
-/** Fetch with exponential backoff — handles rate limits and transient errors */
+
+// ---------------------------------------------------------------------------
+// gh CLI integration — preferred over HTTP when available (no rate limit issues)
+// ---------------------------------------------------------------------------
+
+let _hasGhCli: boolean | null = null;
+
+export function hasGhCliAvailable(): boolean { return hasGhCli(); }
+
+// ---------------------------------------------------------------------------
+// Rate limit check — call this before a scan to surface warnings early
+// ---------------------------------------------------------------------------
+
+export type RateLimitInfo = {
+  remaining: number;
+  limit: number;
+  resetAt: Date;
+  resetInMinutes: number;
+  isExhausted: boolean;
+};
+
+export function checkRateLimit(): RateLimitInfo | null {
+  try {
+    const raw = execSync("gh api /rate_limit --jq '.resources.core'", {
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 10_000,
+    }).toString();
+    const data = JSON.parse(raw) as { remaining: number; limit: number; reset: number };
+    const resetAt = new Date(data.reset * 1000);
+    const resetInMinutes = Math.ceil((resetAt.getTime() - Date.now()) / 60_000);
+    return {
+      remaining: data.remaining,
+      limit: data.limit,
+      resetAt,
+      resetInMinutes,
+      isExhausted: data.remaining === 0,
+    };
+  } catch {
+    // gh CLI not available or quota check failed — not critical
+    return null;
+  }
+}
+
+function hasGhCli(): boolean {
+    if (_hasGhCli !== null) return _hasGhCli;
+    try {
+        // Use `gh auth token` — exits 0 if any token is available (env var or keyring)
+        // `gh auth status` exits 1 when keyring is broken even if a token exists
+        execSync("gh auth token", { stdio: "ignore" });
+        _hasGhCli = true;
+    } catch {
+        _hasGhCli = false;
+    }
+    return _hasGhCli;
+}
+
+/**
+ * Fetch a GitHub API path via the `gh` CLI.
+ * The CLI handles auth automatically and uses the OAuth token (higher rate limits).
+ * IMPORTANT: preserve the full path including query string (e.g. ?recursive=1).
+ */
+function fetchWithGhCli<T>(url: string): T {
+    // Extract path+query from full URL or use as-is if already a path
+    let apiPath: string;
+    try {
+        const u = new URL(url);
+        apiPath = u.pathname + u.search; // preserve ?recursive=1 etc.
+    } catch {
+        apiPath = url.startsWith("/") ? url : `/${url}`;
+    }
+    const output = execSync(`gh api '${apiPath}'`, {
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 30_000,
+    }).toString();
+    return JSON.parse(output) as T;
+}
+
+/** Fetch with gh CLI preferred, HTTP as fallback with exponential backoff */
 async function ghFetchWithRetry<T>(
     url: string,
     token?: string,
     maxRetries = 2
 ): Promise<T> {
+    // Prefer gh CLI — it uses OAuth and has much higher rate limits
+    if (hasGhCli()) {
+        try {
+            return fetchWithGhCli<T>(url);
+        } catch (cliErr) {
+            // Only fall through if CLI itself failed (not a 404/auth error worth reporting)
+            const msg = cliErr instanceof Error ? cliErr.message : String(cliErr);
+            if (msg.includes("HTTP 404") || msg.includes("Not Found")) {
+                throw new Error(`Repository or resource not found: ${url}`);
+            }
+            // CLI failed for other reason — try HTTP
+        }
+    }
+
+    // HTTP fallback
     let attempt = 0;
     while (true) {
         const res = await fetchWithTimeout(url, { headers: ghHeaders(token) }, 20_000);
 
         if (res.ok) return res.json() as Promise<T>;
 
+        const body = await res.text();
 
-        // Rate limit — only retry if the server tells us when to retry
         if (res.status === 429 || res.status === 403) {
             const retryAfter = res.headers.get("Retry-After");
             const resetAt = res.headers.get("X-RateLimit-Reset");
@@ -78,7 +171,6 @@ async function ghFetchWithRetry<T>(
                 const waitMs = retryAfter
                     ? parseInt(retryAfter, 10) * 1000
                     : Math.max(0, parseInt(resetAt!, 10) * 1000 - Date.now()) + 1000;
-                // Cap wait at 10s to avoid multi-minute hangs
                 const cappedWait = Math.min(waitMs, 10_000);
                 if (attempt < maxRetries) {
                     await new Promise((r) => setTimeout(r, cappedWait));
@@ -86,14 +178,12 @@ async function ghFetchWithRetry<T>(
                     continue;
                 }
             }
-            // No retry headers — fail immediately with a useful message
             if (res.status === 403) {
-                throw new Error(`GitHub 403: Forbidden. Set GITHUB_TOKEN or GITHUB_PRIVATE_TOKEN in your .env. Detail: ${body.slice(0, 150)}`);
+                throw new Error(`GitHub 403. Install gh CLI (brew install gh && gh auth login) or set GITHUB_TOKEN in .env. Detail: ${body.slice(0, 100)}`);
             }
-            throw new Error(`GitHub rate limited (${res.status}). Set GITHUB_TOKEN in .env for higher limits. ${body.slice(0, 100)}`);
+            throw new Error(`GitHub rate limited. Install gh CLI (brew install gh && gh auth login) for unlimited access. ${body.slice(0, 100)}`);
         }
 
-        // Transient server error — exponential backoff, capped at 5s
         if (res.status >= 500 && attempt < maxRetries) {
             const wait = Math.min(1000 * 2 ** attempt, 5_000);
             await new Promise((r) => setTimeout(r, wait));

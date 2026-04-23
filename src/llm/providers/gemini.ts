@@ -3,12 +3,12 @@ import type { LLMProvider, Message, ToolDefinition, ToolCall } from "./base.js";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const MAX_TOOL_ITERATIONS = 8;
 
-// Retry on 429 with exponential backoff: 15s → 30s → 60s
-async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3): Promise<Response> {
+// Retry on 429 with exponential backoff: 5s → 10s → 20s (max 2 retries)
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const response = await fetch(url, options);
     if (response.status !== 429 || attempt === maxRetries) return response;
-    const delay = 15_000 * Math.pow(2, attempt);
+    const delay = 5_000 * Math.pow(2, attempt);
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
   return fetch(url, options);
