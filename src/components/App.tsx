@@ -467,10 +467,18 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       // CCS Code vault commands
       // ------------------------------------------------------------------
       case "vault": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "vault", name: "Managing vault", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleVaultCommand(args, process.cwd()).then((output) => {
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+        }).catch(err => {
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Running /vault...")]);
         break;
       }
       case "sync": {

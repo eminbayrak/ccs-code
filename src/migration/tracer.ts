@@ -1,18 +1,14 @@
 import { promises as fs } from "fs";
 import { join } from "path";
-import os from "os";
 import { execSync } from "child_process";
 import {
-  fetchFileContent,
-  fetchFileTree,
   parseRepoUrl,
-  hasGhCliAvailable,
   checkRateLimit,
 } from "../connectors/github.js";
 import { createProvider, loadConfig } from "../llm/index.js";
 import { runPluginScan, groupByNamespace } from "./scanner.js";
 import type { MigratePlugin, ServiceReference } from "./types.js";
-import { resolveNamespace, findWsdlFiles } from "./resolver.js";
+import { resolveNamespace } from "./resolver.js";
 import type { GithubConfig } from "./resolver.js";
 import { analyzeService } from "./analyzer.js";
 import type { ServiceAnalysis } from "./analyzer.js";
@@ -111,94 +107,68 @@ const GIT_ENV = {
   GIT_SSH_COMMAND: "false",       // refuse SSH — force HTTPS
 };
 
-async function cloneAndReadFiles(
-  repoUrl: string,
-  extensions: string[],
-  token?: string,
-  onLog?: (msg: string) => void
-): Promise<{ files: Array<{ path: string; content: string }>; tmpDir: string }> {
-  const tmpDir = join(os.tmpdir(), `ccs-scan-${Date.now()}`);
-  await fs.mkdir(tmpDir, { recursive: true });
-
-  const parsed = parseRepoUrl(repoUrl);
-  const slug   = parsed ? `${parsed.owner}/${parsed.repo}` : repoUrl;
-  const cloneUrl = buildCloneUrl(repoUrl, token);
-
-  onLog?.(`Cloning ${slug} via HTTPS...`);
-  execSync(
-    `git clone --depth 1 --single-branch --quiet '${cloneUrl}' '${tmpDir}'`,
-    { env: GIT_ENV, stdio: ["ignore", "ignore", "ignore"], timeout: 120_000 }
-  );
-
-  const extSet = new Set(extensions);
-  const files: Array<{ path: string; content: string }> = [];
-  await walkDir(tmpDir, extSet, tmpDir, files);
-  return { files, tmpDir };
-}
-
-async function fetchRepoFiles(
-  owner: string,
-  repo: string,
-  config: GithubConfig,
-  extensions: string[],
-  repoUrl?: string,
-  onLog?: (msg: string) => void
-): Promise<{ files: Array<{ path: string; content: string }>; tmpDir: string | null }> {
-  // Prefer git clone — no API rate limits, no SSH prompts
-  if (repoUrl) {
-    try {
-      return await cloneAndReadFiles(repoUrl, extensions, config.token, onLog);
-    } catch (e) {
-      onLog?.(`Clone failed (${e instanceof Error ? e.message : String(e)}), trying API...`);
-    }
-  }
-
-  // API fallback
-  const tree = await fetchFileTree(owner, repo, config.token, config.host);
-  const extSet = new Set(extensions);
-  const matching = tree.filter((p) => {
-    const dot = p.lastIndexOf(".");
-    return dot !== -1 && extSet.has(p.slice(dot));
-  });
-  const results = await Promise.all(
-    matching.map(async (filePath) => {
-      try {
-        const content = await fetchFileContent(owner, repo, filePath, config.token, config.host);
-        return { path: filePath, content };
-      } catch {
-        return null;
-      }
-    })
-  );
-  return {
-    files: results.filter((r): r is { path: string; content: string } => r !== null),
-    tmpDir: null,
-  };
-}
-
-async function fetchServiceFiles(
+// Clone a repo once to a persistent path under migrationDir/repos/.
+// On subsequent calls for the same repo, the existing clone is reused — no re-cloning.
+async function cloneRepoOnce(
   repoFullName: string,
-  namespace: string,
-  config: GithubConfig
-): Promise<Array<{ path: string; content: string }>> {
+  config: GithubConfig,
+  migrationDir: string,
+  onLog?: (msg: string) => void,
+): Promise<string | null> {
   const [owner, repo] = repoFullName.split("/");
-  if (!owner || !repo) return [];
+  if (!owner || !repo) return null;
 
+  const repoDir = join(migrationDir, "repos", owner, repo);
+
+  // Already cloned — reuse without any network call
+  try {
+    await fs.access(join(repoDir, ".git"));
+    onLog?.(`  Reusing cached clone: ${owner}/${repo}`);
+    return repoDir;
+  } catch { /* not yet cloned */ }
+
+  await fs.mkdir(repoDir, { recursive: true });
+  const host = config.host ?? "github.com";
+  const cloneUrl = buildCloneUrl(`https://${host}/${repoFullName}`, config.token);
+
+  onLog?.(`  Cloning ${repoFullName}...`);
+  try {
+    execSync(`git clone --depth 1 --single-branch --quiet '${cloneUrl}' '${repoDir}'`, {
+      env: GIT_ENV,
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 120_000,
+    });
+    return repoDir;
+  } catch (e) {
+    onLog?.(`  Clone failed: ${e instanceof Error ? e.message : String(e)}`);
+    await fs.rm(repoDir, { recursive: true, force: true }).catch(() => {});
+    return null;
+  }
+}
+
+// Read service implementation files from a pre-cloned repo directory.
+// Selects the primary implementation file + closely related files (contracts, models, WSDL).
+// Reads full file content from disk — no size limits, no API calls.
+async function readServiceFilesFromClone(
+  repoDir: string,
+  namespace: string,
+): Promise<Array<{ path: string; content: string }>> {
   const nsLower = namespace.toLowerCase();
   const baseName = nsLower.replace("manager", "").replace("service", "");
   const implExtensions = /\.(cs|vb|cls|bas|java|py|asmx)$/;
 
-  // Filter function applied to a list of file paths
   function pickFiles(tree: string[]): string[] {
     const exact = tree.filter((p) => {
       const fileName = p.split("/").pop() ?? "";
       const fileLower = fileName.toLowerCase();
       if (/^i[A-Z]/.test(fileName)) return false;
       if (/test|mock|spec|stub/i.test(p)) return false;
-      return fileLower === `${nsLower}.cs` || fileLower === `${nsLower}.vb` ||
+      return (
+        fileLower === `${nsLower}.cs` || fileLower === `${nsLower}.vb` ||
         fileLower === `${nsLower}.cls` || fileLower === `${nsLower}.java` ||
         fileLower === `${nsLower}.py` || fileLower === `${nsLower}.bas` ||
-        fileLower === `${nsLower}.asmx.cs`;
+        fileLower === `${nsLower}.asmx.cs`
+      );
     });
     const supplementary = tree.filter((p) => {
       const fileName = p.split("/").pop() ?? "";
@@ -211,77 +181,52 @@ async function fetchServiceFiles(
         (implExtensions.test(p) && (fileLower.includes(baseName) || fileLower.includes(nsLower)))
       );
     });
-    return [...exact, ...supplementary].slice(0, 6);
+    return [...exact, ...supplementary].slice(0, 8);
   }
 
-  // Clone via HTTPS to avoid SSH passphrase prompts and API rate limits
-  const host = config.host ?? "github.com";
-  const repoUrl = `https://${host}/${repoFullName}`;
-  try {
-    const tmpDir = join(os.tmpdir(), `ccs-svc-${Date.now()}`);
-    await fs.mkdir(tmpDir, { recursive: true });
-
-    const cloneUrl = buildCloneUrl(repoUrl, config.token);
-    execSync(`git clone --depth 1 --single-branch --quiet '${cloneUrl}' '${tmpDir}'`, {
-      env: GIT_ENV, stdio: ["ignore", "ignore", "ignore"], timeout: 90_000,
-    });
-
-    // Build a tree from local filesystem
-    const localFiles: string[] = [];
-    async function collectPaths(dir: string) {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const e of entries) {
-        if (e.name.startsWith(".")) continue;
-        const full = join(dir, e.name);
-        if (e.isDirectory()) await collectPaths(full);
-        else localFiles.push(full.slice(tmpDir.length + 1));
-      }
+  const allPaths: string[] = [];
+  async function collectPaths(dir: string) {
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) await collectPaths(full);
+      else allPaths.push(full.slice(repoDir.length + 1));
     }
-    await collectPaths(tmpDir);
-
-    const toRead = pickFiles(localFiles);
-    const result: Array<{ path: string; content: string }> = [];
-    for (const p of toRead) {
-      try {
-        const content = await fs.readFile(join(tmpDir, p), "utf-8");
-        result.push({ path: p, content });
-      } catch { /* skip */ }
-    }
-    fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    return result;
-  } catch {
-    // Fall back to API
   }
+  await collectPaths(repoDir);
 
-  // API fallback
-  try {
-    const tree = await fetchFileTree(owner, repo, config.token, config.host);
-    const toFetch = pickFiles(tree);
-    const files: Array<{ path: string; content: string }> = [];
-    for (const filePath of toFetch) {
-      try {
-        const content = await fetchFileContent(owner, repo, filePath, config.token, config.host);
-        files.push({ path: filePath, content });
-      } catch { /* skip */ }
-    }
-    return files;
-  } catch {
-    return [];
+  const toRead = pickFiles(allPaths);
+  const result: Array<{ path: string; content: string }> = [];
+  for (const p of toRead) {
+    try {
+      const content = await fs.readFile(join(repoDir, p), "utf-8");
+      result.push({ path: p, content });
+    } catch { /* skip unreadable */ }
   }
+  return result;
 }
 
-async function fetchWsdl(
-  repoFullName: string,
-  config: GithubConfig
-): Promise<WsdlParseResult | null> {
-  const wsdlFiles = await findWsdlFiles(repoFullName, config);
-  if (wsdlFiles.length === 0) return null;
+// Find and parse the first WSDL/XSD in a cloned repo directory — zero API calls.
+async function findWsdlInClone(repoDir: string): Promise<WsdlParseResult | null> {
+  const wsdlPaths: string[] = [];
 
-  const [owner, repo] = repoFullName.split("/");
-  if (!owner || !repo) return null;
+  async function findWsdl(dir: string) {
+    let entries;
+    try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) await findWsdl(full);
+      else if (e.name.endsWith(".wsdl") || e.name.endsWith(".xsd")) wsdlPaths.push(full);
+    }
+  }
 
   try {
-    const content = await fetchFileContent(owner, repo, wsdlFiles[0] ?? "", config.token, config.host);
+    await findWsdl(repoDir);
+    if (wsdlPaths.length === 0) return null;
+    const content = await fs.readFile(wsdlPaths[0]!, "utf-8");
     return parseWsdl(content);
   } catch {
     return null;
@@ -392,19 +337,15 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     }
   }
 
-  let clonedTmpDir: string | null = null;
-  let entryFiles: Array<{ path: string; content: string }>;
+  // Clone entry repo once into the migration workspace — reused on re-runs
+  const entryCloneDir = await cloneRepoOnce(
+    `${owner}/${repo}`, githubConfig, migrationDir, (msg) => log(config, msg)
+  );
+  if (!entryCloneDir) throw new Error(`Failed to clone entry repo: ${entryRepoUrl}`);
 
-  try {
-    const result = await fetchRepoFiles(
-      owner, repo, githubConfig, config.plugin.fileExtensions,
-      entryRepoUrl, (msg) => log(config, msg)
-    );
-    entryFiles = result.files;
-    clonedTmpDir = result.tmpDir;
-  } catch (e) {
-    throw new Error(`Failed to fetch repo files: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  const extSet = new Set(config.plugin.fileExtensions);
+  const entryFiles: Array<{ path: string; content: string }> = [];
+  await walkDir(entryCloneDir, extSet, entryCloneDir, entryFiles);
 
   log(config, `Found ${entryFiles.length} source files → ${entryFiles.slice(0, 8).map(f => f.path.split("/").pop()).join(", ")}${entryFiles.length > 8 ? "..." : ""}`);
   log(config, `Running plugin: ${config.plugin.name}...`);
@@ -491,44 +432,26 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     const sites = grouped.get(ns) ?? [];
     const methodName = sites[0]?.methodName;
 
-    // Heartbeat — emit a status every 10s so the UI doesn't look frozen
-    let heartbeatSecs = 0;
-    const heartbeat = setInterval(() => {
-      heartbeatSecs += 10;
-      log(config, `  Searching GitHub for ${ns}... (${heartbeatSecs}s)`);
-    }, 10_000);
-
-    // Hard timeout — never hang more than 2 mins per service
-    const RESOLVE_TIMEOUT_MS = 120_000;
     let resolved: Awaited<ReturnType<typeof resolveNamespace>>;
     try {
-      const timeoutPromise = new Promise<null>((res) =>
-        setTimeout(() => res(null), RESOLVE_TIMEOUT_MS)
+      resolved = await resolveNamespace(
+        ns, githubConfig, haiku, entryRepoUrl, methodName,
+        (msg) => log(config, `  ${msg}`),
+        migrationDir,
+        entryCloneDir ?? undefined,
       );
-      resolved = await Promise.race([
-        resolveNamespace(
-          ns, githubConfig, haiku, entryRepoUrl, methodName,
-          (toolMsg) => log(config, `  ${toolMsg}`),
-          migrationDir,
-          clonedTmpDir ?? undefined
-        ),
-        timeoutPromise,
-      ]);
     } catch (e) {
-      clearInterval(heartbeat);
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
         if (msg.includes("daily") || msg.includes("quota exceeded") || msg.includes("plan and billing")) {
-          log(config, `✗ LLM Daily Quota exhausted. Please switch models or try again tomorrow.`);
+          log(config, `✗ LLM ranking quota exhausted. Please switch models or try again tomorrow.`);
           unresolved.push(ns);
           return;
         }
-        log(config, `⚠ LLM Burst limit reached. Waiting 30s before skipping...`);
+        log(config, `⚠ LLM burst limit hit during ranking. Waiting 30s...`);
         await new Promise(r => setTimeout(r, 30_000));
       }
       throw e;
-    } finally {
-      clearInterval(heartbeat);
     }
 
     if (!resolved) {
@@ -538,16 +461,23 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     }
 
     log(config, `  → ${resolved.repoFullName} / ${resolved.filePath} (${resolved.confidence})`);
-    log(config, `AI Analysis: Reading ${ns} implementation...`);
 
     try {
       const callSites = grouped.get(ns) ?? [];
       const primary = callSites[0];
       if (!primary) { errors.push(`${ns}: no call site found`); return; }
 
+      // Clone the service repo once — reuses existing clone if already fetched
+      log(config, `AI Analysis: Cloning ${resolved.repoFullName}...`);
+      const svcCloneDir = await cloneRepoOnce(
+        resolved.repoFullName, githubConfig, migrationDir, (m) => log(config, `  ${m}`)
+      );
+
+      // Read ALL implementation files from local clone — no size limits, no API calls
+      log(config, `AI Analysis: Reading ${ns} implementation...`);
       const [serviceFiles, wsdl] = await Promise.all([
-        fetchServiceFiles(resolved.repoFullName, ns, githubConfig),
-        fetchWsdl(resolved.repoFullName, githubConfig),
+        svcCloneDir ? readServiceFilesFromClone(svcCloneDir, ns) : Promise.resolve([]),
+        svcCloneDir ? findWsdlInClone(svcCloneDir) : Promise.resolve(null),
       ]);
 
       if (serviceFiles.length > 0) {
@@ -561,7 +491,47 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       }
 
       log(config, `AI Analysis: Analyzing ${ns} with LLM...`);
-      const analysis = await analyzeService(primary, serviceFiles, wsdl, sonnet);
+      let analysis: ServiceAnalysis | null = null;
+      try {
+        analysis = await analyzeService(primary, serviceFiles, wsdl, sonnet);
+      } catch (llmErr) {
+        const llmMsg = llmErr instanceof Error ? llmErr.message : String(llmErr);
+        if (llmMsg.includes("429") || llmMsg.includes("RESOURCE_EXHAUSTED") || llmMsg.includes("quota") || llmMsg.includes("rate_limit_exceeded")) {
+          log(config, `  ⚠ Pro model quota exceeded, retrying with Flash...`);
+          try {
+            analysis = await analyzeService(primary, serviceFiles, wsdl, haiku);
+          } catch {
+            // Both models quota-exceeded — write stub so user has something
+          }
+        } else {
+          throw llmErr;
+        }
+      }
+
+      // If LLM quota exhausted on both models, build a stub from raw files
+      if (!analysis) {
+        log(config, `  ⚠ Both models quota-exceeded — writing partial context for ${ns}`);
+        analysis = {
+          namespace: ns,
+          methodName: primary.methodName,
+          callerFile: primary.callerFile,
+          callerLine: primary.lineNumber,
+          purpose: "unknown — LLM quota exceeded during analysis",
+          dataFlow: "unknown",
+          allMethods: [],
+          businessRules: [],
+          errorHandling: [],
+          statusValues: [],
+          databaseInteractions: [],
+          nestedServiceCalls: [],
+          inputContract: {},
+          outputContract: {},
+          confidence: "low",
+          unknownFields: ["purpose", "dataFlow", "allMethods", "businessRules"],
+          rawFiles: serviceFiles.map((f) => f.path),
+        };
+      }
+
       analyzed.push(analysis);
 
       // Log extracted results inline
@@ -692,11 +662,6 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   const unresolvedCount = unresolved.length;
 
   log(config, `\n### ✻ Scan Results\n\n| Metric | Value |\n| :--- | :--- |\n| **Analyzed** | ${analyzedCount} services |\n| **Unresolved** | ${unresolvedCount} |\n| **Errors** | ${errorCount} |\n\n**Report:** [scan-report.md](file://${reportPath})\n`);
-
-  // Final cleanup
-  if (clonedTmpDir) {
-    fs.rm(clonedTmpDir, { recursive: true, force: true }).catch(() => {});
-  }
 
   return { analyzed, unresolved, errors, indexPath, scanReportPath: reportPath };
 }

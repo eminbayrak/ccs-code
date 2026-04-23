@@ -108,17 +108,21 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
           const rawFiles = await walkIngestable(join(vaultPath, "raw"));
           const skillDirs = await fs.readdir(join(vaultPath, "skills")).catch(() => []);
           return [
-            `Vault at: ${vaultPath}`,
-            `  wiki/   — ${wikiFiles.length} items`,
+            `✓ Vault already active at: ${vaultPath}`,
+            "  No new files were created.",
+            "",
+            "── Current Status ───────────────────────────────────",
+            `  wiki/   — ${wikiFiles.length} items (knowledge base)`,
             `  raw/    — ${rawFiles.length} file(s) ready to ingest`,
             `  skills  — ${skillDirs.length} skills loaded`,
             "",
-            "Commands:",
-            "  /ingest        process files in raw/",
-            "  /sync          pull from GitHub sources",
-            "  /graph         build knowledge graph",
-            "  /lint          check wiki health",
-            "  /migrate       migration platform",
+            "── How to use your vault ────────────────────────────",
+            "  1. Drop files into:  vault/raw/uploads/",
+            "  2. Run /ingest       to process them into wiki pages",
+            "  3. Run /sync         if you added repos to ccs.yaml",
+            "  4. Run /graph        to see your knowledge graph",
+            "",
+            "Commands: /ingest, /sync, /graph, /lint, /migrate",
           ].join("\n");
         }
         return [
