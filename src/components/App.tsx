@@ -156,6 +156,8 @@ function nextDoneVerb() {
   return DONE_VERBS[doneVerbIdx++ % DONE_VERBS.length]!;
 }
 
+
+
 export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const { exit } = useApp();
   const { columns: terminalWidth } = useTerminalSize();
@@ -220,18 +222,16 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       } else if (target === "setup") {
         setSetupInput((prev) => prev + text);
       } else if (target === "wizard") {
-        // Wizard step inputs — update migrateWizardData directly
         setMigrateWizardData((prev) => ({
           ...prev,
           repo: migrateWizardStep === 0 ? text : prev.repo,
           lang: migrateWizardStep === 1 ? text : prev.lang,
         }));
-        // Also set main input so TextInput renders it
         setInput(text);
         setInputKey((k) => k + 1);
       }
     }, [migrateWizardStep]),
-    isProcessing, // disable during scan — no input active
+    isProcessing,
   );
 
   // LLM provider
@@ -294,7 +294,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
   const handleInputChange = useCallback(
     async (value: string) => {
-      setInput(value);
+      // Un-escape common terminal escapes if present
+      const cleaned = value.replace(/\\\//g, "/").replace(/\\ /g, " ");
+      setInput(cleaned);
       setSelectedIdx(0);
 
       // Claude-like help behavior: show help only while the input is exactly '?'.
@@ -1038,7 +1040,10 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           <Text bold color="yellow">❯</Text>
           <TextInput
             value={setupInput}
-            onChange={(val) => { activeInputRef.current = "setup"; setSetupInput(val); }}
+            onChange={(val) => { 
+              activeInputRef.current = "setup"; 
+              setSetupInput(val.replace(/\\\//g, "/").replace(/\\ /g, " ")); 
+            }}
             onSubmit={handleSetupSubmit}
             placeholder="Enter absolute or relative path..."
           />
