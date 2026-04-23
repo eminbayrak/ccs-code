@@ -139,29 +139,22 @@ function renderTable(rows: string[][], startKey: number): React.ReactNode {
   }
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginTop={1} marginBottom={1}>
       {/* Header row */}
-      <Box flexDirection="row">
+      <Box flexDirection="row" backgroundColor="blue" paddingX={1}>
         {(header ?? []).map((cell, c) => (
-          <Text key={c} bold color="cyan">
-            {" "}{padCell(cell, colWidths[c]!)}{" "}
+          <Text key={c} bold color="white">
+            {padCell(cell, colWidths[c]!)} {"  "}
           </Text>
-        ))}
-      </Box>
-      {/* Separator */}
-      <Box flexDirection="row">
-        {(header ?? []).map((_, c) => (
-          <Text key={c} dimColor>{"─".repeat((colWidths[c]! + 2))}</Text>
         ))}
       </Box>
       {/* Body rows */}
       {body.map((row, r) => (
-        <Box key={r} flexDirection="row">
+        <Box key={r} flexDirection="row" paddingX={1}>
           {row.map((cell, c) => (
             <Box key={c} flexDirection="row">
-              <Text> </Text>
               <InlineText line={padCell(cell, colWidths[c]!)} />
-              <Text> </Text>
+              <Text> {"  "}</Text>
             </Box>
           ))}
         </Box>
@@ -301,13 +294,15 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       CAUTION: "red",
     };
     const color = colorMap[activeAlert.type] || "white";
+    const icon = activeAlert.type === "WARNING" || activeAlert.type === "CAUTION" ? "⚠" : "ℹ";
+
     elements.push(
       <Box key={key++} flexDirection="column" paddingX={1} marginY={1} borderStyle="round" borderColor={color} width={w}>
-        <Box marginBottom={1}>
-          <Text bold color={color}>{activeAlert.type}</Text>
+        <Box marginBottom={1} flexDirection="row" gap={1}>
+          <Text bold color={color}>{icon} {activeAlert.type}</Text>
         </Box>
         {activeAlert.lines.map((l, i) => (
-          <Box key={i} width={w - 4}><InlineText line={l} /></Box>
+          <Box key={i} width={w - 4} flexWrap="wrap"><InlineText line={l} /></Box>
         ))}
       </Box>
     );
@@ -361,8 +356,8 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       case "h1":
         elements.push(
           <Box key={key++} flexDirection="column" marginTop={1} width={w}>
-            <Text bold color="green">{cl.text}</Text>
-            <Text dimColor>{"─".repeat(Math.min(cl.text.length + 2, w - 4))}</Text>
+            <Text bold color="blue">{cl.text.toUpperCase()}</Text>
+            <Text color="blue">{"━".repeat(Math.min(cl.text.length, w - 4))}</Text>
           </Box>
         );
         break;
@@ -370,7 +365,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       case "h2":
         elements.push(
           <Box key={key++} marginTop={1} width={w}>
-            <Text bold color="cyan">{cl.text}</Text>
+            <Text bold color="cyan"># {cl.text}</Text>
           </Box>
         );
         break;

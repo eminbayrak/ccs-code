@@ -46,7 +46,7 @@ export function CCSSpinner({ isStalled = false }: { isStalled?: boolean }) {
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={isStalled ? "red" : "green"}>{FRAMES[frame]}</Text>
+      <Text color={isStalled ? "red" : "cyan"}>{FRAMES[frame]}</Text>
       <ShimmerText text={label} />
     </Box>
   );
