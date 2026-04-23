@@ -48,11 +48,11 @@ function cleanMessage(msg: string): string {
   return msg.replace(/^[✓✗⚠·●]\s*/, "").trim();
 }
 
-function CollapsibleLog({ log, style, indent }: { log: string; style: LineStyle; indent: number }) {
+function CollapsibleLog({ log, style, indent, isExpanded }: { log: string; style: LineStyle; indent: number; isExpanded: boolean }) {
   const MAX_LINES = 3;
   const lines = log.split("\n");
   const isLong = lines.length > MAX_LINES;
-  const displayLines = isLong ? lines.slice(0, MAX_LINES) : lines;
+  const displayLines = (isLong && !isExpanded) ? lines.slice(0, MAX_LINES) : lines;
 
   return (
     <Box flexDirection="column" marginLeft={indent > 0 ? 0 : 0}>
@@ -66,7 +66,7 @@ function CollapsibleLog({ log, style, indent }: { log: string; style: LineStyle;
               {cleanMessage(line)}
             </Text>
           ))}
-          {isLong && (
+          {isLong && !isExpanded && (
             <Text dimColor italic>
               {`   … +${lines.length - MAX_LINES} lines (ctrl+o to expand)`}
             </Text>
@@ -79,7 +79,7 @@ function CollapsibleLog({ log, style, indent }: { log: string; style: LineStyle;
 
 const MAX_VISIBLE = 12;
 
-export function ScanProgressLog({ logs }: { logs: string[] }) {
+export function ScanProgressLog({ logs, isExpanded = false }: { logs: string[]; isExpanded?: boolean }) {
   if (logs.length === 0) return null;
 
   // Aggressive deduplication and cleaning
@@ -142,6 +142,7 @@ export function ScanProgressLog({ logs }: { logs: string[] }) {
             log={log.trim()}
             style={style}
             indent={indentLevel}
+            isExpanded={isExpanded}
           />
         );
       })}

@@ -1090,6 +1090,11 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   }
 
   // ---------------------------------------------------------------------------
+  // Global Expansion Logic (ctrl+o)
+  // ---------------------------------------------------------------------------
+  const [areLogsExpanded, setAreLogsExpanded] = useState(false);
+
+  // ---------------------------------------------------------------------------
   // Global Cancel Logic
   // ---------------------------------------------------------------------------
   const cancelOperation = useCallback(() => {
@@ -1101,10 +1106,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     // Note: In a real orchestrator, we'd also trigger an AbortController here.
   }, [isProcessing]);
 
-  // Listen for ESC key globally
+  // Listen for global keys
   useInput((input, key) => {
     if (key.escape) {
       cancelOperation();
+    }
+    // ctrl+o to toggle log expansion
+    if (input === "o" && key.ctrl) {
+      setAreLogsExpanded(prev => !prev);
     }
   });
 
@@ -1154,7 +1163,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         {/* Active Operations (Scan, Ingest, etc.) */}
         {(isProcessing || migrateLogs.length > 0) && (
           <Box flexDirection="column" marginTop={1} paddingLeft={1}>
-            <ScanProgressLog logs={migrateLogs} />
+            <ScanProgressLog logs={migrateLogs} isExpanded={areLogsExpanded} />
             {isProcessing && <CCSSpinner isStalled={isStalled} />}
           </Box>
         )}
@@ -1169,32 +1178,37 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
         {/* Input Row */}
         <Box flexDirection="row" gap={1} paddingY={0}>
-          <Text bold color={isProcessing ? "cyan" : "cyan"}>❯</Text>
+          <Text bold color="cyan">❯</Text>
           <Box flexGrow={1}>
             <TextInput
               key={inputKey}
               value={input}
+              focus={!isProcessing}
               onChange={(val) => {
                 activeInputRef.current = isMigrateWizard ? "wizard" : "main";
                 handleInputChange(val);
               }}
               onSubmit={handleSubmit}
-              placeholder={
-                isProcessing ? (
-                  <Text>
-                    <Text color="yellow">ESC</Text> to cancel processing...
-                  </Text>
-                ) as any : (
-                  isMigrateWizard
-                    ? migrateWizardStep === 0
-                      ? "https://github.com/org/repo"
-                      : migrateWizardStep === 1
-                      ? "csharp, typescript, python..."
-                      : "y / n"
-                    : "Message CCS Code  (@file · /command · ? for help)"
-                )
-              }
             />
+            {input === "" && (
+              <Box position="absolute" marginLeft={1}>
+                {isProcessing ? (
+                  <Text dimColor>
+                    <Text color="yellow" bold>ESC</Text> to cancel processing...
+                  </Text>
+                ) : (
+                  <Text dimColor>
+                    {isMigrateWizard
+                      ? migrateWizardStep === 0
+                        ? "https://github.com/org/repo"
+                        : migrateWizardStep === 1
+                        ? "csharp, typescript, python..."
+                        : "y / n"
+                      : "Message CCS Code  (@file · /command · ? for help)"}
+                  </Text>
+                )}
+              </Box>
+            )}
           </Box>
         </Box>
 

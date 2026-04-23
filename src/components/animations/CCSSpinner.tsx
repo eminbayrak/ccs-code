@@ -42,9 +42,12 @@ export function CCSSpinner({ isStalled = false, label: overrideLabel }: { isStal
   });
 
   const activeLabel = overrideLabel ?? label;
+  const isThinkingLabel = !overrideLabel;
   const baseColor = isStalled ? "red" : "cyan";
 
   useEffect(() => {
+    if (!isThinkingLabel) return;
+
     const frameTimer = setInterval(() => {
       setFrame((f) => (f + 1) % FRAMES.length);
     }, 120);
@@ -57,7 +60,7 @@ export function CCSSpinner({ isStalled = false, label: overrideLabel }: { isStal
       clearInterval(frameTimer);
       clearInterval(elapsedTimer);
     };
-  }, []);
+  }, [isThinkingLabel]);
 
   const formatTime = (s: number) => {
     if (s < 60) return `${s}s`;
@@ -68,10 +71,16 @@ export function CCSSpinner({ isStalled = false, label: overrideLabel }: { isStal
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={baseColor} bold>{FRAMES[frame]}</Text>
+      <Text color={baseColor} bold>
+        {isThinkingLabel ? FRAMES[frame] : "·"}
+      </Text>
       <Box flexDirection="row" gap={1}>
-        <ShimmerText text={activeLabel} color={baseColor} />
-        <Text dimColor>({formatTime(seconds)})</Text>
+        {isThinkingLabel ? (
+          <ShimmerText text={activeLabel} color={baseColor} />
+        ) : (
+          <Text color={baseColor}>{activeLabel}</Text>
+        )}
+        {isThinkingLabel && <Text dimColor>({formatTime(seconds)})</Text>}
       </Box>
     </Box>
   );
