@@ -193,7 +193,7 @@ function nextDoneVerb() {
 
 export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const { exit } = useApp();
-  const { columns: terminalWidth } = useTerminalSize();
+  const { columns: terminalWidth, rows: terminalHeight } = useTerminalSize();
 
   // Chat state
   const [messages, setMessages] = useState<UIMessage[]>([]);
@@ -1089,9 +1089,28 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Global Cancel Logic
+  // ---------------------------------------------------------------------------
+  const cancelOperation = useCallback(() => {
+    if (!isProcessing) return;
+    setIsProcessing(false);
+    setIsStalled(false);
+    setActiveTools([]);
+    setMigrateLogs(prev => [...prev, "✗ Operation cancelled by user."]);
+    // Note: In a real orchestrator, we'd also trigger an AbortController here.
+  }, [isProcessing]);
+
+  // Listen for ESC key globally
+  useInput((input, key) => {
+    if (key.escape) {
+      cancelOperation();
+    }
+  });
+
   return (
     <Box flexDirection="column">
-      {/* Messages — printed into terminal scrollback, never re-rendered */}
+      {/* Scrollback History */}
       <Static items={messages}>
         {(msg, index) => {
           const prevMsg = index > 0 ? messages[index - 1] : null;
@@ -1122,59 +1141,36 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         }}
       </Static>
 
-      {/* Welcome screen — shown until user sends first message */}
-      {showWelcome && (
-        <WelcomeBox
-          activeModel={activeModel}
-          workspacePath={process.cwd()}
-        />
-      )}
-
-      {/* Spinner line (while processing) or completion label (after done) */}
-      <Box paddingX={1} marginTop={1}>
-        {isProcessing ? (
-          <Box flexDirection="column">
-            {migrateLogs.length > 0 ? (
-              <ScanProgressLog logs={migrateLogs} />
-            ) : (
-              activeTools.map((tool) => (
-                <AgentProgressLine key={tool.id} taskName={tool.name} isComplete={tool.isComplete} />
-              ))
-            )}
-            <CCSSpinner isStalled={isStalled} />
-          </Box>
-        ) : completionLabel ? (
-          <Box flexDirection="row" gap={1}>
-            <Text color="green">✻</Text>
-            <Text dimColor>{completionLabel}</Text>
-          </Box>
-        ) : (
-          <Text> </Text>
-        )}
-      </Box>
-
-      {/* Top divider */}
-      <Box paddingX={1}>
-        <Divider width={dividerWidth} />
-      </Box>
-
-      {/* Input area */}
+      {/* Main Active Body */}
       <Box flexDirection="column" paddingX={1}>
-        {/* Suggestion list floats above input */}
-        {!isProcessing && suggestionMode && suggestions.length > 0 && (
-          <SuggestionList
-            items={suggestions}
-            selectedIndex={selectedIdx}
-            mode={suggestionMode}
+        {/* Welcome screen */}
+        {showWelcome && (
+          <WelcomeBox
+            activeModel={activeModel}
+            workspacePath={process.cwd()}
           />
         )}
 
-        {/* Input row */}
-        <Box flexDirection="row" gap={1}>
-          <Text bold color={isProcessing ? "gray" : suggestionMode ? "cyan" : "white"}>❯</Text>
-          {isProcessing ? (
-            <Text dimColor> </Text>
-          ) : (
+        {/* Active Operations (Scan, Ingest, etc.) */}
+        {(isProcessing || migrateLogs.length > 0) && (
+          <Box flexDirection="column" marginTop={1} paddingLeft={1}>
+            <ScanProgressLog logs={migrateLogs} />
+            {isProcessing && <CCSSpinner isStalled={isStalled} />}
+          </Box>
+        )}
+      </Box>
+
+      {/* Input Area */}
+      <Box flexDirection="column" paddingX={1} marginTop={1}>
+        {/* Divider above input */}
+        <Box marginBottom={0}>
+          <Divider width={dividerWidth} />
+        </Box>
+
+        {/* Input Row */}
+        <Box flexDirection="row" gap={1} paddingY={0}>
+          <Text bold color={isProcessing ? "cyan" : "cyan"}>❯</Text>
+          <Box flexGrow={1}>
             <TextInput
               key={inputKey}
               value={input}
@@ -1184,37 +1180,45 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
               }}
               onSubmit={handleSubmit}
               placeholder={
-                isMigrateWizard
-                  ? migrateWizardStep === 0
-                    ? "https://github.com/org/repo"
-                    : migrateWizardStep === 1
-                    ? "csharp, typescript, python..."
-                    : "y / n"
-                  : "Message CCS Code  (@file · /command · ? for help)"
+                isProcessing ? (
+                  <Text>
+                    <Text color="yellow">ESC</Text> to cancel processing...
+                  </Text>
+                ) as any : (
+                  isMigrateWizard
+                    ? migrateWizardStep === 0
+                      ? "https://github.com/org/repo"
+                      : migrateWizardStep === 1
+                      ? "csharp, typescript, python..."
+                      : "y / n"
+                    : "Message CCS Code  (@file · /command · ? for help)"
+                )
               }
+            />
+          </Box>
+        </Box>
+
+        {/* Divider below input */}
+        <Box marginTop={0}>
+          <Divider width={dividerWidth} />
+        </Box>
+
+        {/* Status Bar */}
+        <Box marginBottom={0}>
+          {helpOpen ? (
+            <HelpMenu terminalWidth={terminalWidth} />
+          ) : (
+            <StatusBar
+              workspacePath={process.cwd()}
+              sandboxStatus={permissionMode}
+              activeModel={activeModel}
+              instructionsCount={instructions.length}
+              skillsCount={skills.length}
+              terminalWidth={terminalWidth}
             />
           )}
         </Box>
       </Box>
-
-      {/* Bottom divider */}
-      <Box paddingX={1}>
-        <Divider width={dividerWidth} />
-      </Box>
-
-      {/* Footer: help grid or compact status bar */}
-      {helpOpen ? (
-        <HelpMenu terminalWidth={terminalWidth} />
-      ) : (
-        <StatusBar
-          workspacePath={process.cwd()}
-          sandboxStatus={permissionMode}
-          activeModel={activeModel}
-          instructionsCount={instructions.length}
-          skillsCount={skills.length}
-          terminalWidth={terminalWidth}
-        />
-      )}
     </Box>
   );
 }
