@@ -282,12 +282,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
     // Check for vault configuration
     const vaultCfg = await readVaultConfig();
-    if (!vaultCfg.activeVault) {
-      setIsSetupMode(true);
-      setActiveModel("Waiting for setup...");
-      return;
+    if (vaultCfg.activeVault) {
+      setVaultPath(vaultCfg.activeVault);
     }
-    setVaultPath(vaultCfg.activeVault);
 
     const [loadedInstructions, loadedSkills, systemPrompt, projectFiles] =
       await Promise.all([
@@ -461,6 +458,12 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
     // Dismiss welcome box on any command, regardless of how it was triggered
     setShowWelcome(false);
+
+    const vaultCommands = ["vault", "sync", "ingest", "graph", "lint", "rewrite", "index", "enrich", "ask", "harvest", "migrate"];
+    if (vaultCommands.includes(id) && !vaultPath) {
+      setIsSetupMode(true);
+      return;
+    }
 
     switch (id) {
       // ------------------------------------------------------------------
@@ -985,6 +988,33 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   };
 
   // ---------------------------------------------------------------------------
+  // Global Expansion Logic (ctrl+o)
+  // ---------------------------------------------------------------------------
+  const [areLogsExpanded, setAreLogsExpanded] = useState(false);
+
+  // ---------------------------------------------------------------------------
+  // Global Cancel Logic
+  // ---------------------------------------------------------------------------
+  const cancelOperation = useCallback(() => {
+    if (!isProcessing) return;
+    setIsProcessing(false);
+    setIsStalled(false);
+    setActiveTools([]);
+    setMigrateLogs(prev => [...prev, "✗ Operation cancelled by user."]);
+  }, [isProcessing]);
+
+  // Listen for global keys
+  useInput((input, key) => {
+    if (key.escape) {
+      cancelOperation();
+    }
+    // ctrl+o to toggle log expansion
+    if (input === "o" && key.ctrl) {
+      setAreLogsExpanded(prev => !prev);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -1096,34 +1126,6 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       </Box>
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Global Expansion Logic (ctrl+o)
-  // ---------------------------------------------------------------------------
-  const [areLogsExpanded, setAreLogsExpanded] = useState(false);
-
-  // ---------------------------------------------------------------------------
-  // Global Cancel Logic
-  // ---------------------------------------------------------------------------
-  const cancelOperation = useCallback(() => {
-    if (!isProcessing) return;
-    setIsProcessing(false);
-    setIsStalled(false);
-    setActiveTools([]);
-    setMigrateLogs(prev => [...prev, "✗ Operation cancelled by user."]);
-    // Note: In a real orchestrator, we'd also trigger an AbortController here.
-  }, [isProcessing]);
-
-  // Listen for global keys
-  useInput((input, key) => {
-    if (key.escape) {
-      cancelOperation();
-    }
-    // ctrl+o to toggle log expansion
-    if (input === "o" && key.ctrl) {
-      setAreLogsExpanded(prev => !prev);
-    }
-  });
 
   return (
     <Box flexDirection="column">
