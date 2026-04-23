@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import { join, basename, extname } from "path";
 
-type Node = { id: string; label: string; group: string; title: string; keywords: string[] };
+type Node = { id: string; label: string; group: string; title: string; keywords: string[]; path: string };
 type Edge = { from: string; to: string; label?: string };
 
 // Topic clusters — keyword → group name
@@ -109,7 +109,7 @@ export async function buildGraphData(wikiDir: string): Promise<{ nodes: Node[]; 
     const keywords = extractKeywords(`${title} ${summary} ${body} ${tags.join(" ")}`);
     const label = title || basename(fpath, extname(fpath));
 
-    nodes.push({ id, label, group, title: summary || label, keywords });
+    nodes.push({ id, label, group, title: summary || label, keywords, path: fpath });
   }
 
   const keywordIndex = new Map<string, string[]>();
@@ -268,7 +268,37 @@ export async function generateGraphHtml(wikiDir: string, outputPath: string): Pr
   #info-connections {
     margin-top: 10px;
     font-size: 11px; color: rgba(255,255,255,0.25);
-    padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  #info-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+  }
+  .action-btn {
+    flex: 1;
+    text-align: center;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 6px;
+    color: #f1f5f9;
+    padding: 6px;
+    font-size: 11px;
+    text-decoration: none;
+    transition: all 0.2s;
+  }
+  .action-btn:hover {
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.2);
+  }
+  .action-btn.primary {
+    background: rgba(124, 92, 252, 0.2);
+    border-color: rgba(124, 92, 252, 0.4);
+    color: #a78bfa;
+  }
+  .action-btn.primary:hover {
+    background: rgba(124, 92, 252, 0.3);
+    border-color: rgba(124, 92, 252, 0.6);
   }
 
   /* ── Controls hint ── */
@@ -306,6 +336,9 @@ export async function generateGraphHtml(wikiDir: string, outputPath: string): Pr
   <div id="info-body"></div>
   <div id="info-tags"></div>
   <div id="info-connections"></div>
+  <div id="info-actions">
+    <a id="open-btn" class="action-btn primary" href="#">Open in Editor</a>
+  </div>
 </div>
 
 <div id="hint">
@@ -419,6 +452,7 @@ const infoTitle    = document.getElementById("info-title");
 const infoBody     = document.getElementById("info-body");
 const infoTagsEl   = document.getElementById("info-tags");
 const infoConn     = document.getElementById("info-connections");
+const openBtn      = document.getElementById("open-btn");
 
 network.on("click", params => {
   if (params.nodes.length > 0) {
@@ -436,6 +470,10 @@ network.on("click", params => {
     ).join("");
     const conn = connCount[n.id] ?? 0;
     infoConn.textContent = conn + (conn === 1 ? " connection" : " connections") + "  ·  " + n.group;
+    
+    // Set up open in editor link (VS Code / Cursor protocol)
+    openBtn.href = "vscode://file" + n.path;
+    
     infoEl.style.display = "block";
   } else {
     infoEl.style.display = "none";

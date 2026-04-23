@@ -587,10 +587,11 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
 
       log(config, `✓ ${ns} analyzed (confidence: ${analysis.confidence})`);
 
-      // Recurse into nested services
+      // Recurse into nested services (skip placeholder values the LLM emits when uncertain)
+      const SKIP_NS = new Set(["unknown", "none", "n/a", "null", "undefined"]);
       for (const nested of analysis.nestedServiceCalls) {
         const nestedNs = nested.split(".")[0];
-        if (nestedNs && !visited.has(nestedNs)) {
+        if (nestedNs && !visited.has(nestedNs) && !SKIP_NS.has(nestedNs.toLowerCase())) {
           const nestedSite: ServiceReference = {
             callerFile: resolved.filePath,
             lineNumber: 0,
@@ -624,11 +625,21 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   if (!finalStatusOrNull) throw new Error("Migration status file missing after scan — this is a bug.");
   const finalStatus: MigrationStatus = finalStatusOrNull;
 
-  // Build system index
+  // Build system index — try pro model, fall back to flash on quota error
   let indexPath: string | null = null;
   if (analyzed.length > 0) {
     try {
-      indexPath = await buildIndex(migrationDir, analyzed, finalStatus, unresolved, sonnet);
+      try {
+        indexPath = await buildIndex(migrationDir, analyzed, finalStatus, unresolved, sonnet);
+      } catch (indexErr) {
+        const indexMsg = indexErr instanceof Error ? indexErr.message : String(indexErr);
+        if (indexMsg.includes("429") || indexMsg.includes("RESOURCE_EXHAUSTED") || indexMsg.includes("quota")) {
+          log(config, `  ⚠ Pro model quota exceeded for index, retrying with Flash...`);
+          indexPath = await buildIndex(migrationDir, analyzed, finalStatus, unresolved, haiku);
+        } else {
+          throw indexErr;
+        }
+      }
       log(config, `✓ Written: knowledge-base/_index.md`);
     } catch (e) {
       errors.push(`index: ${e instanceof Error ? e.message : String(e)}`);

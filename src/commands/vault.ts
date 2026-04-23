@@ -108,45 +108,41 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
           const rawFiles = await walkIngestable(join(vaultPath, "raw"));
           const skillDirs = await fs.readdir(join(vaultPath, "skills")).catch(() => []);
           return [
-            `✓ Vault already active at: ${vaultPath}`,
-            "  No new files were created.",
+            `## ✓ Vault Active`,
+            `**Location:** \`${vaultPath}\``,
             "",
-            "── Current Status ───────────────────────────────────",
-            `  wiki/   — ${wikiFiles.length} items (knowledge base)`,
-            `  raw/    — ${rawFiles.length} file(s) ready to ingest`,
-            `  skills  — ${skillDirs.length} skills loaded`,
+            "### Current Status",
+            `- **Wiki pages:** ${wikiFiles.length}`,
+            `- **Raw files:**  ${rawFiles.length} ready to ingest`,
+            `- **Skills:**     ${skillDirs.length} loaded`,
             "",
-            "── How to use your vault ────────────────────────────",
-            "  1. Drop files into:  vault/raw/uploads/",
-            "  2. Run /ingest       to process them into wiki pages",
-            "  3. Run /sync         if you added repos to ccs.yaml",
-            "  4. Run /graph        to see your knowledge graph",
+            "### How to use your vault",
+            "1. Drop files into `vault/raw/uploads/`",
+            "2. Run `/ingest` to process them into wiki pages",
+            "3. Run `/sync` if you added repos to `ccs.yaml`",
+            "4. Run `/graph` to see your knowledge graph",
             "",
-            "Commands: /ingest, /sync, /graph, /lint, /migrate",
+            "**Commands:** `/ingest`, `/sync`, `/graph`, `/lint`, `/migrate`"
           ].join("\n");
         }
         return [
-          `✓ Vault initialized at: ${vaultPath}`,
-          `  ${created.length} files created`,
+          `## ✓ Vault Initialized`,
+          `**Location:** \`${vaultPath}\``,
+          `${created.length} default files and folders created.`,
           "",
-          "── Where to put your files ──────────────────────────",
-          `  ${join(vaultPath, "raw", "uploads")}`,
-          "  Drop any file here and run /ingest to process it.",
+          "### 📥 Raw Inbox",
+          `**Uploads:** \`${join(vaultPath, "raw", "uploads")}\``,
+          "Drop any file here and run `/ingest` to process it.",
           "",
-          "── Accepted formats ─────────────────────────────────",
-          "  .md   .txt   .html   .json   .csv   .pdf",
+          "### 📄 Formats",
+          "`.md`  `.txt`  `.html`  `.json`  `.csv`  `.pdf`",
           "",
-          "── Other raw/ inboxes (auto-populated by /sync) ─────",
-          "  raw/github/      ← GitHub commits, PRs, issues, README",
-          "  raw/confluence/  ← Confluence pages",
-          "  raw/vscode/      ← VS Code workspace exports",
-          "",
-          "── Next steps ───────────────────────────────────────",
-          "  1. Copy your files into:  raw/uploads/",
-          "  2. Run /ingest            convert files → wiki pages",
-          "  3. Run /enrich            add AI summaries + links",
-          "  4. Run /graph             open visual knowledge graph",
-          "  (or /sync first if you have GitHub repos in ccs.yaml)",
+          "### 🚀 Next Steps",
+          "1. Copy your files into `raw/uploads/`",
+          "2. Run `/ingest` — convert files → wiki pages",
+          "3. Run `/enrich` — add AI summaries + links",
+          "4. Run `/graph` — open visual knowledge graph",
+          "*(or /sync first if you have GitHub repos in ccs.yaml)*"
         ].join("\n");
       } catch (e) {
         return `Error initializing vault: ${e instanceof Error ? e.message : String(e)}`;
@@ -160,10 +156,12 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
       const skillDirs = await fs.readdir(join(vaultPath, "skills")).catch(() => []);
 
       return [
-        `Vault: ${vaultPath}`,
-        `  wiki pages  — ${wikiCount}`,
-        `  raw files   — ${rawFiles.length} ready to ingest`,
-        `  skills      — ${skillDirs.length}`,
+        `## 🏰 Vault Status`,
+        `**Path:** \`${vaultPath}\``,
+        "",
+        `- **wiki pages** — ${wikiCount}`,
+        `- **raw files**  — ${rawFiles.length} ready to ingest`,
+        `- **skills**     — ${skillDirs.length}`,
       ].join("\n");
     }
 
@@ -193,18 +191,21 @@ export async function handleSyncCommand(args: string[], cwd: string): Promise<st
   const sources = Array.isArray(config.sources) ? config.sources : [];
   if (sources.length === 0) {
     return [
-      `Vault: ${vaultPath}`,
+      `## 🔄 Sync Sources`,
+      `**Vault:** \`${vaultPath}\``,
       "",
-      "No sources configured. Edit ccs.yaml to add sources:",
-      "  sources:",
-      "    - type: github",
-      "      repos: [my-org/my-service]",
-      "      include: [commits, prs, issues, readme]",
-      "      token_env: GITHUB_PRIVATE_TOKEN",
+      "⚠ **No sources configured.** Edit `ccs.yaml` to add sources:",
+      "```yaml",
+      "sources:",
+      "  - type: github",
+      "    repos: [my-org/my-service]",
+      "    include: [commits, prs, issues, readme]",
+      "    token_env: GITHUB_PRIVATE_TOKEN",
+      "```",
     ].join("\n");
   }
 
-  const results: string[] = [`Syncing to ${rawDir}`, ""];
+  const results: string[] = [`## 🔄 Syncing Sources`, `**Target:** \`${rawDir}\``, ""];
 
   try {
     for (const source of sources) {
@@ -214,9 +215,9 @@ export async function handleSyncCommand(args: string[], cwd: string): Promise<st
         for (const repo of source.repos) {
           try {
             const written = await syncRepo(repo, rawDir, { repos: [repo], include, token });
-            results.push(`  ✓ github:${repo} — ${written.length} file(s) written`);
+            results.push(`- **github:${repo}** — ✓ ${written.length} file(s) written`);
           } catch (e) {
-            results.push(`  ✗ github:${repo} — ${e instanceof Error ? e.message : String(e)}`);
+            results.push(`- **github:${repo}** — ✗ ${e instanceof Error ? e.message : String(e)}`);
           }
         }
       } else if (source.type === "folder") {
@@ -242,10 +243,11 @@ export async function handleIngestCommand(args: string[], cwd: string): Promise<
 
   if (nonReadme.length === 0) {
     return [
-      `Vault: ${vaultPath}`,
+      `## 📥 Ingesting Files`,
+      `**Vault:** \`${vaultPath}\``,
       "",
-      "No files found in raw/.",
-      "Drop files into raw/uploads/ or run /sync to pull from GitHub.",
+      "No files found in `raw/`.",
+      "Drop files into `raw/uploads/` or run `/sync` to pull from GitHub.",
     ].join("\n");
   }
 
@@ -257,31 +259,31 @@ export async function handleIngestCommand(args: string[], cwd: string): Promise<
   }
   const { written, updated, skipped, errors } = result;
 
-  const lines = [`Vault: ${vaultPath}`, ""];
+  const lines = [`## 📥 Ingest Results`, `**Vault:** \`${vaultPath}\``, ""];
 
   if (written.length > 0) {
-    lines.push(`✓ Created ${written.length} new wiki page(s):`);
-    for (const f of written.slice(0, 15)) lines.push(`  + ${f}`);
-    if (written.length > 15) lines.push(`  ... and ${written.length - 15} more`);
+    lines.push(`### ✓ Created ${written.length} new wiki page(s):`);
+    for (const f of written.slice(0, 8)) lines.push(`- \`${f}\``);
+    if (written.length > 8) lines.push(`- ... and ${written.length - 8} more`);
   }
 
   if (updated.length > 0) {
-    lines.push(`↻ Merged new content into ${updated.length} existing page(s)`);
+    lines.push(`### ↻ Updated ${updated.length} existing page(s)`);
   }
 
   if (skipped.length > 0) {
-    lines.push(`  ${skipped.length} file(s) skipped (unsupported format)`);
+    lines.push(`- **Skipped:** ${skipped.length} file(s) (unsupported format)`);
   }
 
   if (errors.length > 0) {
-    lines.push("", "Errors:");
-    for (const e of errors) lines.push(`  ✗ ${e}`);
+    lines.push("", "### ✗ Errors:");
+    for (const e of errors) lines.push(`- \`${e}\``);
   }
 
   if (written.length === 0 && updated.length === 0 && errors.length === 0) {
-    lines.push("Wiki is up to date — no new content found.");
+    lines.push("Wiki is already up to date — no new content found.");
   } else {
-    lines.push("", "Run /enrich to add AI summaries and links, then /graph to visualize.");
+    lines.push("", "---", "Run `/enrich` to add AI summaries and links, then `/graph` to visualize.");
   }
 
   return lines.join("\n");
@@ -343,9 +345,11 @@ export async function handleGraphCommand(args: string[], cwd: string): Promise<s
     spawn("open", [outputPath], { detached: true, stdio: "ignore" }).unref();
 
     return [
-      `Vault: ${vaultPath}`,
-      `Graph built: ${nodeCount} nodes, ${edgeCount} edges`,
-      `Saved to: output/graph.html`,
+      `## 🕸️ Knowledge Graph Built`,
+      `**Nodes:** ${nodeCount} (pages)`,
+      `**Edges:** ${edgeCount} (links)`,
+      "",
+      `✓ Saved to: \`output/graph.html\``,
       "",
       "Opening in browser…",
     ].join("\n");
@@ -473,22 +477,23 @@ export async function handleEnrichCommand(args: string[], cwd: string): Promise<
 
   if (enriched === 0 && errors === 0) {
     return [
-      `Vault: ${vaultPath}`,
-      `Provider: ${provider.name}`,
+      `## ✨ AI Enrichment`,
+      `**Provider:** ${provider.name}`,
       "",
-      "All wiki pages already enriched.",
-      "Run /graph to rebuild the knowledge graph with semantic links.",
+      "All wiki pages are already enriched. 🚀",
+      "Run `/graph` to rebuild the knowledge graph with semantic links.",
     ].join("\n");
   }
 
   return [
-    `Vault: ${vaultPath}`,
-    `Provider: ${provider.name}`,
+    `## ✨ Enrichment Complete`,
+    `**Provider:** ${provider.name}`,
     "",
-    `✓ Enriched ${enriched} page(s) with summaries, tags, and [[wikilinks]]`,
-    errors > 0 ? `  ${errors} error(s) — some pages may have been skipped` : "",
+    `- Enriched **${enriched}** page(s) with summaries, tags, and [[wikilinks]]`,
+    errors > 0 ? `- ✗ **${errors} error(s)** — some pages were skipped` : "",
     "",
-    "Run /graph to rebuild the knowledge graph.",
+    "---",
+    "Run `/graph` to rebuild the knowledge graph.",
   ].filter(l => l !== "").join("\n");
 }
 
@@ -585,25 +590,26 @@ async function runVaultAudit(vaultPath: string): Promise<string> {
       totalMemories += mdFiles.length;
     }
     
-    reports.push(`[Raw Memories]`);
-    reports.push(`Total Harvested: ${totalMemories}`);
+    reports.push(`## 📂 Raw Memories`);
+    reports.push(`**Total Harvested:** ${totalMemories}`);
     for (const [tool, count] of Object.entries(toolCounts)) {
-      reports.push(`  › ${tool}: ${count}`);
+      reports.push(`- **${tool}**: ${count}`);
     }
     reports.push("");
     
     // 2. Check Wiki Ingestion
     const wikiMarkdownFiles = await walkRecursive(wikiPath);
     const totalWiki = wikiMarkdownFiles.filter(f => f.endsWith(".md")).length;
-    reports.push(`[Wiki State]`);
-    reports.push(`Total Wiki Pages: ${totalWiki}`);
+    reports.push(`## 📚 Wiki State`);
+    reports.push(`**Total Wiki Pages:** ${totalWiki}`);
+    reports.push("");
     
     // Simple heuristic: If wiki count is much lower than memories, something is wrong
     if (totalWiki < totalMemories && totalMemories > 0) {
-      reports.push(`⚠️ WARNING: Some memories might be missing from the wiki.`);
-      reports.push(`   Memories: ${totalMemories}, Wiki: ${totalWiki}`);
+      reports.push(`⚠ **WARNING:** Some memories might be missing from the wiki.`);
+      reports.push(`Memories: ${totalMemories}, Wiki: ${totalWiki}`);
     } else {
-      reports.push(`✅ Knowledge base coverage looks good.`);
+      reports.push(`✓ Knowledge base coverage looks good.`);
     }
     
     return reports.join("\n");
