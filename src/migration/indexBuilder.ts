@@ -1,16 +1,17 @@
 import { promises as fs } from "fs";
 import { join } from "path";
-import { AnthropicProvider } from "../llm/providers/anthropic.js";
+import type { LLMProvider } from "../llm/providers/base.js";
 import type { ServiceAnalysis } from "./analyzer.js";
 import type { MigrationStatus } from "./statusTracker.js";
 
 // ---------------------------------------------------------------------------
-// Generate the system overview paragraph using Sonnet
+// Generate the system overview paragraph
 // ---------------------------------------------------------------------------
 
 async function generateSystemOverview(
   analyses: ServiceAnalysis[],
-  entryRepo: string
+  entryRepo: string,
+  provider: LLMProvider
 ): Promise<string> {
   if (analyses.length === 0) return "No services analyzed yet.";
 
@@ -21,7 +22,6 @@ async function generateSystemOverview(
     )
     .join("\n");
 
-  const provider = new AnthropicProvider("claude-sonnet-4-6");
   const response = await provider.chat(
     [
       {
@@ -69,12 +69,12 @@ export async function buildIndex(
   migrationDir: string,
   analyses: ServiceAnalysis[],
   status: MigrationStatus,
-  unresolvedNamespaces: string[]
+  unresolvedNamespaces: string[],
+  provider: LLMProvider
 ): Promise<string> {
-  const overview = await generateSystemOverview(analyses, status.entryRepo);
+  const overview = await generateSystemOverview(analyses, status.entryRepo, provider);
   const sharedServices = findSharedServices(analyses);
 
-  // Collect all unique DB tables across all services
   const allDbInteractions = [
     ...new Set(analyses.flatMap((a) => a.databaseInteractions)),
   ];

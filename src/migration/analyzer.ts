@@ -1,7 +1,15 @@
-import { AnthropicProvider } from "../llm/providers/anthropic.js";
+import type { LLMProvider } from "../llm/providers/base.js";
 import type { ServiceReference } from "./types.js";
 import type { WsdlParseResult } from "./wsdlParser.js";
 import { wsdlToPromptText } from "./wsdlParser.js";
+
+export type ServiceMethod = {
+  name: string;
+  purpose: string;
+  input: Record<string, string>;
+  output: Record<string, string>;
+  businessRules: string[];
+};
 
 export type ServiceAnalysis = {
   namespace: string;
@@ -10,7 +18,10 @@ export type ServiceAnalysis = {
   callerLine: number;
   purpose: string;
   dataFlow: string;
+  allMethods: ServiceMethod[];
   businessRules: string[];
+  errorHandling: string[];
+  statusValues: string[];
   databaseInteractions: string[];
   nestedServiceCalls: string[];
   inputContract: Record<string, string>;
@@ -28,8 +39,8 @@ export type AnalyzeProgress = {
 };
 
 const SYSTEM_PROMPT = `You are a code analyst documenting a legacy system for migration.
-Your job is to extract business logic from service implementation code.
-Be precise and accurate. Do not invent or assume details not present in the code.
+Extract every business rule, data contract, and database interaction visible in the code.
+A developer who has never seen this codebase must be able to rewrite the service from your output alone — with no ambiguity.
 If you cannot determine a field from the provided code, use exactly the string "unknown".
 Respond only with valid JSON matching the exact schema requested.`;
 
@@ -43,7 +54,7 @@ function buildPrompt(
   wsdl: WsdlParseResult | null
 ): string {
   const fileBundle = serviceFiles
-    .map((f) => `=== FILE: ${f.path} ===\n${f.content.slice(0, 8000)}`)
+    .map((f) => `=== FILE: ${f.path} ===\n${f.content.slice(0, 12000)}`)
     .join("\n\n");
 
   const wsdlSection = wsdl
@@ -52,35 +63,56 @@ function buildPrompt(
 
   const paramFlags = callSite.metadata["parameterFlags"] ?? "none";
 
-  return `Analyze this legacy service for migration documentation.
+  return `Analyze this legacy SOAP/COM service for migration. A developer must be able to rewrite it as a REST API using ONLY your output — no access to the original source.
 
 Caller file: ${callSite.callerFile} (line ${callSite.lineNumber})
 Service namespace: ${callSite.serviceNamespace}
-Method called: ${callSite.methodName}
-Parameter flags: ${paramFlags}
+Primary method called from caller: ${callSite.methodName}
+Parameter flags observed: ${paramFlags}
 ${wsdlSection}
 
-Service implementation:
+Service implementation files:
 ${fileBundle}
 
-Respond ONLY with this JSON (use "unknown" for any field you cannot determine):
+Respond ONLY with this JSON (use "unknown" string for anything you cannot determine):
 {
-  "purpose": "one sentence — business intent in plain language, not code mechanics",
-  "dataFlow": "what comes in from the caller → what is sent to the service → what transforms → what is returned",
-  "businessRules": ["specific rule 1", "specific rule 2"],
-  "databaseInteractions": ["table: foo — SELECT", "proc: sp_GetFoo — called with patientId"],
-  "nestedServiceCalls": ["AnotherService.methodName"],
+  "purpose": "one sentence — what this service does for the business (not code mechanics)",
+  "dataFlow": "step-by-step: caller sends X → service validates Y → queries Z table → applies rule A → returns B",
+  "allMethods": [
+    {
+      "name": "MethodName",
+      "purpose": "what this specific method does",
+      "input": { "paramName": "type" },
+      "output": { "fieldName": "type" },
+      "businessRules": ["every if/else condition that enforces domain logic for this method"]
+    }
+  ],
+  "businessRules": ["every rule that applies across the whole service — validation, access control, thresholds, routing, masking"],
+  "databaseInteractions": [
+    "table: TableName — SELECT columns: col1, col2, col3",
+    "proc: sp_ProcName — params: param1 (type), param2 (type); returns: col1, col2"
+  ],
+  "nestedServiceCalls": ["ServiceName.MethodName"],
   "inputContract": { "fieldName": "type" },
   "outputContract": { "fieldName": "type" },
+  "errorHandling": [
+    "condition: X is empty → throws: ArgumentException / SOAP fault: InvalidInput",
+    "condition: account is Deactivated → returns: access denied error"
+  ],
+  "statusValues": [
+    "AccountStatus: Active, Deactivated, VIP",
+    "OrderStatus: Pending, Shipped, Delivered, Cancelled"
+  ],
   "confidence": "high | medium | low"
 }
 
-Rules:
-- businessRules: only concrete rules visible in the code (validation, masking, access control, conditional logic)
-- databaseInteractions: only what you can see — table names, query types, stored proc names
-- nestedServiceCalls: only service calls found in the implementation code
-- confidence: "high" if you understand the full flow, "medium" if some parts are unclear, "low" if the code is too complex or incomplete
-- use "unknown" (string) for any field you cannot determine — never guess`;
+Extraction rules:
+- allMethods: document EVERY public method defined in the service, not just the one called from the entry point
+- businessRules: extract every concrete condition — numeric thresholds, role checks, status guards, tier exceptions, time limits, domain-specific overrides
+- databaseInteractions: include exact table names, column names where visible, stored proc names with their parameters
+- errorHandling: every exception type thrown, every early-return error condition, every SOAP fault
+- statusValues: every enum, status string, role name, or tier value referenced in the logic
+- confidence: "high" = you can see the full implementation; "medium" = some parts unclear or truncated; "low" = only got interface/partial code`;
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +122,10 @@ Rules:
 type RawAnalysis = {
   purpose?: unknown;
   dataFlow?: unknown;
+  allMethods?: unknown;
   businessRules?: unknown;
+  errorHandling?: unknown;
+  statusValues?: unknown;
   databaseInteractions?: unknown;
   nestedServiceCalls?: unknown;
   inputContract?: unknown;
@@ -108,11 +143,13 @@ function parseAnalysisResponse(
   try {
     parsed = JSON.parse(jsonText) as RawAnalysis;
   } catch {
-    // JSON parse failed — return minimal analysis
     return {
       purpose: "unknown",
       dataFlow: "unknown",
+      allMethods: [],
       businessRules: [],
+      errorHandling: [],
+      statusValues: [],
       databaseInteractions: [],
       nestedServiceCalls: [],
       inputContract: {},
@@ -137,13 +174,29 @@ function parseAnalysisResponse(
     );
   };
 
+  const parseMethods = (v: unknown): ServiceMethod[] => {
+    if (!Array.isArray(v)) return [];
+    return v.flatMap((item) => {
+      if (typeof item !== "object" || item === null) return [];
+      const m = item as Record<string, unknown>;
+      return [{
+        name: typeof m["name"] === "string" ? m["name"] : "unknown",
+        purpose: typeof m["purpose"] === "string" ? m["purpose"] : "unknown",
+        input: strRecord(m["input"]),
+        output: strRecord(m["output"]),
+        businessRules: Array.isArray(m["businessRules"])
+          ? m["businessRules"].filter((x: unknown) => typeof x === "string")
+          : [],
+      }];
+    });
+  };
+
   const confidence = (["high", "medium", "low"] as const).includes(
     parsed.confidence as "high" | "medium" | "low"
   )
     ? (parsed.confidence as "high" | "medium" | "low")
     : "low";
 
-  // Track which fields came back as "unknown"
   const unknownFields: string[] = [];
   if (str(parsed.purpose) === "unknown") unknownFields.push("purpose");
   if (str(parsed.dataFlow) === "unknown") unknownFields.push("dataFlow");
@@ -151,7 +204,10 @@ function parseAnalysisResponse(
   return {
     purpose: str(parsed.purpose),
     dataFlow: str(parsed.dataFlow),
+    allMethods: parseMethods(parsed.allMethods),
     businessRules: strArr(parsed.businessRules),
+    errorHandling: strArr(parsed.errorHandling),
+    statusValues: strArr(parsed.statusValues),
     databaseInteractions: strArr(parsed.databaseInteractions),
     nestedServiceCalls: strArr(parsed.nestedServiceCalls),
     inputContract: strRecord(parsed.inputContract),
@@ -162,14 +218,14 @@ function parseAnalysisResponse(
 }
 
 // ---------------------------------------------------------------------------
-// Analyze a single service — exported for use by tracer
+// Analyze a single service
 // ---------------------------------------------------------------------------
 
 export async function analyzeService(
   callSite: ServiceReference,
   serviceFiles: Array<{ path: string; content: string }>,
   wsdl: WsdlParseResult | null,
-  provider: AnthropicProvider
+  provider: LLMProvider
 ): Promise<ServiceAnalysis> {
   const prompt = buildPrompt(callSite, serviceFiles, wsdl);
 
@@ -191,7 +247,7 @@ export async function analyzeService(
 }
 
 // ---------------------------------------------------------------------------
-// Batch analyze multiple services — follows enricher.ts pattern
+// Batch analyze — accepts provider so the caller controls which model is used
 // ---------------------------------------------------------------------------
 
 export async function analyzeServices(
@@ -200,10 +256,10 @@ export async function analyzeServices(
     namespace: string
   ) => Promise<Array<{ path: string; content: string }>>,
   getWsdl: (namespace: string) => Promise<WsdlParseResult | null>,
+  provider: LLMProvider,
   onProgress?: (p: AnalyzeProgress) => void,
   batchSize = 3
 ): Promise<{ results: ServiceAnalysis[]; errors: number }> {
-  const sonnet = new AnthropicProvider("claude-sonnet-4-6");
   const results: ServiceAnalysis[] = [];
   let errors = 0;
 
@@ -224,7 +280,7 @@ export async function analyzeServices(
             getServiceFiles(callSite.serviceNamespace),
             getWsdl(callSite.serviceNamespace),
           ]);
-          const analysis = await analyzeService(callSite, files, wsdl, sonnet);
+          const analysis = await analyzeService(callSite, files, wsdl, provider);
           results.push(analysis);
         } catch (e) {
           console.error(`[analyzer] Failed to analyze ${callSite.serviceNamespace}:`, e);

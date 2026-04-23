@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import { join } from "path";
 import { fetchFileContent, fetchFileTree, parseRepoUrl } from "../connectors/github.js";
-import { AnthropicProvider } from "../llm/providers/anthropic.js";
+import { createProvider, type LLMProvider, loadConfig } from "../llm/index.js";
 import type { GithubConfig } from "./resolver.js";
 import type { ComponentAnalysis, FrameworkInfo, RewriteResult } from "./rewriteTypes.js";
 import {
@@ -95,7 +95,7 @@ async function fetchFiles(
 async function generateSystemOverview(
   analyses: ComponentAnalysis[],
   frameworkInfo: FrameworkInfo,
-  provider: AnthropicProvider
+  provider: LLMProvider
 ): Promise<string> {
   if (analyses.length === 0) return "No components analyzed yet.";
 
@@ -129,8 +129,8 @@ Respond with ONLY the overview paragraph. No headers, no lists.`,
 export async function analyze(config: RewriteTracerConfig): Promise<RewriteResult> {
   const { repoUrl, targetLanguage, outputDir, githubConfig } = config;
 
-  const haiku  = new AnthropicProvider("claude-haiku-4-5-20251001");
-  const sonnet = new AnthropicProvider("claude-sonnet-4-6");
+  const haiku = await createProvider("flash");
+  const sonnet = await createProvider("pro");
 
   const parsed = parseRepoUrl(repoUrl);
   if (!parsed) throw new Error(`Invalid repo URL: ${repoUrl}`);
@@ -180,7 +180,8 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
 
   // --- Cost preview ---
   if (config.onCostPreview) {
-    const estimate = estimateScanCost(nonTestComponents.length, keyFiles, 2);
+    const configData = await loadConfig();
+    const estimate = estimateScanCost(nonTestComponents.length, keyFiles, 2, configData.provider);
     const preview = formatCostPreview(estimate);
     const confirmed = await config.onCostPreview(preview);
     if (!confirmed) {

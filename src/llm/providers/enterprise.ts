@@ -1,4 +1,6 @@
-import type { LLMProvider, Message } from "./base.js";
+import type { LLMProvider, Message, ToolDefinition, ToolCall } from "./base.js";
+
+const MAX_TOOL_ITERATIONS = 8;
 
 /**
  * Enterprise Corporate Provider
@@ -99,5 +101,82 @@ export class EnterpriseProvider implements LLMProvider {
     };
 
     return json.choices[0]?.message?.content ?? "";
+  }
+
+  async chatWithTools(
+    messages: Message[],
+    tools: ToolDefinition[],
+    executeToolCall: (call: ToolCall) => Promise<string>,
+    systemPrompt?: string,
+  ): Promise<string> {
+    const token = await getAccessToken();
+    const apiBase = process.env.CCS_ENTERPRISE_API_BASE;
+    if (!apiBase) throw new Error("[Enterprise Provider] Missing CCS_ENTERPRISE_API_BASE in .env file.");
+
+    const openaiTools = tools.map((t) => ({
+      type: "function",
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: {
+          type: "object",
+          properties: Object.fromEntries(
+            t.parameters.map((p) => [p.name, { type: p.type, description: p.description }])
+          ),
+          required: t.parameters.filter((p) => p.required !== false).map((p) => p.name),
+        },
+      },
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let allMessages: any[] = [
+      ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+      ...messages.filter((m) => m.role !== "system").map((m) => ({ role: m.role, content: m.content })),
+    ];
+
+    for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+      // Re-fetch token per iteration in case it expires during a long research session
+      const iterToken = i === 0 ? token : await getAccessToken();
+
+      const response = await fetch(`${apiBase}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${iterToken}`,
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: allMessages,
+          tools: openaiTools,
+          tool_choice: "auto",
+        }),
+        signal: AbortSignal.timeout(120_000),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`[Enterprise Provider] Tool chat request failed (${response.status}): ${text}`);
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const json = (await response.json()) as any;
+      const choice = json.choices[0];
+      const message = choice.message;
+
+      if (choice.finish_reason !== "tool_calls" || !message.tool_calls?.length) {
+        return message.content ?? "";
+      }
+
+      allMessages.push(message);
+
+      for (const tc of message.tool_calls) {
+        let input: Record<string, unknown> = {};
+        try { input = JSON.parse(tc.function.arguments ?? "{}"); } catch { /* ignore */ }
+        const result = await executeToolCall({ id: tc.id, name: tc.function.name, input });
+        allMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
+      }
+    }
+
+    return allMessages[allMessages.length - 1]?.content ?? "";
   }
 }

@@ -5,7 +5,7 @@ import {
   fetchFileTree,
   parseRepoUrl,
 } from "../connectors/github.js";
-import { AnthropicProvider } from "../llm/providers/anthropic.js";
+import { createProvider, loadConfig } from "../llm/index.js";
 import { runPluginScan, groupByNamespace } from "./scanner.js";
 import type { MigratePlugin, ServiceReference } from "./types.js";
 import { resolveNamespace, findWsdlFiles } from "./resolver.js";
@@ -81,28 +81,46 @@ async function fetchServiceFiles(
   if (!owner || !repo) return [];
 
   const tree = await fetchFileTree(owner, repo, config.token, config.host);
-
-  // Find files that likely belong to this namespace
   const nsLower = namespace.toLowerCase();
-  const relevant = tree.filter((p) => {
-    const name = p.split("/").pop()?.toLowerCase() ?? "";
+  const baseName = nsLower.replace("manager", "").replace("service", "");
+
+  // Tier 1: exact implementation file (e.g. OrderManager.cs / CustomerManager.cls)
+  // Explicitly exclude interface files (I-prefix like IOrderManager.cs)
+  const implExtensions = /\.(cs|vb|cls|bas|java|py|asmx)$/;
+  const exact = tree.filter((p) => {
+    const fileName = p.split("/").pop() ?? "";
+    const fileLower = fileName.toLowerCase();
+    if (/^i[A-Z]/.test(fileName)) return false; // interface file
+    if (/test|mock|spec|stub/i.test(p)) return false;
+    return fileLower === `${nsLower}.cs` || fileLower === `${nsLower}.vb` ||
+      fileLower === `${nsLower}.cls` || fileLower === `${nsLower}.java` ||
+      fileLower === `${nsLower}.py` || fileLower === `${nsLower}.bas` ||
+      fileLower === `${nsLower}.asmx.cs`;
+  });
+
+  // Tier 2: related files (WSDL, models, client proxies) — no interface files
+  const supplementary = tree.filter((p) => {
+    const fileName = p.split("/").pop() ?? "";
+    const fileLower = fileName.toLowerCase();
+    if (/^i[A-Z]/.test(fileName)) return false;
+    if (/test|mock|spec|stub/i.test(p)) return false;
+    if (exact.includes(p)) return false;
     return (
-      name.includes(nsLower.replace("manager", "")) ||
-      name.includes(nsLower) ||
-      /\.(cs|asmx|java|vb|py)$/.test(p)
+      p.endsWith(".wsdl") ||
+      p.endsWith(".wsml") ||
+      (implExtensions.test(p) && (fileLower.includes(baseName) || fileLower.includes(nsLower)))
     );
   });
 
-  // Cap at 5 files to stay within token budget
-  const toFetch = relevant.slice(0, 5);
+  const toFetch = [...exact, ...supplementary].slice(0, 6);
   const files: Array<{ path: string; content: string }> = [];
 
   for (const filePath of toFetch) {
     try {
       const content = await fetchFileContent(owner, repo, filePath, config.token, config.host);
-      files.push({ path: `${repoFullName}/${filePath}`, content });
+      files.push({ path: filePath, content });
     } catch {
-      // skip
+      // skip unreadable files
     }
   }
   return files;
@@ -198,8 +216,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     githubConfig,
   } = config;
 
-  const haiku = new AnthropicProvider("claude-haiku-4-5-20251001");
-  const sonnet = new AnthropicProvider("claude-sonnet-4-6");
+  const haiku = await createProvider("flash");
+  const sonnet = await createProvider("pro");
 
   const parsed = parseRepoUrl(entryRepoUrl);
   if (!parsed) throw new Error(`Invalid repo URL: ${entryRepoUrl}`);
@@ -229,10 +247,12 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
 
   // Cost preview
   if (config.onCostPreview) {
+    const configData = await loadConfig();
     const estimate = estimateScanCost(
       uniqueNamespaces.length,
       entryFiles.slice(0, 5),
-      2
+      2,
+      configData.provider
     );
     const preview = formatCostPreview(estimate);
     const confirmed = await config.onCostPreview(preview);
@@ -285,16 +305,18 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       return;
     }
 
-    log(config, `Resolving ${ns}...`);
-    const resolved = await resolveNamespace(ns, githubConfig, haiku);
+    log(config, `AI Research: Searching for ${ns} across organization...`);
+    const sites = grouped.get(ns) ?? [];
+    const methodName = sites[0]?.methodName;
+    const resolved = await resolveNamespace(ns, githubConfig, haiku, entryRepoUrl, methodName);
 
     if (!resolved) {
-      log(config, `⚠ Could not resolve ${ns} — flagging as unresolved.`);
+      log(config, `AI Research: Could not resolve ${ns} — flagging as unresolved.`);
       unresolved.push(ns);
       return;
     }
 
-    log(config, `Analyzing ${ns} from ${resolved.repoFullName}...`);
+    log(config, `AI Analysis: Analyzing service logic for ${ns} in ${resolved.repoFullName}...`);
 
     try {
       const callSites = grouped.get(ns) ?? [];
@@ -387,7 +409,7 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   let indexPath: string | null = null;
   if (analyzed.length > 0) {
     try {
-      indexPath = await buildIndex(migrationDir, analyzed, finalStatus, unresolved);
+      indexPath = await buildIndex(migrationDir, analyzed, finalStatus, unresolved, sonnet);
       log(config, `✓ System index written to ${indexPath}`);
     } catch (e) {
       errors.push(`index: ${e instanceof Error ? e.message : String(e)}`);
@@ -417,6 +439,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   }
 
   log(config, `\nScan complete. ${analyzed.length} services analyzed, ${unresolved.length} unresolved.`);
+  log(config, `\n📄 Scan Report:`);
+  log(config, `   \x1b[36m${reportPath}\x1b[0m\n`);
 
   return { analyzed, unresolved, errors, indexPath, scanReportPath: reportPath };
 }

@@ -72,8 +72,8 @@ export function createPlugin(config: Partial<PluginConfig> = {}): MigratePlugin 
         const closeParen = findClosingParen(content, openParen);
         const block = content.slice(openParen + 1, closeParen);
 
-        const namespace = extractStringField(block, cfg.namespaceField);
-        if (!namespace) continue;
+        const namespace = extractStringField(block, cfg.namespaceField)?.trim();
+        if (!namespace || namespace === "unknown" || namespace.toLowerCase() === "undefined") continue;
 
         const method = extractStringField(block, cfg.methodField);
         const actionName = extractStringField(block, "actionName");

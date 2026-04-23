@@ -1,4 +1,4 @@
-import type { ServiceAnalysis } from "./analyzer.js";
+import type { ServiceAnalysis, ServiceMethod } from "./analyzer.js";
 import type { ResolvedService } from "./resolver.js";
 
 export type ContextBuildInput = {
@@ -59,6 +59,36 @@ function formatContract(contract: Record<string, string>): string {
 }
 
 // ---------------------------------------------------------------------------
+// Format all methods section
+// ---------------------------------------------------------------------------
+
+function formatMethodsSection(methods: ServiceMethod[], lang: string): string {
+  if (methods.length === 0) return "_No methods extracted — verify manually._";
+  const ext = lang === "csharp" ? "cs" : lang === "java" ? "java" : "ts";
+  return methods
+    .map((m) => {
+      const rules =
+        m.businessRules.length > 0
+          ? m.businessRules.map((r) => `  - ${r}`).join("\n")
+          : "  - _no rules extracted_";
+      const input = Object.keys(m.input).length > 0
+        ? Object.entries(m.input).map(([k, v]) => `  ${k}: ${v}`).join(", ")
+        : "unknown";
+      const output = Object.keys(m.output).length > 0
+        ? Object.entries(m.output).map(([k, v]) => `  ${k}: ${v}`).join(", ")
+        : "unknown";
+      return `### \`${m.name}\`
+_${m.purpose}_
+
+**Input:** \`${input}\`
+**Output:** \`${output}\`
+**Rules:**
+${rules}`;
+    })
+    .join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
 // Build the per-service context document
 // ---------------------------------------------------------------------------
 
@@ -74,14 +104,12 @@ export function buildContextDoc(input: ContextBuildInput): string {
 
   const unknownWarning =
     analysis.unknownFields.length > 0
-      ? `\n> The following fields could not be determined from the code and require manual investigation: ${analysis.unknownFields.join(", ")}\n`
+      ? `\n> The following fields could not be determined: ${analysis.unknownFields.join(", ")}\n`
       : "";
 
   const businessRulesSection =
     analysis.businessRules.length > 0
-      ? analysis.businessRules
-          .map((r) => `- ${r}`)
-          .join("\n")
+      ? analysis.businessRules.map((r) => `- ${r}`).join("\n")
       : "_No specific business rules extracted — verify manually._";
 
   const dbSection =
@@ -94,10 +122,23 @@ export function buildContextDoc(input: ContextBuildInput): string {
       ? analysis.nestedServiceCalls.map((s) => `- ${s}`).join("\n")
       : "_No nested service calls found._";
 
+  const errorSection =
+    analysis.errorHandling.length > 0
+      ? analysis.errorHandling.map((e) => `- ${e}`).join("\n")
+      : "_No error handling patterns extracted._";
+
+  const statusSection =
+    analysis.statusValues.length > 0
+      ? analysis.statusValues.map((s) => `- \`${s}\``).join("\n")
+      : "_No enum/status values extracted._";
+
+  const methodsSection = formatMethodsSection(analysis.allMethods, targetLanguage);
+
+  const fileExt = targetLanguage === "csharp" ? "cs" : targetLanguage === "java" ? "java" : "ts";
   const rewriteTargets = [
-    `Controller.${targetLanguage === "csharp" ? "cs" : "ts"}`,
-    `${analysis.namespace.replace("Manager", "Service")}.${targetLanguage === "csharp" ? "cs" : "ts"}`,
-    `Models/${analysis.namespace.replace("Manager", "")}.${targetLanguage === "csharp" ? "cs" : "ts"}`,
+    `Controller.${fileExt}`,
+    `${analysis.namespace.replace("Manager", "Service")}.${fileExt}`,
+    `Models/${analysis.namespace.replace("Manager", "")}.${fileExt}`,
   ];
 
   const callerLink = ghLink(
@@ -107,10 +148,11 @@ export function buildContextDoc(input: ContextBuildInput): string {
     analysis.callerLine
   );
 
+  const serviceRepoBase = resolved.htmlUrl.split("/blob")[0] ?? resolved.htmlUrl;
   const serviceFileLinks = analysis.rawFiles
     .map((f) => {
       const label = f.split("/").pop() ?? f;
-      return `| ${ghLink(label, resolved.htmlUrl.split("/blob")[0] ?? resolved.htmlUrl, f)} | Service implementation |`;
+      return `| ${ghLink(label, serviceRepoBase, f)} | Service implementation |`;
     })
     .join("\n");
 
@@ -118,7 +160,7 @@ export function buildContextDoc(input: ContextBuildInput): string {
 
 **Discovered via:** ${callerLink}
 **Service namespace:** \`${analysis.namespace}\`
-**Method:** \`${analysis.methodName}\`
+**Primary method:** \`${analysis.methodName}\`
 **Source repo:** ${resolved.repoFullName}
 **Target language:** ${targetLanguage}
 **Analyzed:** ${analysisDate}
@@ -141,7 +183,13 @@ ${analysis.dataFlow}
 
 ---
 
-## Business Rules
+## All Methods
+
+${methodsSection}
+
+---
+
+## Business Rules (Service-Wide)
 
 ${businessRulesSection}
 
@@ -149,7 +197,19 @@ ${businessRulesSection}
 
 ---
 
-## Data Contract
+## Error Handling
+
+${errorSection}
+
+---
+
+## Status & Enum Values
+
+${statusSection}
+
+---
+
+## Data Contract (Primary Method: \`${analysis.methodName}\`)
 
 **Input:**
 \`\`\`
@@ -167,7 +227,7 @@ ${formatContract(analysis.outputContract)}
 
 ${dbSection}
 
-> DB analysis is documented here for reference. Connect directly to the database in the rewrite.
+> Connect directly to the database in the rewrite — no SOAP calls.
 
 ---
 
@@ -190,28 +250,33 @@ ${serviceFileLinks}
 
 You are rewriting \`${analysis.namespace}\` as a \`${targetLanguage}\` REST API.
 
-**Before writing any code, open and read all source files listed above.**
+**Before writing any code, open and read every source file listed above.**
 
 **Produce the following files:**
 ${rewriteTargets.map((t, i) => `${i + 1}. \`${t}\``).join("\n")}
 
+**Implement every method listed in the "All Methods" section above.**
+
 **Preserve these business rules exactly — they are non-negotiable:**
 ${analysis.businessRules.length > 0 ? analysis.businessRules.map((r) => `- ${r}`).join("\n") : "- Verify business rules manually (low extraction confidence)"}
+
+**Error handling:**
+${analysis.errorHandling.length > 0 ? analysis.errorHandling.map((e) => `- ${e}`).join("\n") : "- Verify error handling manually"}
 
 **Architecture:**
 - No legacy SOAP calls — connect to the data layer directly
 - ${langConventions(targetLanguage)}
-- All business rules listed above must be preserved exactly
+- Return proper HTTP status codes mapped from the error conditions above
 
 ---
 
 ## Before You Rewrite — Verify These
 
-- [ ] The purpose description accurately reflects what this service does
-- [ ] The data flow matches what the code actually does
-- [ ] All business rules are complete and accurate
-- [ ] The input and output contracts are correct
-- [ ] All database interactions are accounted for
+- [ ] All methods in the "All Methods" section are complete and accurate
+- [ ] Every business rule is present and unambiguous
+- [ ] Input/output contracts match the actual WSDL or implementation
+- [ ] All database interactions (tables, columns, stored procs) are accounted for
+- [ ] Error handling maps correctly to HTTP status codes
 - [ ] No nested service calls are missing
 
 Reviewed by: _______________  Date: _______________

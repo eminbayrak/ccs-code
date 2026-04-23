@@ -253,6 +253,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     triggerBoot();
   }, [triggerBoot]);
 
+
   // ---------------------------------------------------------------------------
   // Input change — detect @ and / triggers
   // ---------------------------------------------------------------------------
@@ -817,6 +818,17 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       handleMigrateWizardSubmit,
     ],
   );
+
+  // Execute initialPrompt if provided on boot
+  useEffect(() => {
+    if (initialPrompt && orchestratorRef.current) {
+      // Small delay to ensure boot is fully settled and messages are ready
+      const timer = setTimeout(() => {
+        handleSubmit(initialPrompt);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [initialPrompt, handleSubmit, triggerBoot]);
 
   // ---------------------------------------------------------------------------
   // LLM call

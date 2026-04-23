@@ -5,6 +5,7 @@ import { trace } from "../migration/tracer.js";
 import { analyze } from "../migration/rewriteTracer.js";
 import { loadPlugins, listPlugins } from "../migration/pluginLoader.js";
 import * as statusTracker from "../migration/statusTracker.js";
+import { loadConfig } from "../llm/index.js";
 
 // ---------------------------------------------------------------------------
 // Resolve the migration output directory.
@@ -25,14 +26,33 @@ async function getMigrationDir(): Promise<string> {
 
 type SetupIssue = { severity: "error" | "warn"; message: string };
 
-function validateSetup(requireGithub: boolean): SetupIssue[] {
+async function validateSetup(requireGithub: boolean): Promise<SetupIssue[]> {
   const issues: SetupIssue[] = [];
+  const config = await loadConfig();
 
-  if (!process.env.CCS_ANTHROPIC_API_KEY) {
+  // Check Provider-specific keys
+  if (config.provider === "anthropic" && !process.env.CCS_ANTHROPIC_API_KEY) {
     issues.push({
       severity: "error",
-      message: "CCS_ANTHROPIC_API_KEY is not set. Add it to your .env file or environment.\n  Get a key at https://console.anthropic.com/",
+      message: "CCS_ANTHROPIC_API_KEY is not set. Get a key at https://console.anthropic.com/",
     });
+  } else if (config.provider === "openai" && !process.env.CCS_OPENAI_API_KEY) {
+    issues.push({
+      severity: "error",
+      message: "CCS_OPENAI_API_KEY is not set. Get a key at https://platform.openai.com/",
+    });
+  } else if (config.provider === "gemini" && !process.env.CCS_GEMINI_API_KEY) {
+    issues.push({
+      severity: "error",
+      message: "CCS_GEMINI_API_KEY is not set. Get a key at https://aistudio.google.com/",
+    });
+  } else if (config.provider === "enterprise") {
+     if (!process.env.CCS_ENTERPRISE_CLIENT_ID || !process.env.CCS_ENTERPRISE_CLIENT_SECRET) {
+        issues.push({
+          severity: "error",
+          message: "Enterprise credentials (ID/Secret) are missing in .env.",
+        });
+     }
   }
 
   if (requireGithub) {
@@ -44,7 +64,7 @@ function validateSetup(requireGithub: boolean): SetupIssue[] {
     if (!hasGithubToken) {
       issues.push({
         severity: "error",
-        message: "No GitHub token found. Set CCS_GITHUB_TOKEN (or GITHUB_TOKEN) in your environment.\n  Generate one at GitHub → Settings → Developer settings → Personal access tokens\n  Required scopes: repo, read:org",
+        message: "No GitHub token found. Set CCS_GITHUB_TOKEN in your environment.",
       });
     }
   }
@@ -72,7 +92,7 @@ async function handleScan(args: string[], onProgress?: (msg: string) => void): P
     if (a === "--yes" || a === "-y") autoConfirm = true;
   }
 
-  const setupIssues = validateSetup(true);
+  const setupIssues = await validateSetup(true);
   if (setupIssues.length > 0) {
     return [
       "### Setup Required",
@@ -332,7 +352,7 @@ async function handleDone(args: string[]): Promise<string> {
 // ---------------------------------------------------------------------------
 
 async function handleRewrite(args: string[], onProgress?: (msg: string) => void): Promise<string> {
-  const setupIssues = validateSetup(true);
+  const setupIssues = await validateSetup(true);
   if (setupIssues.length > 0) {
     return [
       "### Setup Required",

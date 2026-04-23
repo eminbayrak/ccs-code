@@ -1,5 +1,11 @@
-import { searchOrgCode, fetchFileTree, parseRepoUrl } from "../connectors/github.js";
+import {
+  searchOrgCode,
+  fetchFileTree,
+  fetchFileContent,
+  parseRepoUrl,
+} from "../connectors/github.js";
 import type { LLMProvider } from "../llm/providers/base.js";
+import type { ToolDefinition, ToolCall } from "../llm/providers/base.js";
 
 export type ResolvedService = {
   repoFullName: string;
@@ -14,10 +20,148 @@ export type GithubConfig = {
   host?: string;
 };
 
-// File extensions that could contain a SOAP service implementation
-const SERVICE_EXTENSIONS = [".cs", ".asmx", ".java", ".vb", ".cpp", ".py"];
+const SERVICE_EXTENSIONS = [".cs", ".asmx", ".java", ".vb", ".cls", ".bas", ".cpp", ".py"];
 
-// Naming patterns to check for a given namespace (e.g. "FooManager")
+// ---------------------------------------------------------------------------
+// AI-agent-driven resolver
+// The model is given real GitHub tools and decides how to search for the service.
+// It can make multiple calls (search → read file to confirm → decide) before
+// returning its final answer. This is far more accurate than hardcoded strategies.
+// ---------------------------------------------------------------------------
+
+async function resolveWithAgentTools(
+  namespace: string,
+  config: GithubConfig,
+  provider: LLMProvider,
+  entryRepoUrl?: string,
+): Promise<ResolvedService | null> {
+  if (!provider.chatWithTools) return null;
+
+  const host = config.host ?? "github.com";
+
+  const tools: ToolDefinition[] = [
+    {
+      name: "search_github",
+      description: `Search for code across GitHub repositories in the '${config.org}' organization. Returns a list of matching files with their repo name and path. Use specific queries first (e.g. filename:CustomerManager.cls), then broader ones if needed.`,
+      parameters: [
+        {
+          name: "query",
+          type: "string",
+          description: "GitHub code search query. Examples: 'filename:CustomerManager.cls', 'CustomerManager Class', 'CustomerManager serviceNamespace'",
+          required: true,
+        },
+      ],
+    },
+    {
+      name: "list_repo_files",
+      description: "List all files in a GitHub repository. Use this to understand a repo's structure when you have a candidate repo but aren't sure which file is the implementation.",
+      parameters: [
+        { name: "owner", type: "string", description: "GitHub username or organization name", required: true },
+        { name: "repo", type: "string", description: "Repository name", required: true },
+      ],
+    },
+    {
+      name: "read_file",
+      description: "Read the content of a specific file from GitHub to verify it contains the service implementation you are looking for.",
+      parameters: [
+        { name: "owner", type: "string", description: "GitHub username or organization name", required: true },
+        { name: "repo", type: "string", description: "Repository name", required: true },
+        { name: "path", type: "string", description: "File path within the repository (e.g. 'Services/CustomerManager.cls')", required: true },
+      ],
+    },
+  ];
+
+  const executeToolCall = async (call: ToolCall): Promise<string> => {
+    try {
+      if (call.name === "search_github") {
+        const query = call.input.query as string;
+        const results = await searchOrgCode(config.org, query, config.token, config.host);
+        if (results.length === 0) return "No results found for this query.";
+        return results
+          .slice(0, 10)
+          .map((r) => `${r.repoFullName} — ${r.filePath}`)
+          .join("\n");
+      }
+
+      if (call.name === "list_repo_files") {
+        const owner = call.input.owner as string;
+        const repo = call.input.repo as string;
+        const tree = await fetchFileTree(owner, repo, config.token, config.host);
+        if (tree.length === 0) return "Repository is empty or inaccessible.";
+        return tree.slice(0, 150).join("\n");
+      }
+
+      if (call.name === "read_file") {
+        const owner = call.input.owner as string;
+        const repo = call.input.repo as string;
+        const path = call.input.path as string;
+        const content = await fetchFileContent(owner, repo, path, config.token, config.host);
+        // Truncate to avoid burning tokens on very large files
+        return content.length > 4000 ? content.slice(0, 4000) + "\n... [truncated]" : content;
+      }
+
+      return `Unknown tool: ${call.name}`;
+    } catch (e) {
+      return `Error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  };
+
+  const entryContext = entryRepoUrl
+    ? `\nThis service was called from: ${entryRepoUrl}. It may live in the same org but a different repo.`
+    : "";
+
+  const systemPrompt =
+    "You are a research agent that finds GitHub repositories for SOAP/WCF service implementations. " +
+    "Use the tools to search GitHub, then verify by reading file content if needed. " +
+    "When confident, respond with ONLY a valid JSON object — no markdown, no explanation, just the JSON.";
+
+  const userMessage =
+    `Find the GitHub repository and source file that implements the SOAP service named "${namespace}".` +
+    `\n\nOrganization to search: "${config.org}"${entryContext}` +
+    `\n\nThis is a legacy SOAP/WCF/COM service. Common file patterns:` +
+    `\n- ${namespace}.cs, ${namespace}.vb, ${namespace}.cls (VB6 Class Module)` +
+    `\n- ${namespace}Service.cs, ${namespace}Manager.cs, ${namespace}Impl.java` +
+    `\n- I${namespace}.cs (interface — avoid this, find the implementation)` +
+    `\n\nSearch strategy: start specific (exact filename), broaden if no results.` +
+    `\nAvoid test files, mock files, and interfaces.` +
+    `\n\nWhen you have found the correct file, respond with ONLY this JSON:` +
+    `\n{"repoFullName":"owner/repo","filePath":"path/to/file","confidence":"exact"|"likely"|"ambiguous"}` +
+    `\n\nIf you cannot find it after searching, respond with:` +
+    `\n{"repoFullName":null,"filePath":null,"confidence":"none"}`;
+
+  const response = await provider.chatWithTools(
+    [{ role: "user", content: userMessage }],
+    tools,
+    executeToolCall,
+    systemPrompt,
+  );
+
+  try {
+    const match = response.match(/\{[\s\S]*?\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]) as {
+      repoFullName: string | null;
+      filePath: string | null;
+      confidence: string;
+    };
+    if (!parsed.repoFullName || !parsed.filePath) return null;
+    return {
+      repoFullName: parsed.repoFullName,
+      filePath: parsed.filePath,
+      htmlUrl: `https://${host}/${parsed.repoFullName}/blob/main/${parsed.filePath}`,
+      confidence: (["exact", "likely", "ambiguous"].includes(parsed.confidence)
+        ? parsed.confidence
+        : "likely") as "exact" | "likely" | "ambiguous",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sequential fallback — used when the provider does not support chatWithTools
+// ---------------------------------------------------------------------------
+
 function candidateFilenames(namespace: string): string[] {
   return [
     `${namespace}.cs`,
@@ -29,38 +173,33 @@ function candidateFilenames(namespace: string): string[] {
     `${namespace}.java`,
     `${namespace}ServiceImpl.java`,
     `${namespace}.vb`,
+    `${namespace}.cls`,
+    `${namespace}.bas`,
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Rank candidates using Haiku when there are multiple matches
-// ---------------------------------------------------------------------------
+function deduplicate(candidates: ResolvedService[]): ResolvedService[] {
+  const seen = new Set<string>();
+  return candidates.filter((c) => {
+    const key = `${c.repoFullName}/${c.filePath}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 async function rankCandidates(
   provider: LLMProvider,
   namespace: string,
-  candidates: ResolvedService[]
+  candidates: ResolvedService[],
 ): Promise<ResolvedService> {
-  const list = candidates
-    .map((c, i) => `${i + 1}. ${c.repoFullName}/${c.filePath}`)
-    .join("\n");
+  const list = candidates.map((c, i) => `${i + 1}. ${c.repoFullName}/${c.filePath}`).join("\n");
 
   const response = await provider.chat(
     [
       {
         role: "user",
-        content: `You are resolving a SOAP service namespace to the correct source file.
-
-Namespace to find: "${namespace}"
-
-Candidates:
-${list}
-
-Which candidate (number) is most likely the main implementation file for "${namespace}"?
-Prefer files that: match the exact name, are in a "Services" or "Implementations" folder, are .cs or .asmx files.
-Avoid interfaces (prefixed with "I"), test files, and mock files.
-
-Respond with ONLY a JSON object: {"choice": <number 1-${candidates.length}>}`,
+        content: `Which of these files is most likely the main implementation of the "${namespace}" SOAP service?\n\n${list}\n\nRespond ONLY with JSON: {"choice": <number>}`,
       },
     ],
     "You resolve service names to source files. Respond only with valid JSON."
@@ -76,75 +215,92 @@ Respond with ONLY a JSON object: {"choice": <number 1-${candidates.length}>}`,
   }
 }
 
-// ---------------------------------------------------------------------------
-// Main resolver
-// ---------------------------------------------------------------------------
-
-export async function resolveNamespace(
+async function resolveSequential(
   namespace: string,
   config: GithubConfig,
-  haikuProvider: LLMProvider
+  provider: LLMProvider,
+  entryRepoUrl?: string,
+  methodName?: string,
 ): Promise<ResolvedService | null> {
+  const host = config.host ?? "github.com";
   const candidates: ResolvedService[] = [];
+  const entryParsed = entryRepoUrl ? parseRepoUrl(entryRepoUrl) : null;
+  const entryRepoName = entryParsed ? `${entryParsed.owner}/${entryParsed.repo}` : null;
 
-  // Strategy 1: search for exact filename matches
+  // Strategy 1 — exact filename search
   for (const filename of candidateFilenames(namespace)) {
     const ext = filename.slice(filename.lastIndexOf("."));
     if (!SERVICE_EXTENSIONS.includes(ext)) continue;
-
     try {
-      const results = await searchOrgCode(
-        config.org,
-        `filename:${filename}`,
-        config.token,
-        config.host
-      );
+      const results = await searchOrgCode(config.org, `filename:${filename}`, config.token, config.host);
       for (const r of results) {
-        // Exclude test and mock files
         if (/test|mock|spec|stub/i.test(r.filePath)) continue;
         candidates.push({ ...r, confidence: "exact" });
       }
-    } catch {
-      // search API may fail — continue
-    }
+    } catch { /* continue */ }
   }
 
-  // Strategy 2: search for the namespace string in code
+  // Strategy 2 — namespace string search
   if (candidates.length === 0) {
     try {
-      const results = await searchOrgCode(
-        config.org,
-        `"${namespace}"`,
-        config.token,
-        config.host
-      );
+      const results = await searchOrgCode(config.org, `"${namespace}"`, config.token, config.host);
       for (const r of results) {
         if (/test|mock|spec|stub/i.test(r.filePath)) continue;
         const ext = r.filePath.slice(r.filePath.lastIndexOf("."));
         if (!SERVICE_EXTENSIONS.includes(ext)) continue;
         candidates.push({ ...r, confidence: "likely" });
       }
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
+  }
+
+  // Strategy 3 — method name search
+  if (candidates.length === 0 && methodName && methodName !== "unknown") {
+    try {
+      const results = await searchOrgCode(config.org, `"${methodName}"`, config.token, config.host);
+      for (const r of results) {
+        if (/test|mock|spec|stub/i.test(r.filePath)) continue;
+        const ext = r.filePath.slice(r.filePath.lastIndexOf("."));
+        if (!SERVICE_EXTENSIONS.includes(ext)) continue;
+        candidates.push({ ...r, confidence: "ambiguous" });
+      }
+    } catch { /* ignore */ }
   }
 
   if (candidates.length === 0) return null;
 
-  // Deduplicate by filePath
-  const seen = new Set<string>();
-  const unique = candidates.filter((c) => {
-    const key = `${c.repoFullName}/${c.filePath}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // Prefer entry repo matches
+  if (entryRepoName) {
+    const entryMatches = deduplicate(candidates.filter((c) => c.repoFullName === entryRepoName));
+    if (entryMatches.length === 1) return entryMatches[0] ?? null;
+    if (entryMatches.length > 1) return rankCandidates(provider, namespace, entryMatches);
+  }
 
+  const unique = deduplicate(candidates);
   if (unique.length === 1) return unique[0] ?? null;
+  return rankCandidates(provider, namespace, unique);
+}
 
-  // Multiple candidates — ask Haiku to rank
-  const best = await rankCandidates(haikuProvider, namespace, unique);
-  return { ...best, confidence: "ambiguous" };
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+export async function resolveNamespace(
+  namespace: string,
+  config: GithubConfig,
+  provider: LLMProvider,
+  entryRepoUrl?: string,
+  methodName?: string,
+): Promise<ResolvedService | null> {
+  // Use AI-agent tool research if the provider supports it
+  if (provider.chatWithTools) {
+    const result = await resolveWithAgentTools(namespace, config, provider, entryRepoUrl);
+    if (result) return result;
+    // If agent returned null (truly not found), don't fall through to sequential
+    return null;
+  }
+
+  // Fallback: hardcoded sequential search + LLM ranking
+  return resolveSequential(namespace, config, provider, entryRepoUrl, methodName);
 }
 
 // ---------------------------------------------------------------------------
@@ -153,13 +309,15 @@ export async function resolveNamespace(
 
 export async function findWsdlFiles(
   repoFullName: string,
-  config: GithubConfig
+  config: GithubConfig,
 ): Promise<string[]> {
-  const parsed = { owner: repoFullName.split("/")[0], repo: repoFullName.split("/")[1] };
-  if (!parsed.owner || !parsed.repo) return [];
+  const parts = repoFullName.split("/");
+  const owner = parts[0];
+  const repo = parts[1];
+  if (!owner || !repo) return [];
 
   try {
-    const tree = await fetchFileTree(parsed.owner, parsed.repo, config.token, config.host);
+    const tree = await fetchFileTree(owner, repo, config.token, config.host);
     return tree.filter((p) => p.endsWith(".wsdl") || p.endsWith(".xsd"));
   } catch {
     return [];
