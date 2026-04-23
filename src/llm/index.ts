@@ -14,6 +14,7 @@ export type LLMTier = "flash" | "pro";
 type CCSConfig = {
   provider: "enterprise" | "openai" | "anthropic" | "gemini";
   model?: string;
+  model_flash?: string;
 };
 
 const DEFAULT_CONFIG: CCSConfig = { provider: "openai" };
@@ -31,7 +32,7 @@ export async function loadConfig(): Promise<CCSConfig> {
 /**
  * Factory function: reads .ccs/config.json and returns the correct provider.
  * tier: "flash" (faster/cheaper) or "pro" (smarter/complex).
- * If model is explicitly set in config, it overrides the tier-based default.
+ * Priority: config.model_flash/pro -> config.model (only for pro) -> tier default.
  */
 export async function createProvider(tier: LLMTier = "pro"): Promise<LLMProvider> {
   const config = await loadConfig();
@@ -40,16 +41,22 @@ export async function createProvider(tier: LLMTier = "pro"): Promise<LLMProvider
     case "enterprise":
       return new EnterpriseProvider(config.model);
     case "anthropic": {
-      const model = config.model || (tier === "flash" ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6");
+      const model = (tier === "flash")
+        ? (config.model_flash || "claude-haiku-4-5-20251001")
+        : (config.model || "claude-sonnet-4-6");
       return new AnthropicProvider(model);
     }
     case "gemini": {
-      const model = config.model || (tier === "flash" ? "gemini-3.1-flash-lite-preview" : "gemini-3.1-pro-preview");
+      const model = (tier === "flash")
+        ? (config.model_flash || "gemini-3.1-flash-lite-preview")
+        : (config.model || "gemini-3.1-pro-preview");
       return new GeminiProvider(model);
     }
     case "openai":
     default: {
-      const model = config.model || (tier === "flash" ? "gpt-4o-mini" : "gpt-4o");
+      const model = (tier === "flash")
+        ? (config.model_flash || "gpt-4o-mini")
+        : (config.model || "gpt-4o");
       return new OpenAIProvider(model);
     }
   }

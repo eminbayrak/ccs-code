@@ -76,7 +76,7 @@ async function resolveWithAgentTools(
     try {
       if (call.name === "search_github") {
         const query = call.input.query as string;
-        onProgress?.(`search_github("${query}")`);
+        onProgress?.(`Searching GitHub: ${query}`);
         const results = await searchOrgCode(config.org, query, config.token, config.host);
         if (results.length === 0) {
           onProgress?.(`  → No results`);
@@ -90,10 +90,10 @@ async function resolveWithAgentTools(
       if (call.name === "list_repo_files") {
         const owner = call.input.owner as string;
         const repo = call.input.repo as string;
-        onProgress?.(`list_repo_files(${owner}/${repo})`);
+        onProgress?.(`Listing files: ${owner}/${repo}`);
         const tree = await fetchFileTree(owner, repo, config.token, config.host);
         if (tree.length === 0) return "Repository is empty or inaccessible.";
-        onProgress?.(`  → ${tree.length} files`);
+        onProgress?.(`  → Found ${tree.length} files`);
         return tree.slice(0, 150).join("\n");
       }
 
@@ -101,10 +101,11 @@ async function resolveWithAgentTools(
         const owner = call.input.owner as string;
         const repo = call.input.repo as string;
         const path = call.input.path as string;
-        onProgress?.(`read_file(${owner}/${repo}/${path})`);
+        const filename = path.split("/").pop() ?? path;
+        onProgress?.(`Reading implementation: ${filename}`);
         const content = await fetchFileContent(owner, repo, path, config.token, config.host);
         const lines = content.split("\n").length;
-        onProgress?.(`  → ${lines} lines`);
+        onProgress?.(`  → Read ${lines} lines`);
         return content.length > 4000 ? content.slice(0, 4000) + "\n... [truncated]" : content;
       }
 

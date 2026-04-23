@@ -150,7 +150,7 @@ function formatElapsed(ms: number): string {
   return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 }
 
-const DONE_VERBS = ["Cooked", "Brewed", "Crunched", "Synthesized", "Distilled", "Crafted", "Wrangled", "Baked"];
+const DONE_VERBS = ["Completed", "Finished", "Done", "Processed", "Ready"];
 let doneVerbIdx = 0;
 function nextDoneVerb() {
   return DONE_VERBS[doneVerbIdx++ % DONE_VERBS.length]!;

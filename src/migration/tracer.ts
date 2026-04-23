@@ -496,15 +496,15 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     const sites = grouped.get(ns) ?? [];
     const methodName = sites[0]?.methodName;
 
-    // Heartbeat — emit a dot every 10s so the UI doesn't look frozen
+    // Heartbeat — emit a status every 10s so the UI doesn't look frozen
     let heartbeatSecs = 0;
     const heartbeat = setInterval(() => {
       heartbeatSecs += 10;
       log(config, `  Searching GitHub for ${ns}... (${heartbeatSecs}s)`);
     }, 10_000);
 
-    // Hard timeout — never hang more than 60s per service
-    const RESOLVE_TIMEOUT_MS = 60_000;
+    // Hard timeout — never hang more than 2 mins per service
+    const RESOLVE_TIMEOUT_MS = 120_000;
     let resolved: Awaited<ReturnType<typeof resolveNamespace>>;
     try {
       const timeoutPromise = new Promise<null>((res) =>
@@ -517,12 +517,25 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         ),
         timeoutPromise,
       ]);
+    } catch (e) {
+      clearInterval(heartbeat);
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+        if (msg.includes("daily") || msg.includes("quota exceeded") || msg.includes("plan and billing")) {
+          log(config, `✗ LLM Daily Quota exhausted. Please switch models or try again tomorrow.`);
+          unresolved.push(ns);
+          return;
+        }
+        log(config, `⚠ LLM Burst limit reached. Waiting 30s before skipping...`);
+        await new Promise(r => setTimeout(r, 30_000));
+      }
+      throw e;
     } finally {
       clearInterval(heartbeat);
     }
 
     if (!resolved) {
-      log(config, `✗ Could not find ${ns} — timed out or not found in org`);
+      log(config, `✗ Could not resolve ${ns} — timed out or not found`);
       unresolved.push(ns);
       return;
     }

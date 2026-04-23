@@ -50,7 +50,12 @@ export class GeminiProvider implements LLMProvider {
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`[Gemini Provider] Request failed (${response.status}): ${text}`);
+      let status = "ERROR";
+      try {
+        const json = JSON.parse(text);
+        if (json.error?.status) status = json.error.status;
+      } catch { /* ignore */ }
+      throw new Error(`[Gemini Provider] Request failed (${response.status} ${status}): ${text}`);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

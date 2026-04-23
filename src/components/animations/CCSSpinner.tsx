@@ -5,41 +5,29 @@ import { ShimmerText } from "./ShimmerText.js";
 const FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 
 const THINKING_LABELS = [
-  "Thinkering…",
-  "Incubating…",
-  "Pondering…",
-  "Roosting…",
-  "Considering…",
-  "Brewing…",
-  "Synthesizing…",
-  "Stewing…",
-  "Shimmying…",
-  "Spelunking…",
-  "Boondoggling…",
-  "Snoozing…",
-  "Caramelizing…",
-  "Osmosing…",
-  "Ramening…",
-  "Whatchamacalling…",
-  "Shenaniganning…",
-  "Razzmatazzing…",
-  "Optum-izing…",
+  "Thinking…",
+  "Working…",
+  "Analyzing…",
+  "Processing…",
+  "Researching…",
 ];
 
 const STALLED_LABELS = [
   "Thinking deeply…",
   "Still working…",
   "Almost there…",
-  "Crunching hard…",
+  "Crunching…",
 ];
 
-export function CCSSpinner({ isStalled = false }: { isStalled?: boolean }) {
+export function CCSSpinner({ isStalled = false, label: overrideLabel }: { isStalled?: boolean; label?: string }) {
   const [frame, setFrame] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const [label] = useState(() => {
     const pool = isStalled ? STALLED_LABELS : THINKING_LABELS;
     return pool[Math.floor(Math.random() * pool.length)]!;
   });
+
+  const activeLabel = overrideLabel ?? label;
 
   useEffect(() => {
     const frameTimer = setInterval(() => {
@@ -57,17 +45,17 @@ export function CCSSpinner({ isStalled = false }: { isStalled?: boolean }) {
   }, []);
 
   const formatTime = (s: number) => {
+    if (s < 60) return `${s}s`;
     const mins = Math.floor(s / 60);
     const secs = s % 60;
-    if (mins > 0) return `${mins}m ${secs}s`;
-    return `${secs}s`;
+    return `${mins}m ${secs}s`;
   };
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={isStalled ? "#ef4444" : "#d97706"}>{FRAMES[frame]}</Text>
+      <Text color={isStalled ? "#f87171" : "#d1d5db"}>{FRAMES[frame]}</Text>
       <Box flexDirection="row" gap={1}>
-        <ShimmerText text={label} color={isStalled ? "#ef4444" : "#d97706"} />
+        <Text color={isStalled ? "#f87171" : "#f3f4f6"}>{activeLabel}</Text>
         <Text dimColor>({formatTime(seconds)})</Text>
       </Box>
     </Box>
