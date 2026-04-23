@@ -6,384 +6,234 @@ _ccs-code · Principal Engineer Decision_
 
 ---
 
-## Decision
+## Status: Implemented (Scanner Plugin Layer)
 
-**Open the existing connector/registry system into a true plugin architecture.
-Build `/migrate` as the first external plugin using this system.**
+The plugin architecture described in earlier drafts of this document had two layers:
 
-This document explains the decision, the design, and how to implement it.
+1. **Full CCSPlugin system** — external plugins that add slash commands and connectors to the whole app
+2. **Scanner plugin system** — plugins that define how to find service references within `/migrate scan`
+
+Layer 1 (full command plugins) remains a future capability. Layer 2 (scanner plugins) is **fully implemented** and in production use. This document describes what is actually built.
 
 ---
 
-## Why a Plugin Architecture
+## What Is Actually Built
 
-The tool is growing: `/harvest`, `/vault`, `/enrich`, `/migrate` — and more will come.
-Without a plugin boundary, every new capability gets compiled into the core binary.
-That creates a monolith that is hard to maintain, impossible to extend without touching core code,
-and difficult to audit for security.
+### The Scanner Plugin Interface
 
-A plugin system solves this:
-- Core stays lean and stable
-- New capabilities are isolated, versioned, and independently deployable
-- External contributors (or a company's internal team) can add capabilities without touching core
-- Features can be enabled per-environment: development machine vs. company deployment
-
-## Why Not a Separate Plugin System
-
-The existing codebase already has the right shape:
-
-- `ConnectorAdapter` in `src/connectors/base.ts` — the connector interface
-- `ToolDescriptor` in `src/capabilities/types.ts` — the tool contract
-- `loadCapabilities()` in `src/capabilities/registry.ts` — the aggregation point
-
-The only thing missing is **dynamic discovery**. Right now `loadConnectorAdapters()` hardcodes the list:
+Every scanner plugin is a JS module that default-exports a `MigratePlugin` object:
 
 ```ts
-function loadConnectorAdapters(): ConnectorAdapter[] {
-  return [githubConnector, jiraConnector];  // ← closed list
+// src/migration/types.ts
+
+export interface MigratePlugin {
+  name: string;
+  fileExtensions: string[];          // e.g. [".js", ".ts", ".jsx", ".mjs"]
+  scan(file: { path: string; content: string }): ServiceReference[];
+}
+
+export interface ServiceReference {
+  callerFile: string;
+  lineNumber: number;
+  serviceNamespace: string;
+  methodName: string;
+  metadata: Record<string, string>;  // plugin-specific extracted fields
 }
 ```
 
-One change — scanning `.ccs/plugins/` instead of importing a hardcoded list — unlocks the whole system.
-There is no need to design a new plugin protocol from scratch.
-
-## Prior Art
-
-This pattern is well established:
-
-| Tool | Plugin directory | Manifest | Export contract |
-|------|-----------------|----------|----------------|
-| Claude Code | `.claude/commands/` | none (file = command) | default export function |
-| Obsidian | `.obsidian/plugins/<name>/` | `manifest.json` | `Plugin` class |
-| VS Code | `~/.vscode/extensions/` | `package.json` | `activate()` function |
-| Raycast | npm packages | `package.json` | `Command` export |
-
-ccs-code follows the same idea: a well-known directory, a manifest, a standard export shape.
+The core app calls `plugin.scan(file)` on every file matching `plugin.fileExtensions`. The plugin returns `ServiceReference[]`. The core does the rest — resolve, analyze, build context docs, write status.
 
 ---
 
-## Plugin Contract
+## The Built-In SOAP Plugin
 
-Every plugin is a directory under `.ccs/plugins/<plugin-name>/`.
+`plugins/migrate-soap/` is the first and currently only built-in scanner plugin.
 
-### Manifest — `ccs-plugin.json`
+### What it does
+
+Finds every `constructSoapRequest(...)` call (configurable function name) across Node.js/TypeScript files and extracts:
+
+| Field | Source |
+|-------|--------|
+| `serviceNamespace` | `serviceNamespace` key in the config object |
+| `methodName` | `methodName` key in the config object |
+| `isXmlResponse` | `isXmlResponse` flag → stored in `metadata` |
+| `parameterFlags` | boolean flags from the `parameters` array → stored in `metadata` |
+
+Nested parentheses are handled correctly — `findClosingParen()` walks the string character by character so deeply nested config objects don't break extraction.
+
+### Files
+
+```
+plugins/
+  migrate-soap/
+    index.ts          — TypeScript source
+    index.js          — compiled ESM output (committed — works without a build step)
+    ccs-plugin.json   — manifest: { name, version, entry }
+```
+
+### Configurable factory
+
+```ts
+import { createPlugin } from "plugins/migrate-soap/index.js";
+
+// Default: looks for "constructSoapRequest"
+const plugin = createPlugin();
+
+// Custom function name in your codebase
+const plugin = createPlugin({ callerFunctionName: "callExternalService" });
+
+// Custom field names in the config object
+const plugin = createPlugin({
+  callerFunctionName: "callService",
+  namespaceField: "serviceName",
+  methodField: "operation",
+});
+```
+
+---
+
+## Plugin Discovery
+
+`src/migration/pluginLoader.ts` implements three-tier discovery. When `/migrate scan` runs, it searches these locations in order:
+
+| Priority | Location | Purpose |
+|----------|----------|---------|
+| 1 (highest) | `.ccs/plugins/` in current project directory | Project-specific overrides |
+| 2 | `~/.ccs/plugins/` in user home | Global user-installed plugins |
+| 3 (lowest) | Built-in `plugins/` directory | Shipped with the tool |
+
+The built-in directory is found differently depending on how the tool is running:
+
+```ts
+function builtinPluginsDir(): string {
+  const arg1 = process.argv[1] ?? "";
+  if (arg1.endsWith(".ts") || arg1.endsWith(".tsx") || arg1.endsWith(".js")) {
+    // Dev mode (bun run src/main.tsx) — arg1 is the script file
+    // plugins/ is two levels up from src/main.tsx
+    return join(dirname(arg1), "..", "..", "plugins");
+  }
+  // Binary mode (./ccs) — arg0 is the compiled binary
+  // plugins/ is a sibling of the binary
+  return join(dirname(process.argv[0] ?? ""), "plugins");
+}
+```
+
+This means built-in plugins work immediately in both `bun run src/main.tsx` (dev) and `./ccs` (binary) without any install step.
+
+### Plugin manifest
+
+Each plugin directory must contain `ccs-plugin.json`:
 
 ```json
 {
-  "name": "migrate",
-  "version": "0.1.0",
-  "description": "Scans legacy codebases and generates migration context for AI rewrite tools",
-  "entry": "index.js",
-  "commands": ["migrate"],
-  "connectors": []
+  "name": "migrate-soap",
+  "version": "1.0.0",
+  "entry": "index.js"
 }
 ```
 
-### Entry Point — `index.js` (compiled from TypeScript)
+The `entry` field points to the compiled JS file. The loader calls `import(entryPath)` and reads `module.default` as the `MigratePlugin` object.
 
-The entry point must export a default object satisfying `CCSPlugin`:
+---
 
-```ts
-// src/plugin.ts (in each plugin repo)
-
-import type { ConnectorAdapter } from 'ccs-code/connectors/base'
-
-export interface CommandPlugin {
-  name: string           // slash command name — e.g. "migrate" registers /migrate
-  description: string
-  handler: (args: string[], cwd: string) => Promise<string>
-}
-
-export interface CCSPlugin {
-  name: string
-  version: string
-  commands?: CommandPlugin[]
-  connectors?: ConnectorAdapter[]
-}
-```
-
-A plugin can contribute **commands**, **connectors**, or both.
-
-- **Commands** add slash commands: `/migrate`, `/review`, `/standup`, etc.
-- **Connectors** add tools the LLM orchestrator can call during agent runs.
-
-### Example Plugin Entry Point
+## Plugin Loader API
 
 ```ts
-// migrate plugin — .ccs/plugins/migrate/index.ts
+import { loadPlugins, loadPlugin, listPlugins } from "./pluginLoader.js";
 
-import { handleMigrateCommand } from './migration/command.js'
-import type { CCSPlugin } from 'ccs-code'
+// Load all plugins from all search dirs
+const plugins = await loadPlugins(cwd);
 
-const plugin: CCSPlugin = {
-  name: 'migrate',
-  version: '0.1.0',
-  commands: [
-    {
-      name: 'migrate',
-      description: 'Scan a legacy codebase and generate AI migration context',
-      handler: handleMigrateCommand,
-    }
-  ],
-  connectors: [],
-}
+// Load a specific named plugin
+const plugin = await loadPlugin("migrate-soap", cwd);
 
-export default plugin
+// List installed plugins (for /migrate plugin list)
+const list = await listPlugins(cwd);
+// → [{ name, version, location, path }]
 ```
 
 ---
 
-## App.tsx Integration Points
+## Building and Extending Plugins
 
-Two specific locations in `src/components/App.tsx` must be updated:
-
-### 1. `SLASH_COMMANDS` array (line 80)
-
-Currently hardcoded. At boot time, merge plugin commands into this list so they
-appear in autocomplete suggestions:
-
-```ts
-// After plugins are loaded in triggerBoot()
-const pluginSuggestions = loadedPlugins.flatMap(p =>
-  (p.commands ?? []).map(c => ({
-    id: c.name,
-    label: `/${c.name} `,
-    description: c.description,
-  }))
-)
-// Merge into SLASH_COMMANDS state (convert from const to state)
-setSlashCommands([...BUILT_IN_COMMANDS, ...pluginSuggestions])
-```
-
-### 2. `executeSlashCommand` switch statement (line 371)
-
-Add a plugin lookup before the `default:` case:
-
-```ts
-default: {
-  const pluginCmd = loadedPluginCommands.find(c => c.name === id)
-  if (pluginCmd) {
-    setMessages(prev => [...prev, createUIMessage('assistant', `Running /${id}...`)])
-    pluginCmd.handler(args, process.cwd()).then(output => {
-      setMessages(prev => [...prev, createUIMessage('assistant', output)])
-    })
-    break
-  }
-  setMessages(prev => [...prev, createUIMessage('assistant', `Unknown command: /${id}`)])
-  break
-}
-```
-
-Both `loadedPlugins` and `loadedPluginCommands` are populated in `triggerBoot()` and stored in refs,
-same pattern as `providerRef` and `orchestratorRef`.
-
----
-
-## Changes to Core
-
-### 1. Add plugin types to `src/capabilities/types.ts`
-
-```ts
-export interface CommandPlugin {
-  name: string
-  description: string
-  handler: (args: string[], cwd: string) => Promise<string>
-}
-
-export interface CCSPlugin {
-  name: string
-  version: string
-  commands?: CommandPlugin[]
-  connectors?: ConnectorAdapter[]
-}
-```
-
-### 2. Add plugin loader to `src/capabilities/registry.ts`
-
-```ts
-import { join } from 'path'
-import { promises as fs } from 'fs'
-import type { CCSPlugin } from './types.js'
-
-const PLUGIN_DIR = join(os.homedir(), '.ccs', 'plugins')
-
-async function loadPlugins(): Promise<CCSPlugin[]> {
-  const plugins: CCSPlugin[] = []
-
-  let entries: string[]
-  try {
-    entries = await fs.readdir(PLUGIN_DIR)
-  } catch {
-    return []  // no plugins directory — fine
-  }
-
-  for (const entry of entries) {
-    const manifestPath = join(PLUGIN_DIR, entry, 'ccs-plugin.json')
-    const entryPath = join(PLUGIN_DIR, entry, 'index.js')
-
-    try {
-      const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf-8'))
-      const mod = await import(entryPath)
-      const plugin = mod.default as CCSPlugin
-
-      if (plugin && plugin.name) {
-        plugins.push(plugin)
-      }
-    } catch (e) {
-      console.warn(`[plugins] Failed to load plugin "${entry}":`, e)
-    }
-  }
-
-  return plugins
-}
-```
-
-Update `loadCapabilities()` to incorporate plugin connectors and return plugin commands:
-
-```ts
-export async function loadCapabilities(cwd: string): Promise<CapabilitySnapshot> {
-  const localTools = getLocalTools()
-  const builtInAdapters = loadConnectorAdapters()  // github, jira — stays as-is
-  const plugins = await loadPlugins()
-
-  const pluginAdapters = plugins.flatMap(p => p.connectors ?? [])
-  const pluginCommands = plugins.flatMap(p => p.commands ?? [])
-
-  const allAdapters = [...builtInAdapters, ...pluginAdapters]
-
-  const connectors: ConnectorDescriptor[] = allAdapters.map(adapter => ({
-    id: `connector.${adapter.name}`,
-    name: adapter.name,
-    kind: 'connector',
-    tools: adapter.getTools({ cwd }),
-  }))
-
-  return {
-    tools: [...localTools, ...connectors.flatMap(c => c.tools)],
-    connectors,
-    commands: pluginCommands,   // new field — slash commands from plugins
-  }
-}
-```
-
-### 3. Update command dispatch to check plugin commands
-
-Wherever slash commands are currently routed (command handler in `main.tsx` or orchestrator),
-add a check against loaded plugin commands before falling through to built-in handlers:
-
-```ts
-// pseudocode — adapt to actual dispatch location
-const pluginCommand = loadedPluginCommands.find(c => c.name === commandName)
-if (pluginCommand) {
-  return pluginCommand.handler(args, cwd)
-}
-// fall through to built-in commands
-```
-
----
-
-## Plugin Directory Layout
-
-```
-~/.ccs/
-  plugins/
-    migrate/
-      ccs-plugin.json
-      index.js
-      migration/
-        scanner.js
-        resolver.js
-        tracer.js
-        analyzer.js
-        wsdlParser.js
-        contextBuilder.js
-        indexBuilder.js
-        statusTracker.js
-    review/          ← future plugin
-      ccs-plugin.json
-      index.js
-    standup/         ← future plugin
-      ccs-plugin.json
-      index.js
-```
-
-Plugins live in the user's home directory under `~/.ccs/plugins/`, not inside the project repo.
-This means:
-- The core tool repo stays clean — no plugin code
-- Each plugin is independently versioned and installed
-- Company deployments can pre-install plugins without touching the core binary
-
----
-
-## Plugin Development Workflow
-
-To develop and install a plugin locally:
+### Rebuild the built-in SOAP plugin
 
 ```bash
-# 1. Create the plugin directory
-mkdir -p ~/.ccs/plugins/migrate
-
-# 2. Build the plugin
-cd ~/projects/ccs-migrate-plugin
-bun run build   # outputs to dist/
-
-# 3. Copy to plugin directory
-cp dist/index.js ~/.ccs/plugins/migrate/
-cp ccs-plugin.json ~/.ccs/plugins/migrate/
-
-# 4. The tool picks it up automatically on next run
-ccs
-# → /migrate is now available
+bun run build:plugins
+# Runs: bun build ./plugins/migrate-soap/index.ts --outfile ./plugins/migrate-soap/index.js --format esm
 ```
 
-For development, symlink instead of copying:
+### Build everything (binary + plugins)
 
 ```bash
-ln -s ~/projects/ccs-migrate-plugin/dist ~/.ccs/plugins/migrate
+bun run build:all
+```
+
+### Write a new scanner plugin
+
+1. Create a directory under `plugins/<your-plugin-name>/`
+2. Write `index.ts` exporting a default `MigratePlugin` object
+3. Write `ccs-plugin.json` manifest
+4. Compile: `bun build ./plugins/<name>/index.ts --outfile ./plugins/<name>/index.js --format esm`
+
+Or install as a user plugin at `~/.ccs/plugins/<your-plugin-name>/`.
+
+### Example: gRPC plugin skeleton
+
+```ts
+import type { MigratePlugin, ServiceReference } from "../../src/migration/types.js";
+
+const plugin: MigratePlugin = {
+  name: "migrate-grpc",
+  fileExtensions: [".py", ".go", ".ts"],
+  scan(file) {
+    const refs: ServiceReference[] = [];
+    // Find stub.MethodName() calls and extract service + method
+    // Push to refs...
+    return refs;
+  },
+};
+
+export default plugin;
 ```
 
 ---
 
-## What Is Built-In vs. Plugin
+## Plugin Selection at Runtime
 
-| Capability | Location | Reason |
-|------------|----------|--------|
-| `/harvest` | Built-in | Core feature, used by everyone |
-| `/vault` | Built-in | Core feature, used by everyone |
-| `/enrich` | Built-in | Core feature, used by everyone |
-| GitHub connector | Built-in | Core integration, used by many features |
-| Jira connector | Built-in | Core integration |
-| `/migrate` | **Plugin** | Large, specialized, not needed by all users |
-| Future: `/review` | Plugin | Specialized |
-| Future: `/standup` | Plugin | Specialized |
+When running `/migrate scan`, specify the plugin with `--plugin`:
 
-The rule: if a feature is needed to make the core tool work, it is built-in.
-If it is a large, specialized capability that specific users opt into, it is a plugin.
+```
+/migrate scan --repo ... --lang ... --plugin migrate-soap
+```
 
----
+Without `--plugin`, the loader picks the first plugin found across the three search directories. Since `migrate-soap` is the only built-in plugin, it is selected by default for new users.
 
-## Implementation Order
+Use `/migrate plugin list` to see all available plugins and where they were found:
 
-1. Add `CommandPlugin` and `CCSPlugin` types to `src/capabilities/types.ts`
-2. Write `loadPlugins()` in `src/capabilities/registry.ts`
-3. Update `loadCapabilities()` to merge plugin connectors and return plugin commands
-4. Update command dispatch to check plugin commands
-5. Build the `migrate` plugin as a separate project in `~/.ccs/plugins/migrate/`
+```
+Available scanner plugins:
 
-Steps 1–4 are small, focused changes to core.
-Step 5 is the full migrate feature build — follows `migrate-feature-build-instructions.md`.
+  migrate-soap  v1.0.0  [built-in]
+    /path/to/ccs-code/plugins/migrate-soap/index.js
+
+  my-grpc-plugin  v0.1.0  [~/.ccs/plugins]
+    /Users/you/.ccs/plugins/my-grpc-plugin/index.js
+```
 
 ---
 
-## What This Unlocks Long Term
+## Future: Full Command Plugin System
 
-Once the plugin system exists, the tool becomes a platform:
+The original design (CCSPlugin with commands and connectors) is still the right long-term direction. When built, it will allow:
 
-- **Company-specific plugins** — internal teams can add capabilities without touching core
-- **Community plugins** — others can build and share plugins as npm packages
-- **Per-environment installs** — dev machine has all plugins, CI has only what it needs
-- **Security boundary** — plugins run in the same process but are clearly separated from core logic
+- External plugins that register new slash commands (e.g., `/review`, `/standup`)
+- External connectors that add LLM tools (e.g., Jira, Linear, Slack)
+- Per-environment plugin sets (dev machine vs. CI)
+
+The scanner plugin system built here follows the same discovery conventions (`ccs-plugin.json`, three-tier search), so extending it to support full command plugins later will not require changing the plugin format.
 
 ---
 
-_ccs-code · Plugin Architecture Decision · 2026-04-22_
+_ccs-code · Plugin Architecture · 2026-04-22_

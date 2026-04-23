@@ -6,9 +6,7 @@ _ccs-code · Principal Engineer Standards_
 
 ---
 
-This document defines what "trustworthy" means for this tool and the specific requirements
-that enforce it. A tool that does its job well 80% of the time and silently fails the other 20%
-is worse than useless — developers will build wrong code from wrong context.
+This document defines what "trustworthy" means for this tool and the specific requirements that enforce it. A tool that does its job well 80% of the time and silently fails the other 20% is worse than useless — developers will build wrong code from wrong context.
 
 Every feature built in this tool must meet these standards.
 
@@ -22,8 +20,7 @@ This tool makes claims. Developers act on those claims:
 - "This service calls BarService" → developer includes BarService in scope
 - "The input contract is `{ patientId: string }`" → developer builds the new endpoint to match
 
-If any of these claims are wrong — due to hallucination, missed files, or incomplete scanning —
-the rewrite will be wrong. In a healthcare system, a wrong rewrite could be a compliance failure.
+If any of these claims are wrong — due to hallucination, missed files, or incomplete scanning — the rewrite will be wrong. In a healthcare system, a wrong rewrite could be a compliance failure.
 
 Trust is not a nice-to-have. It is the entire point of the tool.
 
@@ -37,12 +34,9 @@ Trust is not a nice-to-have. It is the entire point of the tool.
 
 - The LLM prompt explicitly instructs: "If uncertain, use `"unknown"` — do not guess"
 - Every extracted fact includes a `confidence` level: `high | medium | low`
-- `low` confidence fields are blocked from being presented as facts — they become flagged items
-  requiring human verification before the context doc is considered usable
-- JSON output from the LLM is validated against a strict schema — if it fails, the service
-  is marked `needs-review`, not silently passed through with corrupt data
-- No field is synthesized by combining information from unrelated files — the LLM only
-  claims what it can directly see in the code provided to it
+- `low` confidence fields are flagged in the context doc for human review — not presented as facts
+- JSON output from the LLM is validated — if parse fails, the service is marked `needs-review`, not silently passed through
+- No field is synthesized by combining information from unrelated files — the LLM only claims what it can directly see in the code provided
 
 **What this looks like in the output:**
 
@@ -68,14 +62,9 @@ Trust is not a nice-to-have. It is the entire point of the tool.
   - Total service references found
   - How many were resolved, partially resolved, or unresolved
   - Exactly which services were not resolved and why
-- Unresolved services are never silently dropped — they appear in the system index under
-  "Unresolved (needs manual input)" with the namespace that was found
-- If a file could not be fetched (permission error, deleted, too large), it is logged in the
-  scan report — not skipped without record
-- The system index `_index.md` shows a completeness percentage: `9/12 services fully analyzed`
-
-**The rule:** the developer must be able to look at the scan report and know
-with certainty whether the tool saw everything. No ambiguity about what was covered.
+- Unresolved services are never silently dropped — they appear in the system index under "Unresolved (needs manual input)"
+- If a file could not be fetched (permission error, deleted, too large), it is logged — not skipped without record
+- The system index shows a completeness count: `9/12 services fully analyzed`
 
 ---
 
@@ -83,17 +72,10 @@ with certainty whether the tool saw everything. No ambiguity about what was cove
 
 **How we enforce it:**
 
-- Every fact in a context document links to the exact source file and line range on GitHub
-  using line anchors: `github.com/org/repo/file.cs#L42-L78`
-- The context doc header shows which files were used to produce it — the developer can
-  open each one and verify the tool's interpretation
+- Every fact in a context document links to the exact source file and line range on GitHub using line anchors: `github.com/org/repo/file.cs#L42-L78`
+- The context doc header shows which files were used to produce it
 - The system index shows exactly where each service was discovered: `routes/foo.js:14`
-- No claim appears without a source reference. If the source cannot be identified,
-  the claim is marked as unverified
-
-**Why line numbers matter:** A developer who sees "SSN masking applied" and wants to verify it
-should be able to click one link and see the exact 3 lines of code that do the masking.
-Without line anchors, the link is a navigation hint. With line anchors, it is a proof.
+- No claim appears without a source reference
 
 ---
 
@@ -103,12 +85,10 @@ Without line anchors, the link is a navigation hint. With line anchors, it is a 
 
 - The tool never pretends to have analyzed something it did not analyze
 - If a service was found but not resolvable to a repo, it is listed as a gap — not omitted
-- If the LLM returned low confidence on a service, the context doc prominently shows this —
-  it does not get quietly published as if it were authoritative
-- The verification checklist at the bottom of every context doc forces the developer to
-  explicitly sign off before the status advances — the tool does not auto-advance to `in-progress`
-- The scan report always includes: "If you believe something is missing, these are the
-  likely causes: [list of common resolution failures]"
+- Low-confidence services show a prominent warning in their context doc — not published as authoritative
+- The `verify` command requires explicit human sign-off before status advances
+- The `done` command requires `verified: true` first — throws an error otherwise
+- Low-confidence services can still be verified (the warning is advisory, not a block) — the human reviewer decides, not the tool
 
 ---
 
@@ -117,12 +97,12 @@ Without line anchors, the link is a navigation hint. With line anchors, it is a 
 **How we enforce it:**
 
 - The tracer writes a checkpoint to `migration-status.json` after analyzing every single service
-- If the scan crashes, timeouts, or hits a rate limit midway, the next run resumes from
-  the last checkpoint — it does not start over
-- Rate limits are handled explicitly: read `Retry-After` or `X-RateLimit-Reset` headers,
-  wait the specified time, then continue — never fail with a 403 and stop
+- If the scan crashes, timeouts, or hits a rate limit midway, the next run resumes from the last checkpoint — it does not start over
 - All file fetch failures are caught and logged — they do not crash the scan
 - The tool can be safely interrupted and resumed at any point
+- `status.load()` is null-checked explicitly — a missing status file produces a clear error, not a runtime crash
+
+**Note on interactive confirmation:** The tool does not use interactive prompts (`readline`) for cost confirmation because Ink controls `process.stdin` and the two conflict (deadlock). Instead, cost is shown without `--yes` (command exits after preview), and with `--yes` it proceeds automatically. This is more reliable than interactive confirmation and works in all terminal environments.
 
 ---
 
@@ -130,11 +110,34 @@ Without line anchors, the link is a navigation hint. With line anchors, it is a 
 
 **How we enforce it:**
 
-- Before any LLM call, estimate the token count of all files to be analyzed
-- Show the user a cost preview: estimated Haiku tokens + Sonnet tokens + approximate cost
-- Only proceed after explicit user confirmation (`y/n`)
-- After the scan, log actual tokens used vs. estimated — so the user can calibrate future runs
-- Token counts per service are stored in `migration-status.json` for auditability
+- Before any LLM call, `estimateScanCost()` estimates token count of all files to be analyzed
+- `formatCostPreview()` displays: estimated Haiku tokens + Sonnet tokens + approximate cost
+- Without `--yes`: command shows the estimate and exits — no LLM calls made
+- With `--yes`: command proceeds immediately
+- This prevents accidental large token spend on large repos
+
+---
+
+## Pre-flight Validation
+
+Before any LLM call or network request, `validateSetup(requireGithub)` checks:
+
+1. `CCS_ANTHROPIC_API_KEY` — must be set and non-empty (severity: `error`)
+2. GitHub token (`CCS_GITHUB_TOKEN`, `GITHUB_TOKEN`, or `GITHUB_PRIVATE_TOKEN`) — must be set if scanning a private repo (severity: `warning` for public, `error` for private)
+
+Returns `SetupIssue[]` with severity and actionable message. If any `error` severity issue is found, the command exits before doing anything else. The developer sees a clear message like:
+
+```
+✗ Missing CCS_ANTHROPIC_API_KEY — set this environment variable to your Anthropic API key
+```
+
+This prevents 10+ minutes of waiting only to fail at the first LLM call.
+
+---
+
+## Vault Fallback
+
+`getMigrationDir()` no longer throws if no vault is configured. It falls back to `~/.ccs/migration`. This means `/migrate scan` works immediately in a fresh environment without requiring the user to set up a vault first.
 
 ---
 
@@ -145,94 +148,85 @@ Without line anchors, the link is a navigation hint. With line anchors, it is a 
 - Generate rewritten code — it prepares context, not output
 - Auto-commit or auto-push anything
 - Modify the repos it is scanning
-- Store credentials anywhere except the user's local config files
+- Store credentials anywhere except environment variables or the user's local config files
 - Make network requests to anything other than GitHub API and the configured LLM provider
 
 These boundaries are what make the tool safe to use in a corporate environment.
-A tool that only reads and writes locally is easy to audit, easy to approve, and easy to trust.
 
 ---
 
 ## Testing Requirements
 
-A tool that claims to be accurate must be testable. Every core module needs tests.
+A tool that claims to be accurate must be testable. Current test coverage:
 
-| Module | Test type | What to test |
-|--------|-----------|-------------|
-| `scanner.ts` | Unit | Given known code samples, extracts correct `serviceNamespace` and `methodName` |
-| `wsdlParser.ts` | Unit | Given known WSDL strings, extracts correct operation names and schemas |
-| `resolver.ts` | Integration (mocked GitHub) | Resolves known namespaces to correct repos |
-| `analyzer.ts` | Integration (mocked LLM) | Correctly parses LLM JSON output; handles parse failures gracefully |
-| `contextBuilder.ts` | Unit | Given known analysis, produces correctly formatted markdown |
-| `statusTracker.ts` | Unit | Read/write/resume logic works correctly |
-| `tracer.ts` | Integration | Loop detection works; partial failure resumes correctly |
+| Module | Tests | Status |
+|--------|-------|--------|
+| `scanner.ts` | 22 tests in `scanner.test.ts` | ✅ Passing |
+| `wsdlParser.ts` | 6 tests in `wsdlParser.test.ts` | ✅ Passing |
+| `resolver.ts` | Integration (mocked GitHub) | Pending |
+| `analyzer.ts` | Integration (mocked LLM) | Pending |
+| `contextBuilder.ts` | Unit | Pending |
+| `statusTracker.ts` | Unit | Pending |
+| `tracer.ts` | Integration | Pending |
 
-The scanner tests are the most critical — they are the foundation of everything.
-Write them first, before writing the scanner itself.
+**Total: 28 tests passing.** All run with `bun test`.
+
+### Scanner tests cover
+
+- Single call site extraction
+- Multiple call sites in one file
+- Metadata extraction (`isXmlResponse`, parameter flags)
+- Configurable function name (`callerFunctionName`)
+- Configurable field names (`namespaceField`, `methodField`)
+- Nested parentheses handled correctly
+- Missing `serviceNamespace` → call site skipped (no false positives)
+- `runPluginScan`: extension filtering, `filesWithRefs` counter
+- `groupByNamespace`: correct grouping by namespace key
+
+### WSDL parser tests cover
+
+- Service name extraction
+- Target namespace extraction
+- Operation name extraction
+- Input/output message extraction
+- Empty WSDL input
+- Malformed input (no crash)
 
 ---
 
 ## Architectural Decisions (Resolved)
 
 ### 1. Multi-file services — send all files at once
-When a service spans multiple files (interface + implementation + helpers), send all of them
-to the LLM in a single call. More accurate analysis justifies the extra tokens.
-The analyzer bundles all files belonging to one service namespace before calling Sonnet.
+When a service spans multiple files (interface + implementation + helpers), send all of them to the LLM in a single call. More accurate analysis justifies the extra tokens.
 
 ### 2. Database interactions — leaf node for now, plugin later
-When the scanner finds a stored procedure call or raw SQL, treat it as a **leaf node**.
-Document the call (procedure name, table name) in the context doc but do not attempt to
-fetch the procedure definition or schema.
-
-Database analysis is a **future plugin** — not core. Two plugin options to build later:
-- **GitHub DB plugin** — searches the org for database migration scripts/schema repos and analyzes them
-- **Direct DB plugin** — connects to a live database to fetch schema and stored procedure definitions
-
-Neither is needed for MVP. The context doc notes the database interaction clearly enough
-for a developer to investigate manually.
+When the scanner finds a stored procedure call or raw SQL, treat it as a leaf node. Document the call in the context doc but do not attempt to fetch the procedure definition or schema. Database analysis is a future plugin.
 
 ### 3. Verification workflow — built into the tool
-The tool tracks verification as a first-class status. A context doc is not considered
-ready for rewriting until a human has marked it verified.
+`/migrate verify <Name> --by <initials>` records `verified: true`, `verifiedBy`, `verifiedAt`. Status only advances to `done` after `verified: true`. The `done` command enforces this — throws if not verified. Low-confidence services display an advisory warning but can still be verified if the reviewer is satisfied.
 
-Built-in command:
-```
-/migrate verify <ServiceName>
-```
-This prompts the developer to confirm the checklist items and records:
-```json
-{
-  "verified": true,
-  "verifiedBy": "dev name or initials",
-  "verifiedAt": "ISO timestamp"
-}
-```
-Status only advances `analyzed → in-progress` after `verified: true`.
-This is non-negotiable — it is what separates a trustworthy tool from an overconfident one.
+### 4. Re-analysis — idempotency now, `/sync` later
+**Current:** Basic idempotency — skip services whose status is already `analyzed`. Use `/migrate rescan <Name>` to force re-analysis of a single service.
 
-### 4. Re-analysis — idempotency now, `/sync` later (Principal Engineer decision)
-**Day one:** Basic idempotency — skip services whose context doc already exists.
-Use `/migrate rescan <ServiceName>` to force re-analysis of a single service.
+**Near-term:** A `/sync` command that uses git SHA comparison to detect changed source files and re-analyzes only affected services.
 
-**Near-term enhancement (not MVP):** A `/sync` command that uses git SHA comparison
-to detect which source files changed since the last scan and re-analyzes only affected services.
+### 5. Interactive prompts — replaced by `--yes` flag
+`readline.createInterface` on `process.stdin` conflicts with Ink's terminal control and causes deadlocks. All interactive confirmation is replaced by the `--yes` flag pattern. This is more reliable and works in CI/automated environments.
 
-Reasoning: idempotency is needed immediately — without it the tool is unusable on large repos.
-Full diff-based sync is convenient but not blocking. Ship the important thing first.
+### 6. Plugin architecture — scanner plugins only (for now)
+The migrate feature uses a scanner plugin system (not a full command plugin system). The plugin interface (`MigratePlugin`) is narrow and stable. Full command plugins (adding new slash commands to the app) remain a future capability. See `docs/plugin-architecture.md`.
 
 ---
 
 ## Remaining Enhancements (Post-MVP)
-
-These are valid features that do not block the first usable version:
 
 | Enhancement | What it adds |
 |-------------|-------------|
 | DB plugin (GitHub) | Finds and analyzes schema/migration scripts from org repos |
 | DB plugin (Direct) | Connects to live database for schema and stored proc definitions |
 | `/sync` command | Diff-based re-analysis — only re-scans changed services |
-| Multi-pattern scanner | Support non-SOAP patterns (gRPC stubs, REST clients, etc.) via additional plugins |
-| Output format options | Export context docs as JSON or structured prompt format in addition to markdown |
+| Full command plugin system | External plugins that add slash commands to the app |
+| Token audit | Log actual tokens used vs. estimated after each scan |
 
 ---
 

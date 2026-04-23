@@ -8,8 +8,8 @@ _ccs-code · Internal Developer Tool_
 
 |          |                          |
 | -------- | ------------------------ |
-| Status   | Draft                    |
-| Version  | 0.4                      |
+| Status   | Implemented              |
+| Version  | 1.0                      |
 | Author   | Emin BAYRAK              |
 | Audience | Engineering Team         |
 
@@ -17,24 +17,22 @@ _ccs-code · Internal Developer Tool_
 
 ## Vision
 
-This is a **general-purpose migration intelligence platform**. Any development team
-doing any kind of legacy-to-modern rewrite can use this tool. The first implementation
-targets a specific Node.js + SOAP → REST pattern, but the architecture is designed so
-that each new migration pattern is a plugin — not a rewrite of the tool.
+This is a **general-purpose migration intelligence platform**. Any development team doing any kind of legacy-to-modern rewrite can use this tool. Two concrete pipelines are implemented:
 
-**Two core value propositions:**
+1. **Service scan pipeline** (`/migrate scan`) — targets codebases that call external services via known patterns (e.g., Node.js + SOAP)
+2. **Rewrite pipeline** (`/migrate rewrite`) — targets full framework-to-framework migrations (e.g., .NET → Python, Spring Boot → FastAPI)
 
-1. **Migration Intelligence** — point at any legacy repo, get a full recursive understanding
-   of what the system does, expressed as AI-ready context documents that drive accurate rewrites
-2. **KB Builder** — point at any codebase, get a structured knowledge base back —
-   useful for onboarding, documentation, architecture audits, not just migration
+**Three core value propositions:**
 
-Both use the same infrastructure. The plugin determines what patterns to scan for and
-how to interpret what it finds.
+1. **Migration Intelligence** — point at any legacy repo, get a full recursive understanding of what the system does, expressed as AI-ready context documents
+2. **KB Builder** — structured knowledge base useful for onboarding, documentation, architecture audits, not just migration
+3. **AI Tool Wiring** — the KB is automatically connected to Claude Code and Codex the moment the scan finishes
+
+**The app does not rewrite code. It prepares the context that makes AI rewrites accurate.**
 
 ---
 
-## Background — First Implementation
+## Background
 
 This feature supports migrating a legacy backend architecture to a modern cloud-native stack.
 
@@ -63,95 +61,49 @@ Without this context, AI rewrites are generic and incomplete. Building it manual
 
 ---
 
-## The Solution: Recursive System Intelligence
+## Pipeline 1 — Service Scan (`/migrate scan`)
 
-The app accepts **any repo URL as a starting point** — Node.js or SOAP — and automatically traces every connection in the system until it has the complete picture. It then builds a knowledge base and generates migration instructions ready for AI coding tools.
-
-**The user provides one URL. The app discovers everything else.**
-
----
-
-## Two Entry Points, Same Outcome
-
-### Entry Point A — Node.js Repo
+### Entry Point
 
 ```
-/migrate scan --repo <nodejs-repo-url> --lang <target>
+/migrate scan --repo <nodejs-repo-url> --lang <target> --yes
 ```
 
-The app scans the Node.js codebase and finds SOAP calls using the `constructSoapRequest` pattern:
+**Pre-flight validation** runs before anything else — checks `CCS_ANTHROPIC_API_KEY` and the GitHub token. If either is missing, the command exits immediately with a clear error.
+
+### Scan Flow
+
+1. **Tier 0 (free):** Run the scanner plugin against all repo files. Extracts `ServiceReference[]` — one per call site.
+2. **Group:** All references grouped by `serviceNamespace` — each unique namespace is one service.
+3. **Tier 1 (Haiku):** Resolve each namespace to a GitHub repo. Multiple candidates → Haiku ranks them.
+4. **Tier 2 (Sonnet 4.6):** Analyze each resolved service — purpose, data flow, business rules, contracts, database interactions, nested calls.
+5. **Recurse:** If service A calls service B, add B to the queue and process it the same way.
+6. **Checkpoint:** Write to `migration-status.json` after every service.
+
+### How `constructSoapRequest` Is Parsed
+
+The built-in `migrate-soap` plugin looks for this pattern across all Node.js/TypeScript files:
 
 ```js
-const config = {
+const response = await constructSoapRequest({
   methodName: 'someMethod',
-  serviceNamespace: 'SomeServiceManager',
-  actionName: 'someMethod',
+  serviceNamespace: 'SomeServiceManager',   // ← key identifier
   isXmlResponse: true,
   parameters: [
     { isSecurityContext: true },
-    { isSomeSearchCriteria: true, value: req.body },
+    { isSomeCriteria: true, value: req.body },
   ],
-};
-const response = await constructSoapRequest(config, req.session);
-```
-
-From this, the app extracts:
-- **`serviceNamespace`** — identifies which SOAP service to find (`SomeServiceManager`)
-- **`methodName`** — the specific operation being called (`someMethod`)
-- **`parameters`** — what data flows in
-
-It then **automatically searches the GitHub org** for a repo/class matching `SomeServiceManager`, opens it, and recursively traces what that service does.
-
-### Entry Point B — SOAP Service Repo
-
-```
-/migrate scan --repo <soap-repo-url> --lang <target>
-```
-
-The app scans the SOAP codebase directly. For each service and method found:
-- What does this method do?
-- Does it call another service? → find it, trace recursively
-- Does it run a database query? → extract the query and schema
-- Does it call a stored procedure? → find and read it
-
-**Both entry points produce the same output** — a complete knowledge base with migration instructions per service.
-
----
-
-## How `constructSoapRequest` Is Parsed
-
-The scanner looks for this pattern across all Node.js files:
-
-```js
-// Pattern 1 — inline config object
-const response = await constructSoapRequest({
-  methodName: '...',
-  serviceNamespace: '...',
-  ...
 }, req.session);
-
-// Pattern 2 — config variable
-const config = {
-  methodName: '...',
-  serviceNamespace: '...',
-  ...
-};
-const response = await constructSoapRequest(config, req.session);
 ```
 
 Extracted fields per call site:
 - `serviceNamespace` → used to find the SOAP service repo on GitHub
 - `methodName` → the specific operation to analyze
-- `parameters` → input shape passed to the service
-- `actionName`, `isXmlResponse`, etc. → metadata for context doc
+- `isXmlResponse`, boolean parameter flags → stored in `metadata` for context
 
-Each unique `serviceNamespace` becomes one node in the dependency graph.
+The plugin correctly handles nested parentheses via `findClosingParen()`. Function name and field names are configurable via `createPlugin({ callerFunctionName, namespaceField, methodField })`.
 
----
-
-## Recursive Tracing
-
-The app treats the codebase as a graph. Each service is a node; each call to another service, database, or external resource is an edge.
+### Recursive Tracing
 
 ```
 Node.js route handler
@@ -162,27 +114,68 @@ Node.js route handler
                     └─► SQL: INSERT INTO audit_log ...
 ```
 
-**Traversal rules:**
-1. Parse entry repo — extract all outbound `serviceNamespace` references
-2. For each namespace — search GitHub org for the matching service class/file
-3. Open that service — extract its outbound calls (other services, SQL, stored procs)
-4. Recurse — repeat until no more unresolved references
-5. Loop detection — if a service was already visited, skip it
-6. Stop at leaf nodes — SQL queries, stored procedures, file I/O, external HTTP
-
-### Resolving a `serviceNamespace` to a Repo
-
-When the scanner finds `serviceNamespace: 'FooManager'`, it resolves it by:
-1. Searching the GitHub org for files/classes named `FooManager`
-2. Checking common naming patterns (`FooManager.cs`, `FooManager.asmx`, `FooManagerService.cs`)
-3. If multiple matches — Haiku ranks by relevance
-4. If no match — flagged in scan report for manual input
+Leaf nodes (SQL, stored procs, file I/O, external HTTP) are documented but not recursed into. Loop detection via a `visited` set prevents infinite cycles.
 
 ---
 
-## Analysis: What the LLM Extracts Per Service
+## Pipeline 2 — Rewrite Analysis (`/migrate rewrite`)
 
-For every discovered service method, Sonnet extracts:
+### Entry Point
+
+```
+/migrate rewrite --repo <full-codebase-url> --to python --from aspnet-core --yes
+```
+
+### Rewrite Flow
+
+1. **Fetch file tree** from GitHub (free).
+2. **Detect framework** (Haiku) — fetches key files (`.csproj`, `pom.xml`, `Program.cs`, etc.) and identifies source/target framework pair.
+3. **Discover components** (Haiku) — returns `SourceComponent[]` with name, type, and file paths. Types: `controller`, `service`, `repository`, `model`, `dto`, `middleware`, `config`, `utility`. Test files excluded.
+4. **Cost preview** — shown before any Sonnet calls.
+5. **Analyze each component** (Sonnet 4.6) — fetches source files, uses framework mapping table (e.g., `ControllerBase` → `APIRouter`, `DbContext` → `SQLAlchemy Session`), extracts purpose, business rules, target dependencies, complexity, confidence.
+6. **Topological sort** — orders components so leaf nodes (models, repositories) come before their callers (services, controllers).
+7. **Generate context docs** — one markdown file per component.
+8. **Generate AI integration** — Claude Code slash commands + Codex AGENTS.md + HOW-TO-MIGRATE.md.
+
+### Framework Mapping
+
+Static concept mapping tables in `frameworkMapper.ts` cover:
+- `aspnet-core → fastapi`
+- `aspnet-core → django`
+- `spring-boot → fastapi`
+- `express → fastapi`
+
+Each entry maps a source concept to a target concept + package + migration notes. The mapping is embedded in the Sonnet prompt so the AI understands not just what to analyze but how the concepts translate.
+
+---
+
+## AI Tool Wiring (both pipelines)
+
+This is the key output. The KB is not just markdown files — it is automatically wired to the developer's AI tool of choice.
+
+### Claude Code — custom slash commands
+
+Generated at: `.claude/commands/rewrite-<Name>.md` (scan) or `rewrite/.claude/commands/rewrite-<Name>.md` (rewrite)
+
+Each file embeds the full context doc, so the developer types `/project:rewrite-OrderController` in Claude Code and the AI has everything — source file links, business rules, data contracts, migration checklist — immediately.
+
+### Codex — AGENTS.md
+
+Generated at: `AGENTS.md` (scan) or `rewrite/AGENTS.md` (rewrite)
+
+Read automatically by Codex. Contains migration order, component summaries, install instructions for target dependencies, context doc locations.
+
+### Human guide — HOW-TO-MIGRATE.md
+
+Generated at: `rewrite/HOW-TO-MIGRATE.md`
+
+Numbered steps — one per component — with context doc path, output file path, Claude Code command, Codex command, and the 3 most critical business rules per component.
+
+---
+
+## Analysis: What the LLM Extracts
+
+For every discovered service or component, Sonnet extracts:
 
 - **Purpose** — plain language, business intent not code mechanics
 - **Data flow** — what comes in, what goes out, what transforms along the way
@@ -190,88 +183,47 @@ For every discovered service method, Sonnet extracts:
 - **Database interactions** — tables, query patterns, stored procedures
 - **Downstream calls** — other services called, order of operations
 - **Contract** — input/output shape at the SOAP or API boundary
+- **Confidence** — `high | medium | low`
 
 ---
 
-## Output
+## Output Structure
 
-### Per-Service Context Document
+### Service Scan (`/migrate scan`)
 
-`migration/context/FooService.md` — paste directly into Claude Code / Copilot / Codex:
-
-```markdown
-# Migration Context: FooService
-
-**Entry point:** [repo]/routes/fooRoutes.js → constructSoapRequest
-**Service namespace:** FooManager
-**Target language:** C# .NET 8
-**Status:** todo
-
-## What This Service Does
-[LLM-generated plain language description]
-
-## Full Call Chain
 ```
-Client → POST /foo
-  → Node.js: fooRoutes.js → constructSoapRequest({ serviceNamespace: 'FooManager' })
-    → FooManager.addFoo()
-      → SQL: INSERT INTO foo_table ...
-      → AuditService.log()
-        → SQL: INSERT INTO audit_log ...
+migration/
+  context/
+    OrderManager.md     ← per-service context doc
+    FooService.md
+  knowledge-base/
+    _index.md           ← system map
+  scan-report.md        ← scan summary
+  migration-status.json ← checkpoint file
+  .claude/
+    commands/
+      rewrite-OrderManager.md   ← Claude Code slash command
+      rewrite-FooService.md
+  AGENTS.md             ← Codex context file
 ```
 
-## Business Rules
-- [extracted rule 1]
-- [extracted rule 2]
+### Rewrite Analysis (`/migrate rewrite`)
 
-## Source Files
-| File | Purpose |
-|------|---------|
-| [fooRoutes.js](<github-link>) | Node.js route handler |
-| [FooManager.cs](<github-link>) | SOAP service implementation |
-
-## SOAP Operation: addFoo
-- **Input:** `{ ... }`
-- **Output:** `{ ... }`
-
-## Rewrite Instructions
-You are rewriting FooService as a C# .NET 8 REST API.
-Read all source files listed above before writing any code.
-
-Produce:
-- `Controllers/FooController.cs`
-- `Services/FooService.cs`
-- `Models/FooModel.cs`
-
-Rules:
-- No SOAP — call the database directly
-- Preserve all business rules above exactly
-- .NET 8: dependency injection, async/await, ILogger
 ```
-
-### System Index
-
-`migration/knowledge-base/_index.md` — full system map for any AI tool to read first:
-
-```markdown
-# System Knowledge Base
-
-## Service Map
-| Service | Node.js Entry | Calls | DB Tables | Status |
-|---------|--------------|-------|-----------|--------|
-| FooService | routes/fooRoutes.js | AuditService | foo_table | todo |
-| AuditService | (shared) | — | audit_log | todo |
-
-## Shared Components
-- AuditService — called by every other service, rewrite this first
-
-## Database Tables
-- foo_table, audit_log, ...
+rewrite/
+  context/
+    OrderController.md  ← per-component context doc
+    OrderService.md
+    OrderRepository.md
+  _index.md             ← migration knowledge base
+  report.md             ← analysis summary
+  HOW-TO-MIGRATE.md     ← numbered execution guide
+  .claude/
+    commands/
+      rewrite-OrderController.md  ← Claude Code slash command
+      rewrite-OrderService.md
+  AGENTS.md             ← Codex context file
 ```
-
-### Scan Report
-
-`migration/scan-report.md` — what was discovered, what was skipped, unresolved references needing manual input.
 
 ---
 
@@ -279,43 +231,15 @@ Rules:
 
 | Tier   | Model               | Used For                                          | Why                                     |
 | ------ | ------------------- | ------------------------------------------------- | --------------------------------------- |
-| Tier 0 | No LLM              | Static scan — find `constructSoapRequest` calls, extract fields | Zero cost — regex + AST |
-| Tier 1 | `claude-haiku-4-5`  | Resolve ambiguous repo matches, group services    | Cheap, fast, no deep reasoning needed   |
-| Tier 2 | `claude-sonnet-4-6` | Business logic extraction, context doc generation | 200K context, strong code understanding |
+| Tier 0 | No LLM              | Static scan — plugin extracts `ServiceReference[]` | Zero cost — regex |
+| Tier 1 | `claude-haiku-4-5-20251001` | Resolve ambiguous repos, detect framework, discover components | Cheap, fast |
+| Tier 2 | `claude-sonnet-4-6` | Service/component analysis, system overview | 200K context, strong code understanding |
 
-Opus available as future upgrade when budget allows.
-
-**Token efficiency:**
-- Static scan pre-filters all noise — LLM only sees relevant files
-- Haiku resolves references cheaply before Sonnet does expensive analysis
-- Idempotent — reruns skip already-analyzed services
-- Shared services analyzed once, referenced across all dependent docs
+Cost estimate is shown before any LLM call. Without `--yes`, the command exits after the estimate. This prevents accidental large token spend.
 
 ---
 
-## GitHub Integration
-
-- Personal Access Token (PAT) stored in `.ccs/config.json`
-- GitHub REST API v3 — works with GitHub Enterprise Server and github.com
-- Operations: file tree walk, file content fetch, cross-repo text search
-- Handles pagination for large repos
-
-Config:
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-6",
-  "github": {
-    "token": "ghp_...",
-    "host": "github.company.com",
-    "org": "your-org"
-  }
-}
-```
-
----
-
-## Migration Status Tracking
+## Migration Status Tracking (`/migrate scan`)
 
 `migration/migration-status.json`:
 
@@ -326,49 +250,75 @@ Config:
   "targetLanguage": "csharp",
   "services": [
     {
-      "name": "FooService",
-      "discoveredVia": "routes/fooRoutes.js → constructSoapRequest",
-      "namespace": "FooManager",
-      "contextDoc": "migration/context/FooService.md",
+      "name": "OrderService",
+      "namespace": "OrderManager",
+      "discoveredVia": "routes/api.ts:42",
+      "sourceRepo": "myorg/BackendServices",
+      "sourceFile": "Services/OrderManager.cs",
+      "contextDoc": "migration/context/OrderManager.md",
       "status": "analyzed",
+      "confidence": "high",
       "analyzedAt": "2026-04-22T10:05:00Z",
-      "rewrittenAt": null
+      "verified": false,
+      "verifiedBy": null,
+      "verifiedAt": null,
+      "rewrittenAt": null,
+      "databaseInteractions": ["table: Orders — SELECT"],
+      "nestedServices": ["InventoryManager.GetStock"],
+      "notes": ""
     }
   ]
 }
 ```
 
-Status: `discovered` → `analyzed` → `in-progress` → `done`
+Status lifecycle: `discovered` → `analyzed` → (verified) → `done`
 
 ---
 
-## Files to Create
+## Files Implemented
 
 ```
 src/
   commands/
-    migrate.ts              — entry point, subcommand routing
-  connectors/
-    github.ts               — GitHub API client: file tree, content, search
+    migrate.ts              ← entry point, all subcommand routing
   migration/
-    scanner.ts              — static scan: find constructSoapRequest calls, extract fields
-    resolver.ts             — resolve serviceNamespace to a GitHub repo
-    tracer.ts               — recursive graph traversal, loop detection
-    analyzer.ts             — Sonnet: extract business logic per service
-    wsdlParser.ts           — parse WSDL/XML schemas
-    contextBuilder.ts       — assemble per-service context doc
-    indexBuilder.ts         — assemble _index.md system map
-    statusTracker.ts        — read/write migration-status.json
+    types.ts                ← ServiceReference, MigratePlugin, ScanResult
+    scanner.ts              ← runPluginScan(), groupByNamespace()
+    pluginLoader.ts         ← three-tier plugin discovery, builtinPluginsDir()
+    resolver.ts             ← namespace → GitHub repo resolution
+    analyzer.ts             ← Sonnet analysis per service
+    wsdlParser.ts           ← WSDL/XML parsing
+    contextBuilder.ts       ← per-service markdown assembly
+    indexBuilder.ts         ← _index.md assembly
+    statusTracker.ts        ← migration-status.json CRUD
+    costEstimator.ts        ← token estimate + cost preview
+    tracer.ts               ← /migrate scan orchestrator
+    rewriteTypes.ts         ← ComponentType, SourceComponent, FrameworkInfo, ComponentAnalysis
+    frameworkMapper.ts      ← static source→target concept mapping tables
+    rewriteAnalyzer.ts      ← detectFramework, discoverComponents, analyzeComponent
+    rewriteContextBuilder.ts ← per-component and index markdown assembly
+    rewriteTracer.ts        ← /migrate rewrite orchestrator
+    aiIntegration.ts        ← Claude Code slash commands, AGENTS.md, HOW-TO-MIGRATE.md
+    scanner.test.ts         ← 22 tests
+    wsdlParser.test.ts      ← 6 tests
+  connectors/
+    github.ts               ← extended with fetchFileContent, fetchFileTree, parseRepoUrl
+
+plugins/
+  migrate-soap/
+    index.ts                ← TypeScript source
+    index.js                ← compiled ESM (committed)
+    ccs-plugin.json         ← { name, version, entry }
 ```
 
 ---
 
-## Open Questions
+## Open Questions (resolved)
 
-- Should repos be cloned locally for speed or always streamed via API?
-- Should the migration knowledge base feed into the ccs vault so `/enrich` can link it to related chat memory?
-- Should `/migrate status` render as a terminal table or a UI panel?
+- **Clone locally or stream via API?** → Stream via GitHub API. No local clone needed.
+- **Feed migration KB into vault?** → Future enhancement, not MVP.
+- **`/migrate status` as table or panel?** → Terminal table via the command output string.
 
 ---
 
-_ccs-code · Migration Context Builder · v0.4_
+_ccs-code · Migration Context Builder · v1.0 · 2026-04-22_
