@@ -13,7 +13,7 @@ import type { MigratePlugin } from "./types.js";
 function builtinPluginsDir(): string {
   const arg1 = process.argv[1] ?? "";
   if (arg1.endsWith(".ts") || arg1.endsWith(".tsx") || arg1.endsWith(".js") || arg1.endsWith(".mjs")) {
-    return join(dirname(arg1), "..", "..", "plugins");
+    return join(dirname(arg1), "..", "plugins");
   }
   return join(dirname(process.argv[0] ?? ""), "plugins");
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Text, Box } from "ink";
+import { ShimmerText } from "./ShimmerText.js";
 
 const FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 
@@ -31,7 +32,10 @@ const STALLED_LABELS = [
 
 export function CCSSpinner({ isStalled = false }: { isStalled?: boolean }) {
   const [frame, setFrame] = useState(0);
-  const [labelIdx, setLabelIdx] = useState(0);
+  const [label] = useState(() => {
+    const pool = isStalled ? STALLED_LABELS : THINKING_LABELS;
+    return pool[Math.floor(Math.random() * pool.length)]!;
+  });
 
   useEffect(() => {
     const frameTimer = setInterval(() => {
@@ -40,23 +44,10 @@ export function CCSSpinner({ isStalled = false }: { isStalled?: boolean }) {
     return () => clearInterval(frameTimer);
   }, []);
 
-  useEffect(() => {
-    const labelTimer = setInterval(() => {
-      setLabelIdx((i) => {
-        const pool = isStalled ? STALLED_LABELS : THINKING_LABELS;
-        return (i + 1) % pool.length;
-      });
-    }, 2500);
-    return () => clearInterval(labelTimer);
-  }, [isStalled]);
-
-  const pool = isStalled ? STALLED_LABELS : THINKING_LABELS;
-  const label = pool[labelIdx % pool.length];
-
   return (
     <Box flexDirection="row" gap={1}>
       <Text color={isStalled ? "red" : "green"}>{FRAMES[frame]}</Text>
-      <Text dimColor>{label}</Text>
+      <ShimmerText text={label} />
     </Box>
   );
 }

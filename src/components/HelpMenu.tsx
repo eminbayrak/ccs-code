@@ -22,6 +22,7 @@ export function HelpMenu({ terminalWidth }: { terminalWidth?: number }) {
     ["/ingest", "process raw/ inbox"],
     ["/graph", "build knowledge graph"],
     ["/lint", "wiki health check"],
+    ["/migrate", "migration platform"],
     ["/rewrite <svc>", "rewrite brief"],
     ["/index", "rebuild master index"],
   ];

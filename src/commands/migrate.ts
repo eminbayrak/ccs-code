@@ -56,7 +56,7 @@ function validateSetup(requireGithub: boolean): SetupIssue[] {
 // /migrate scan --repo <url> --lang <language> [--org <org>] [--plugin <name>] [--yes]
 // ---------------------------------------------------------------------------
 
-async function handleScan(args: string[]): Promise<string> {
+async function handleScan(args: string[], onProgress?: (msg: string) => void): Promise<string> {
   let repoUrl = "";
   let lang = "csharp";
   let org = "";
@@ -113,9 +113,13 @@ async function handleScan(args: string[]): Promise<string> {
     return [
       "No scanner plugin found.",
       "",
-      "Install a plugin into `.ccs/plugins/<name>/` or `~/.ccs/plugins/<name>/`.",
-      "Each plugin folder needs a `ccs-plugin.json` manifest and a compiled `index.js`.",
-      "Run `/migrate plugin list` to see what is currently installed.",
+      "To see installed plugins, run: `/migrate plugin list`",
+      "",
+      "Install new plugins into:",
+      "  · `.ccs/plugins/<name>/` (project-level)",
+      "  · `~/.ccs/plugins/<name>/` (global)",
+      "",
+      "Each folder needs a `ccs-plugin.json` manifest and a compiled `index.js`.",
     ].join("\n");
   }
 
@@ -135,7 +139,10 @@ async function handleScan(args: string[]): Promise<string> {
         org,
         token: process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN,
       },
-      onProgress: (msg) => logs.push(msg),
+      onProgress: (msg) => {
+        logs.push(msg);
+        onProgress?.(msg);
+      },
       onCostPreview: async (preview) => {
         logs.push(preview);
         if (autoConfirm) {
@@ -324,7 +331,7 @@ async function handleDone(args: string[]): Promise<string> {
 // /migrate rewrite --repo <url> --to <language> [--from <framework>] [--yes]
 // ---------------------------------------------------------------------------
 
-async function handleRewrite(args: string[]): Promise<string> {
+async function handleRewrite(args: string[], onProgress?: (msg: string) => void): Promise<string> {
   const setupIssues = validateSetup(true);
   if (setupIssues.length > 0) {
     return [
@@ -385,7 +392,10 @@ async function handleRewrite(args: string[]): Promise<string> {
         org: repoUrl.replace(/https?:\/\/[^/]+\//, "").split("/")[0] ?? "",
         token: process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN,
       },
-      onProgress: (msg) => logs.push(msg),
+      onProgress: (msg) => {
+        logs.push(msg);
+        onProgress?.(msg);
+      },
       onCostPreview: async (preview) => {
         logs.push(preview);
         if (autoConfirm) { logs.push("Auto-confirmed (--yes)."); return true; }
@@ -489,13 +499,14 @@ async function handleRescan(args: string[]): Promise<string> {
 
 export async function handleMigrateCommand(
   args: string[],
-  _cwd: string
+  _cwd: string,
+  onProgress?: (msg: string) => void
 ): Promise<string> {
   const [subcommand, ...rest] = args;
 
   switch (subcommand) {
-    case "scan":    return handleScan(rest);
-    case "rewrite": return handleRewrite(rest);
+    case "scan":    return handleScan(rest, onProgress);
+    case "rewrite": return handleRewrite(rest, onProgress);
     case "status":  return handleStatus();
     case "context": return handleContext(rest);
     case "verify":  return handleVerify(rest);

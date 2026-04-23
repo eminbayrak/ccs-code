@@ -401,9 +401,9 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "bullet":
         elements.push(
-          <Box key={key++} flexDirection="row" paddingLeft={cl.indent > 0 ? cl.indent + 2 : 2} width={w}>
+          <Box key={key++} flexDirection="row" flexWrap="wrap" paddingLeft={cl.indent > 0 ? cl.indent + 2 : 2} width={w}>
             <Text color="green">{"› "}</Text>
-            <Box width={w - (cl.indent + 4)}><InlineText line={cl.text} /></Box>
+            <Box flexShrink={1} flexGrow={0}><InlineText line={cl.text} /></Box>
           </Box>
         );
         break;
@@ -431,7 +431,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "text":
         elements.push(
-          <Box key={key++} width={w}>
+          <Box key={key++} width={w} flexWrap="wrap">
             <InlineText line={cl.text} />
           </Box>
         );

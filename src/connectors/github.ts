@@ -152,7 +152,10 @@ export function parseRepoUrl(url: string): { host: string; owner: string; repo: 
         const u = new URL(url);
         const parts = u.pathname.replace(/^\//, "").split("/");
         if (parts.length < 2) return null;
-        return { host: u.host, owner: parts[0] ?? "", repo: parts[1] ?? "" };
+        const owner = parts[0] ?? "";
+        let repo = parts[1] ?? "";
+        if (repo.endsWith(".git")) repo = repo.slice(0, -4);
+        return { host: u.host, owner, repo };
     } catch {
         return null;
     }

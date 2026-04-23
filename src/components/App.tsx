@@ -179,6 +179,11 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const [setupInput, setSetupInput] = useState("");
   const [setupStep, setSetupStep] = useState<"input" | "success">("input");
 
+  // Migration Wizard
+  const [isMigrateWizard, setIsMigrateWizard] = useState(false);
+  const [migrateWizardStep, setMigrateWizardStep] = useState(0);
+  const [migrateWizardData, setMigrateWizardData] = useState({ repo: "", lang: "csharp" });
+
   // Environment
   const [instructions, setInstructions] = useState<ConfigFile[]>([]);
   const [skills, setSkills] = useState<ConfigFile[]>([]);
@@ -299,6 +304,12 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       return;
     }
 
+    if (key.escape && isMigrateWizard) {
+      setIsMigrateWizard(false);
+      setMessages((prev) => [...prev, createUIMessage("assistant", "Migration Wizard cancelled.")]);
+      return;
+    }
+
     if (!suggestionMode) return;
 
     // Esc → close suggestion list
@@ -389,15 +400,37 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         break;
       }
       case "sync": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "sync", name: "Syncing sources", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleSyncCommand(args, process.cwd()).then((output) => {
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         setMessages((prev) => [...prev, createUIMessage("assistant", "Syncing sources...")]);
         break;
       }
       case "ingest": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "ingest", name: "Processing raw files", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleIngestCommand(args, process.cwd()).then((output) => {
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         setMessages((prev) => [...prev, createUIMessage("assistant", "Scanning raw/ inbox...")]);
         break;
@@ -451,8 +484,19 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         break;
       }
       case "harvest": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "harvest", name: "Mining AI logs", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleHarvestCommand(args, process.cwd()).then((output) => {
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         setMessages((prev) => [...prev, createUIMessage("assistant", "Mining local AI histories (Claude, Cursor, VS Code)...")]);
         break;
@@ -465,9 +509,20 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         break;
       }
       case "enrich": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "enrich", name: "AI Analysis", isComplete: false }]);
+        processingStartRef.current = Date.now();
         setMessages((prev) => [...prev, createUIMessage("assistant", `Enriching wiki with ${activeModel}...\nThis runs AI analysis on each page — may take a few minutes.`)]);
         handleEnrichCommand(args, process.cwd()).then((output) => {
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
@@ -572,6 +627,25 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       }
       case "migrate": {
         const subcommand = args[0] ?? "";
+        if (!subcommand) {
+          setIsMigrateWizard(true);
+          setMigrateWizardStep(0);
+          setMigrateWizardData({ repo: "", lang: "csharp" });
+          setMessages((prev) => [...prev, createUIMessage("assistant", "### 🚀 Migration Wizard\n\nI'll help you set up a migration scan. (Press `Esc` to cancel)\n\nFirst, enter the **repository URL** you want to scan:")]);
+          break;
+        }
+
+        const toolNameMap: Record<string, string> = {
+          scan:    "Scanning repository",
+          rewrite: "Analyzing codebase",
+          status:  "Fetching status",
+          context: "Loading context",
+          verify:  "Verifying service",
+          done:    "Finalizing service",
+          rescan:  "Preparing rescan",
+          plugin:  "Loading plugins",
+        };
+
         const startMsgMap: Record<string, string> = {
           scan:    "Starting migration scan — this may take several minutes...",
           rewrite: "Analyzing codebase for migration — this may take several minutes...",
@@ -582,15 +656,30 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           rescan:  "Preparing rescan instructions...",
           plugin:  "Listing installed plugins...",
         };
+
         const startMsg = startMsgMap[subcommand] ?? `Running /migrate ${subcommand}...`;
+        const toolName = toolNameMap[subcommand] ?? `Executing migrate ${subcommand}`;
+
         setMessages((prev) => [...prev, createUIMessage("assistant", startMsg)]);
-        handleMigrateCommand(args, process.cwd())
+        setIsProcessing(true);
+        setActiveTools([{ id: "migrate-task", name: toolName, isComplete: false }]);
+        processingStartRef.current = Date.now();
+
+        handleMigrateCommand(args, process.cwd(), (msg) => {
+          setActiveTools([{ id: "migrate-task", name: msg, isComplete: false }]);
+        })
           .then((output) => {
+            const elapsed = formatElapsed(Date.now() - processingStartRef.current);
             setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+            setIsProcessing(false);
+            setActiveTools([]);
+            setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
           })
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
             setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${msg}`)]);
+            setIsProcessing(false);
+            setActiveTools([]);
           });
         break;
       }
@@ -627,6 +716,42 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     triggerBoot();
   };
 
+  const handleMigrateWizardSubmit = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    setMessages((prev) => [...prev, createUIMessage("user", trimmed)]);
+
+    if (migrateWizardStep === 0) {
+      // Repository URL
+      setMigrateWizardData((prev) => ({ ...prev, repo: trimmed }));
+      setMigrateWizardStep(1);
+      setMessages((prev) => [
+        ...prev,
+        createUIMessage("assistant", "Target language? (e.g., `csharp`, `typescript`, `python`. Default: `csharp`)"),
+      ]);
+    } else if (migrateWizardStep === 1) {
+      // Language
+      const lang = trimmed.toLowerCase() || "csharp";
+      setMigrateWizardData((prev) => ({ ...prev, lang }));
+      setMigrateWizardStep(2);
+      setMessages((prev) => [
+        ...prev,
+        createUIMessage("assistant", `Ready to scan **${migrateWizardData.repo}** for **${lang}** migration.\n\nProceed? (y/n)`),
+      ]);
+    } else if (migrateWizardStep === 2) {
+      // Confirmation
+      if (trimmed.toLowerCase() === "y" || trimmed.toLowerCase() === "yes") {
+        setIsMigrateWizard(false);
+        const cmd = `migrate scan --repo ${migrateWizardData.repo} --lang ${migrateWizardData.lang} --yes`;
+        executeSlashCommand(cmd);
+      } else {
+        setIsMigrateWizard(false);
+        setMessages((prev) => [...prev, createUIMessage("assistant", "Migration scan cancelled.")]);
+      }
+    }
+  };
+
   // ---------------------------------------------------------------------------
   // Submit
   // ---------------------------------------------------------------------------
@@ -641,6 +766,12 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
       const trimmed = value.trim();
       if (!trimmed) return;
+
+      if (isMigrateWizard) {
+        handleMigrateWizardSubmit(trimmed);
+        setInput("");
+        return;
+      }
 
       setShowWelcome(false);
 
@@ -675,7 +806,16 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       ];
       sendToLLM(history);
     },
-    [suggestionMode, suggestions, selectedIdx, messages, skills, activeModel],
+    [
+      suggestionMode,
+      suggestions,
+      selectedIdx,
+      messages,
+      skills,
+      activeModel,
+      isMigrateWizard,
+      handleMigrateWizardSubmit,
+    ],
   );
 
   // ---------------------------------------------------------------------------
@@ -938,7 +1078,15 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
               value={input}
               onChange={handleInputChange}
               onSubmit={handleSubmit}
-              placeholder="Message CCS Code  (@file · /command · ? for help)"
+              placeholder={
+                isMigrateWizard
+                  ? migrateWizardStep === 0
+                    ? "https://github.com/org/repo"
+                    : migrateWizardStep === 1
+                    ? "csharp, typescript, python..."
+                    : "y / n"
+                  : "Message CCS Code  (@file · /command · ? for help)"
+              }
             />
           )}
         </Box>

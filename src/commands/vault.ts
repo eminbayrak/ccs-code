@@ -118,6 +118,7 @@ export async function handleVaultCommand(args: string[], cwd: string): Promise<s
             "  /sync          pull from GitHub sources",
             "  /graph         build knowledge graph",
             "  /lint          check wiki health",
+            "  /migrate       migration platform",
           ].join("\n");
         }
         return [
@@ -535,6 +536,7 @@ Sync repos + files → build a wiki → ask questions about it.
 4. \`/enrich\` — add AI summaries + links
 5. \`/graph\` — open visual knowledge graph
 6. \`/ask <question>\` — query your wiki
+7. \`/migrate scan\` — scan legacy code for migration
 
 ## Example
 
@@ -544,6 +546,11 @@ Sync repos + files → build a wiki → ask questions about it.
 /ingest
 /enrich
 /ask what does auth-svc depend on?
+
+# Migration flow
+/migrate scan --repo https://github.com/org/repo --lang csharp
+/migrate status
+/migrate verify CustomerManager --by "John Doe"
 \`\`\`
 
 Type \`?\` for all commands.`;
