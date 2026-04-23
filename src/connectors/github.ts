@@ -47,27 +47,36 @@ async function ghFetchWithRetry<T>(
 ): Promise<T> {
     let attempt = 0;
     while (true) {
-        const res = await fetch(url, { headers: ghHeaders(token) });
+        const res = await fetch(url, {
+            headers: ghHeaders(token),
+            signal: AbortSignal.timeout(30_000),
+        });
 
         if (res.ok) return res.json() as Promise<T>;
 
-        // Rate limit — respect Retry-After or X-RateLimit-Reset
+        // Rate limit — only retry if the server tells us when to retry
         if (res.status === 429 || res.status === 403) {
             const retryAfter = res.headers.get("Retry-After");
             const resetAt = res.headers.get("X-RateLimit-Reset");
-            let waitMs = 60_000; // default 1 min
 
-            if (retryAfter) {
-                waitMs = parseInt(retryAfter, 10) * 1000;
-            } else if (resetAt) {
-                waitMs = Math.max(0, parseInt(resetAt, 10) * 1000 - Date.now()) + 1000;
+            if (retryAfter || resetAt) {
+                const waitMs = retryAfter
+                    ? parseInt(retryAfter, 10) * 1000
+                    : Math.max(0, parseInt(resetAt!, 10) * 1000 - Date.now()) + 1000;
+                // Cap wait at 30s to avoid multi-minute hangs
+                const cappedWait = Math.min(waitMs, 30_000);
+                if (attempt < maxRetries) {
+                    await new Promise((r) => setTimeout(r, cappedWait));
+                    attempt++;
+                    continue;
+                }
             }
-
-            if (attempt < maxRetries) {
-                await new Promise((r) => setTimeout(r, waitMs));
-                attempt++;
-                continue;
+            // No retry headers — fail immediately with a useful message
+            const body = await res.text();
+            if (res.status === 403) {
+                throw new Error(`GitHub 403: Forbidden. Ensure GITHUB_PRIVATE_TOKEN is set in your .env. Detail: ${body.slice(0, 150)}`);
             }
+            throw new Error(`GitHub ${res.status}: ${body.slice(0, 200)}`);
         }
 
         // Transient server error — exponential backoff

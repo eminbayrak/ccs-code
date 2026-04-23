@@ -60,16 +60,17 @@ async function fetchRepoFiles(
     return extSet.has(ext);
   });
 
-  const files: Array<{ path: string; content: string }> = [];
-  for (const filePath of jsFiles) {
-    try {
-      const content = await fetchFileContent(owner, repo, filePath, config.token, config.host);
-      files.push({ path: filePath, content });
-    } catch {
-      // skip unreadable files
-    }
-  }
-  return files;
+  const results = await Promise.all(
+    jsFiles.map(async (filePath) => {
+      try {
+        const content = await fetchFileContent(owner, repo, filePath, config.token, config.host);
+        return { path: filePath, content };
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter((r): r is { path: string; content: string } => r !== null);
 }
 
 async function fetchServiceFiles(
@@ -228,9 +229,10 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   // Init status
   const migStatus = await status.init(migrationDir, entryRepoUrl, targetLanguage);
 
-  log(config, `Fetching file tree from ${entryRepoUrl}...`);
+  log(config, `Fetching file tree from ${owner}/${repo}...`);
   const entryFiles = await fetchRepoFiles(owner, repo, githubConfig, config.plugin.fileExtensions);
-  log(config, `Found ${entryFiles.length} files. Scanning with plugin: ${config.plugin.name}...`);
+  log(config, `Found ${entryFiles.length} source files → ${entryFiles.map(f => f.path.split("/").pop()).join(", ")}`);
+  log(config, `Running plugin: ${config.plugin.name}...`);
 
   // Tier 0 — static scan via plugin
   const scanResult = runPluginScan(entryFiles, config.plugin);
@@ -238,7 +240,11 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   const grouped = groupByNamespace(allCallSites);
   const uniqueNamespaces = [...grouped.keys()];
 
-  log(config, `Found ${allCallSites.length} SOAP call sites across ${uniqueNamespaces.length} unique services.`);
+  for (const [ns, sites] of grouped.entries()) {
+    const methods = [...new Set(sites.map(s => s.methodName))].join(", ");
+    log(config, `  ◆ ${ns} — ${sites.length} call site${sites.length > 1 ? "s" : ""} (${methods})`);
+  }
+  log(config, `Found ${allCallSites.length} SOAP call sites across ${uniqueNamespaces.length} services.`);
 
   if (uniqueNamespaces.length === 0) {
     const report = await writeScanReport(migrationDir, entryRepoUrl, entryFiles.length, 0, [], [], []);
@@ -305,18 +311,22 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       return;
     }
 
-    log(config, `AI Research: Searching for ${ns} across organization...`);
+    log(config, `AI Research: Resolving ${ns}...`);
     const sites = grouped.get(ns) ?? [];
     const methodName = sites[0]?.methodName;
-    const resolved = await resolveNamespace(ns, githubConfig, haiku, entryRepoUrl, methodName);
+    const resolved = await resolveNamespace(
+      ns, githubConfig, haiku, entryRepoUrl, methodName,
+      (toolMsg) => log(config, `  ${toolMsg}`),
+    );
 
     if (!resolved) {
-      log(config, `AI Research: Could not resolve ${ns} — flagging as unresolved.`);
+      log(config, `✗ Could not find ${ns} in org — flagging as unresolved`);
       unresolved.push(ns);
       return;
     }
 
-    log(config, `AI Analysis: Analyzing service logic for ${ns} in ${resolved.repoFullName}...`);
+    log(config, `  → ${resolved.repoFullName} / ${resolved.filePath} (${resolved.confidence})`);
+    log(config, `AI Analysis: Reading ${ns} implementation...`);
 
     try {
       const callSites = grouped.get(ns) ?? [];
@@ -328,8 +338,31 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         fetchWsdl(resolved.repoFullName, githubConfig),
       ]);
 
+      if (serviceFiles.length > 0) {
+        for (const f of serviceFiles) {
+          const lines = f.content.split("\n").length;
+          log(config, `  Read: ${f.path} (${lines} lines)`);
+        }
+      }
+      if (wsdl) {
+        log(config, `  Read: WSDL — ${wsdl.operations?.length ?? 0} operations`);
+      }
+
+      log(config, `AI Analysis: Analyzing ${ns} with LLM...`);
       const analysis = await analyzeService(primary, serviceFiles, wsdl, sonnet);
       analyzed.push(analysis);
+
+      // Log extracted results inline
+      log(config, `  Methods: ${analysis.allMethods.length > 0 ? analysis.allMethods.map(m => m.name).join(", ") : "unknown"}`);
+      if (analysis.businessRules.length > 0) {
+        log(config, `  Rules: ${analysis.businessRules.length} extracted`);
+      }
+      if (analysis.databaseInteractions.length > 0) {
+        log(config, `  DB: ${analysis.databaseInteractions.map(d => d.split("—")[0]?.trim()).join(" · ")}`);
+      }
+      if (analysis.nestedServiceCalls.length > 0) {
+        log(config, `  Calls: ${analysis.nestedServiceCalls.join(", ")}`);
+      }
 
       // Write context doc
       const contextDir = join(migrationDir, "context");
@@ -346,6 +379,7 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
 
       const docPath = join(contextDir, `${analysis.namespace}.md`);
       await fs.writeFile(docPath, doc, "utf-8");
+      log(config, `  Written: context/${analysis.namespace}.md`);
 
       // Checkpoint
       const svcRecord: ServiceRecord = {
@@ -375,7 +409,6 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       for (const nested of analysis.nestedServiceCalls) {
         const nestedNs = nested.split(".")[0];
         if (nestedNs && !visited.has(nestedNs)) {
-          // Create a synthetic reference for the nested service
           const nestedSite: ServiceReference = {
             callerFile: resolved.filePath,
             lineNumber: 0,
@@ -410,7 +443,7 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   if (analyzed.length > 0) {
     try {
       indexPath = await buildIndex(migrationDir, analyzed, finalStatus, unresolved, sonnet);
-      log(config, `✓ System index written to ${indexPath}`);
+      log(config, `✓ Written: knowledge-base/_index.md`);
     } catch (e) {
       errors.push(`index: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -431,16 +464,14 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   if (analyzed.length > 0) {
     try {
       await generateScanIntegration(migrationDir, analyzed, targetLanguage, entryRepoUrl);
-      log(config, `✓ Claude Code commands written to .claude/commands/`);
-      log(config, `✓ AGENTS.md written for Codex`);
+      log(config, `✓ Written: .claude/commands/ (Claude Code slash commands)`);
+      log(config, `✓ Written: AGENTS.md (Codex instructions)`);
     } catch (e) {
       errors.push(`ai-integration: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  log(config, `\nScan complete. ${analyzed.length} services analyzed, ${unresolved.length} unresolved.`);
-  log(config, `\n📄 Scan Report:`);
-  log(config, `   \x1b[36m${reportPath}\x1b[0m\n`);
+  log(config, `Scan complete. ${analyzed.length} services analyzed, ${unresolved.length} unresolved.`);
 
   return { analyzed, unresolved, errors, indexPath, scanReportPath: reportPath };
 }

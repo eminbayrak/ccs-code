@@ -34,6 +34,7 @@ async function resolveWithAgentTools(
   config: GithubConfig,
   provider: LLMProvider,
   entryRepoUrl?: string,
+  onProgress?: (msg: string) => void,
 ): Promise<ResolvedService | null> {
   if (!provider.chatWithTools) return null;
 
@@ -75,19 +76,24 @@ async function resolveWithAgentTools(
     try {
       if (call.name === "search_github") {
         const query = call.input.query as string;
+        onProgress?.(`search_github("${query}")`);
         const results = await searchOrgCode(config.org, query, config.token, config.host);
-        if (results.length === 0) return "No results found for this query.";
-        return results
-          .slice(0, 10)
-          .map((r) => `${r.repoFullName} — ${r.filePath}`)
-          .join("\n");
+        if (results.length === 0) {
+          onProgress?.(`  → No results`);
+          return "No results found for this query.";
+        }
+        const top = results.slice(0, 10);
+        top.forEach((r) => onProgress?.(`  → ${r.repoFullName} / ${r.filePath}`));
+        return top.map((r) => `${r.repoFullName} — ${r.filePath}`).join("\n");
       }
 
       if (call.name === "list_repo_files") {
         const owner = call.input.owner as string;
         const repo = call.input.repo as string;
+        onProgress?.(`list_repo_files(${owner}/${repo})`);
         const tree = await fetchFileTree(owner, repo, config.token, config.host);
         if (tree.length === 0) return "Repository is empty or inaccessible.";
+        onProgress?.(`  → ${tree.length} files`);
         return tree.slice(0, 150).join("\n");
       }
 
@@ -95,14 +101,18 @@ async function resolveWithAgentTools(
         const owner = call.input.owner as string;
         const repo = call.input.repo as string;
         const path = call.input.path as string;
+        onProgress?.(`read_file(${owner}/${repo}/${path})`);
         const content = await fetchFileContent(owner, repo, path, config.token, config.host);
-        // Truncate to avoid burning tokens on very large files
+        const lines = content.split("\n").length;
+        onProgress?.(`  → ${lines} lines`);
         return content.length > 4000 ? content.slice(0, 4000) + "\n... [truncated]" : content;
       }
 
       return `Unknown tool: ${call.name}`;
     } catch (e) {
-      return `Error: ${e instanceof Error ? e.message : String(e)}`;
+      const errMsg = e instanceof Error ? e.message : String(e);
+      onProgress?.(`  ✗ ${errMsg}`);
+      return `Error: ${errMsg}`;
     }
   };
 
@@ -290,12 +300,12 @@ export async function resolveNamespace(
   provider: LLMProvider,
   entryRepoUrl?: string,
   methodName?: string,
+  onProgress?: (msg: string) => void,
 ): Promise<ResolvedService | null> {
   // Use AI-agent tool research if the provider supports it
   if (provider.chatWithTools) {
-    const result = await resolveWithAgentTools(namespace, config, provider, entryRepoUrl);
+    const result = await resolveWithAgentTools(namespace, config, provider, entryRepoUrl, onProgress);
     if (result) return result;
-    // If agent returned null (truly not found), don't fall through to sequential
     return null;
   }
 

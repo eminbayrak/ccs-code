@@ -5,6 +5,7 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import { join, resolve } from "path";
 import { useTerminalSize } from "../hooks/useTerminalSize";
+import { usePaste } from "../hooks/usePaste";
 import { CCSSpinner } from "./animations/CCSSpinner";
 import { AgentProgressLine } from "./animations/AgentProgressLine";
 import { StatusBar } from "./StatusBar";
@@ -47,6 +48,7 @@ import {
 } from "../commands/vault";
 import { handleHarvestCommand } from "../commands/harvest";
 import { handleMigrateCommand } from "../commands/migrate";
+import { ScanProgressLog } from "./ScanProgressLog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -184,6 +186,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const [migrateWizardStep, setMigrateWizardStep] = useState(0);
   const [migrateWizardData, setMigrateWizardData] = useState({ repo: "", lang: "csharp" });
 
+  // Migration scan live log (accumulated progress lines shown during scan)
+  const [migrateLogs, setMigrateLogs] = useState<string[]>([]);
+
   // Environment
   const [instructions, setInstructions] = useState<ConfigFile[]>([]);
   const [skills, setSkills] = useState<ConfigFile[]>([]);
@@ -199,6 +204,35 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
   // Injected files (path → content)
   const injectedFilesRef = useRef<Map<string, string>>(new Map());
+
+  // ---------------------------------------------------------------------------
+  // Paste handling — intercepts bracketed paste before Ink's key parser sees it
+  // ---------------------------------------------------------------------------
+
+  // Which input is currently active so paste knows where to land
+  const activeInputRef = useRef<"main" | "setup" | "wizard">("main");
+
+  const isPastingRef = usePaste(
+    useCallback((text: string) => {
+      const target = activeInputRef.current;
+      if (target === "main") {
+        setInput((prev) => prev + text);
+      } else if (target === "setup") {
+        setSetupInput((prev) => prev + text);
+      } else if (target === "wizard") {
+        // Wizard step inputs — update migrateWizardData directly
+        setMigrateWizardData((prev) => ({
+          ...prev,
+          repo: migrateWizardStep === 0 ? text : prev.repo,
+          lang: migrateWizardStep === 1 ? text : prev.lang,
+        }));
+        // Also set main input so TextInput renders it
+        setInput(text);
+        setInputKey((k) => k + 1);
+      }
+    }, [migrateWizardStep]),
+    isProcessing, // disable during scan — no input active
+  );
 
   // LLM provider
   const providerRef = useRef<LLMProvider | null>(null);
@@ -300,6 +334,10 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   // ---------------------------------------------------------------------------
 
   useInput((inputChar, key) => {
+    // Never act on escape-like keys during a bracketed paste — the paste start
+    // sequence \x1b[200~ triggers key.escape before the text arrives.
+    if (isPastingRef.current) return;
+
     if (key.escape && helpOpen) {
       setHelpOpen(false);
       return;
@@ -664,9 +702,11 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         setMessages((prev) => [...prev, createUIMessage("assistant", startMsg)]);
         setIsProcessing(true);
         setActiveTools([{ id: "migrate-task", name: toolName, isComplete: false }]);
+        setMigrateLogs([]);
         processingStartRef.current = Date.now();
 
         handleMigrateCommand(args, process.cwd(), (msg) => {
+          setMigrateLogs((prev) => [...prev, msg]);
           setActiveTools([{ id: "migrate-task", name: msg, isComplete: false }]);
         })
           .then((output) => {
@@ -998,7 +1038,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           <Text bold color="yellow">❯</Text>
           <TextInput
             value={setupInput}
-            onChange={setSetupInput}
+            onChange={(val) => { activeInputRef.current = "setup"; setSetupInput(val); }}
             onSubmit={handleSetupSubmit}
             placeholder="Enter absolute or relative path..."
           />
@@ -1018,13 +1058,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         {(msg) => (
           <Box key={msg.id} flexDirection="column" marginTop={1} paddingX={2}>
             {msg.role === "user" ? (
-              <Box backgroundColor="gray" paddingX={1}>
+              <Box flexDirection="row" gap={1}>
+                <Text color="cyan" bold>❯</Text>
                 <Text color="white">{msg.content}</Text>
               </Box>
             ) : (
               <Box flexDirection="column">
                 <Box flexDirection="row" gap={1}>
-                  <Text color="yellow">◆</Text>
+                  <Text color="#f59e0b">◆</Text>
                   <Text bold color="white">CCS Code</Text>
                 </Box>
                 <Box paddingLeft={2} flexDirection="column">
@@ -1048,10 +1089,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       <Box paddingX={1} marginTop={1}>
         {isProcessing ? (
           <Box flexDirection="column">
+            {migrateLogs.length > 0 ? (
+              <ScanProgressLog logs={migrateLogs} />
+            ) : (
+              activeTools.map((tool) => (
+                <AgentProgressLine key={tool.id} taskName={tool.name} isComplete={tool.isComplete} />
+              ))
+            )}
             <CCSSpinner isStalled={isStalled} />
-            {activeTools.map((tool) => (
-              <AgentProgressLine key={tool.id} taskName={tool.name} isComplete={tool.isComplete} />
-            ))}
           </Box>
         ) : completionLabel ? (
           <Box flexDirection="row" gap={1}>
@@ -1088,7 +1133,10 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             <TextInput
               key={inputKey}
               value={input}
-              onChange={handleInputChange}
+              onChange={(val) => {
+                activeInputRef.current = isMigrateWizard ? "wizard" : "main";
+                handleInputChange(val);
+              }}
               onSubmit={handleSubmit}
               placeholder={
                 isMigrateWizard
