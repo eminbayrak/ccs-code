@@ -461,6 +461,8 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     // Clear previous operation logs
     setMigrateLogs([]);
 
+    if (!id) return;
+
     const vaultCommands = ["vault", "sync", "ingest", "graph", "lint", "rewrite", "index", "enrich", "ask", "harvest", "migrate"];
     if (vaultCommands.includes(id) && !vaultPath) {
       setIsSetupMode(true);
