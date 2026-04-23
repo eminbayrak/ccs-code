@@ -291,6 +291,85 @@ async function resolveSequential(
 // Public entry point
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Resolution Cache — prevents redundant GitHub Search API calls
+// ---------------------------------------------------------------------------
+async function getCachedResolution(migrationDir: string, namespace: string): Promise<ResolvedService | null> {
+  try {
+    const cachePath = join(migrationDir, "resolution-cache.json");
+    const content = await fs.readFile(cachePath, "utf-8");
+    const cache = JSON.parse(content);
+    return cache[namespace] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveResolution(migrationDir: string, namespace: string, result: ResolvedService) {
+  try {
+    const cachePath = join(migrationDir, "resolution-cache.json");
+    let cache: Record<string, ResolvedService> = {};
+    try {
+      const content = await fs.readFile(cachePath, "utf-8");
+      cache = JSON.parse(content);
+    } catch { /* ignore */ }
+    cache[namespace] = result;
+    await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), "utf-8");
+  } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// Local Repository Search — bypasses GitHub Search API entirely
+// ---------------------------------------------------------------------------
+async function resolveLocal(
+  namespace: string,
+  localPath: string,
+  repoFullName: string,
+): Promise<ResolvedService | null> {
+  const candidates = candidateFilenames(namespace);
+  const extensions = new Set(SERVICE_EXTENSIONS);
+
+  async function searchDir(dir: string): Promise<string | null> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.name.startsWith(".")) continue;
+      if (entry.isDirectory()) {
+        const found = await searchDir(full);
+        if (found) return found;
+      } else {
+        if (candidates.includes(entry.name)) return full;
+        const ext = entry.name.slice(entry.name.lastIndexOf("."));
+        if (extensions.has(ext)) {
+          try {
+            const content = await fs.readFile(full, "utf-8");
+            if (content.includes(namespace)) return full;
+          } catch { /* skip */ }
+        }
+      }
+    }
+    return null;
+  }
+
+  try {
+    const found = await searchDir(localPath);
+    if (found) {
+      const relative = found.slice(localPath.length + 1);
+      return {
+        repoFullName,
+        filePath: relative,
+        htmlUrl: `https://github.com/${repoFullName}/blob/main/${relative}`,
+        confidence: "exact",
+      };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
 export async function resolveNamespace(
   namespace: string,
   config: GithubConfig,
@@ -298,16 +377,46 @@ export async function resolveNamespace(
   entryRepoUrl?: string,
   methodName?: string,
   onProgress?: (msg: string) => void,
+  migrationDir?: string,
+  localClonePath?: string,
 ): Promise<ResolvedService | null> {
-  // Use AI-agent tool research if the provider supports it
-  if (provider.chatWithTools) {
-    const result = await resolveWithAgentTools(namespace, config, provider, entryRepoUrl, onProgress);
-    if (result) return result;
-    return null;
+  // 1. Check resolution cache
+  if (migrationDir) {
+    const cached = await getCachedResolution(migrationDir, namespace);
+    if (cached) {
+      onProgress?.(`Using cached resolution for ${namespace}`);
+      return cached;
+    }
   }
 
-  // Fallback: hardcoded sequential search + LLM ranking
-  return resolveSequential(namespace, config, provider, entryRepoUrl, methodName);
+  // 2. Try local search in entry repo (if available)
+  if (localClonePath && entryRepoUrl) {
+    const entryParsed = parseRepoUrl(entryRepoUrl);
+    if (entryParsed) {
+      const local = await resolveLocal(namespace, localClonePath, `${entryParsed.owner}/${entryParsed.repo}`);
+      if (local) {
+        onProgress?.(`Found implementation locally in ${entryParsed.repo}`);
+        if (migrationDir) await saveResolution(migrationDir, namespace, local);
+        return local;
+      }
+    }
+  }
+
+  // 3. Use AI-agent tool research if the provider supports it
+  let result: ResolvedService | null = null;
+  if (provider.chatWithTools) {
+    result = await resolveWithAgentTools(namespace, config, provider, entryRepoUrl, onProgress);
+  } else {
+    // Fallback: hardcoded sequential search + LLM ranking
+    result = await resolveSequential(namespace, config, provider, entryRepoUrl, methodName);
+  }
+
+  // Cache result if found
+  if (result && migrationDir) {
+    await saveResolution(migrationDir, namespace, result);
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------

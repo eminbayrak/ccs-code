@@ -421,11 +421,6 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   }
   log(config, `Found ${allCallSites.length} SOAP call sites across ${uniqueNamespaces.length} services.`);
 
-  // Clean up clone after scan phase is done
-  if (clonedTmpDir) {
-    fs.rm(clonedTmpDir, { recursive: true, force: true }).catch(() => {});
-    clonedTmpDir = null;
-  }
 
   if (uniqueNamespaces.length === 0) {
     const report = await writeScanReport(migrationDir, entryRepoUrl, entryFiles.length, 0, [], [], []);
@@ -514,6 +509,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         resolveNamespace(
           ns, githubConfig, haiku, entryRepoUrl, methodName,
           (toolMsg) => log(config, `  ${toolMsg}`),
+          migrationDir,
+          clonedTmpDir ?? undefined
         ),
         timeoutPromise,
       ]);
@@ -695,6 +692,11 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   const unresolvedCount = unresolved.length;
 
   log(config, `\n### ✻ Scan Results\n\n| Metric | Value |\n| :--- | :--- |\n| **Analyzed** | ${analyzedCount} services |\n| **Unresolved** | ${unresolvedCount} |\n| **Errors** | ${errorCount} |\n\n**Report:** [scan-report.md](file://${reportPath})\n`);
+
+  // Final cleanup
+  if (clonedTmpDir) {
+    fs.rm(clonedTmpDir, { recursive: true, force: true }).catch(() => {});
+  }
 
   return { analyzed, unresolved, errors, indexPath, scanReportPath: reportPath };
 }
