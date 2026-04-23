@@ -76,24 +76,22 @@ async function resolveWithAgentTools(
     try {
       if (call.name === "search_github") {
         const query = call.input.query as string;
-        onProgress?.(`Searching GitHub: ${query}`);
+        onProgress?.(`Searching: ${query}`);
         const results = await searchOrgCode(config.org, query, config.token, config.host);
         if (results.length === 0) {
           onProgress?.(`  → No results`);
           return "No results found for this query.";
         }
-        const top = results.slice(0, 10);
-        top.forEach((r) => onProgress?.(`  → ${r.repoFullName} / ${r.filePath}`));
-        return top.map((r) => `${r.repoFullName} — ${r.filePath}`).join("\n");
+        onProgress?.(`  → Found ${results.length} candidate${results.length === 1 ? "" : "s"}`);
+        return results.slice(0, 10).map((r) => `${r.repoFullName} — ${r.filePath}`).join("\n");
       }
 
       if (call.name === "list_repo_files") {
         const owner = call.input.owner as string;
         const repo = call.input.repo as string;
-        onProgress?.(`Listing files: ${owner}/${repo}`);
+        onProgress?.(`Listing: ${owner}/${repo}`);
         const tree = await fetchFileTree(owner, repo, config.token, config.host);
         if (tree.length === 0) return "Repository is empty or inaccessible.";
-        onProgress?.(`  → Found ${tree.length} files`);
         return tree.slice(0, 150).join("\n");
       }
 
@@ -102,10 +100,8 @@ async function resolveWithAgentTools(
         const repo = call.input.repo as string;
         const path = call.input.path as string;
         const filename = path.split("/").pop() ?? path;
-        onProgress?.(`Reading implementation: ${filename}`);
+        onProgress?.(`Verifying: ${filename}`);
         const content = await fetchFileContent(owner, repo, path, config.token, config.host);
-        const lines = content.split("\n").length;
-        onProgress?.(`  → Read ${lines} lines`);
         return content.length > 4000 ? content.slice(0, 4000) + "\n... [truncated]" : content;
       }
 

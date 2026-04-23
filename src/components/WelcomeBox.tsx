@@ -75,7 +75,6 @@ function WideLayout({
       marginTop={1}
       flexDirection="column"
     >
-      {/* Header */}
       <Box paddingLeft={1} paddingTop={0}>
         <Text dimColor>── </Text>
         <Text bold color="white">CCS Code</Text>
@@ -83,8 +82,6 @@ function WideLayout({
       </Box>
 
       <Box flexDirection="row">
-
-        {/* ── Left: identity ── */}
         <Box
           width={LEFT}
           flexShrink={0}
@@ -110,7 +107,6 @@ function WideLayout({
           </Box>
         </Box>
 
-        {/* ── Right: pipeline + tips ── */}
         <Box
           flexGrow={1}
           flexDirection="column"
@@ -124,7 +120,6 @@ function WideLayout({
           paddingTop={1}
           paddingBottom={1}
         >
-          {/* Pipeline */}
           <Text bold color="white">Pipeline</Text>
           <Box flexDirection="column" marginTop={1} marginBottom={1}>
             {PIPELINE.map(({ step, cmd, desc }) => (
@@ -136,12 +131,10 @@ function WideLayout({
             ))}
           </Box>
 
-          {/* Separator */}
           <Box marginBottom={1}>
             <Text dimColor>{"─".repeat(Math.max(10, boxWidth - LEFT - 7))}</Text>
           </Box>
 
-          {/* Tips */}
           <Text bold color="white">Tips</Text>
           <Box marginTop={1} flexDirection="column">
             {QUICK_TIPS.map((tip, i) => (
@@ -162,8 +155,6 @@ function WideLayout({
     </Box>
   );
 }
-
-// ─── Compact layout (< 95 cols) ───────────────────────────────────────────────
 
 function CompactLayout({
   columns,
@@ -190,7 +181,6 @@ function CompactLayout({
       paddingX={2}
       paddingY={1}
     >
-      {/* Identity */}
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
         <Text bold>
           Welcome back, <Text color="cyan">{username}</Text>!
@@ -198,25 +188,21 @@ function CompactLayout({
         <Text dimColor>Your AI-powered knowledge base</Text>
       </Box>
 
-      {/* Logo */}
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
         {(showLargeLogo ? LOGO_LARGE : LOGO_SMALL).map((line, i) => (
           <Text key={i} color="cyan">{line}</Text>
         ))}
       </Box>
 
-      {/* Model + dir */}
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
         <Text dimColor>{model}</Text>
         <Text dimColor>{dir}</Text>
       </Box>
 
-      {/* Divider */}
       <Box marginBottom={1}>
         <Text dimColor>{"─".repeat(Math.max(10, boxWidth - 6))}</Text>
       </Box>
 
-      {/* Pipeline — the core flow */}
       <Box marginBottom={1}>
         <Text bold color="white">Getting started</Text>
       </Box>
@@ -231,7 +217,6 @@ function CompactLayout({
         ))}
       </Box>
 
-      {/* Divider */}
       <Box marginBottom={1}>
         <Text dimColor>{"─".repeat(Math.max(10, boxWidth - 6))}</Text>
       </Box>

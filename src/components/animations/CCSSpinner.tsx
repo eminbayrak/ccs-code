@@ -5,11 +5,25 @@ import { ShimmerText } from "./ShimmerText.js";
 const FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 
 const THINKING_LABELS = [
-  "Thinking…",
-  "Working…",
-  "Analyzing…",
-  "Processing…",
-  "Researching…",
+  "Thinkering…",
+  "Incubating…",
+  "Pondering…",
+  "Roosting…",
+  "Considering…",
+  "Brewing…",
+  "Synthesizing…",
+  "Stewing…",
+  "Shimmying…",
+  "Spelunking…",
+  "Boondoggling…",
+  "Snoozing…",
+  "Caramelizing…",
+  "Osmosing…",
+  "Ramening…",
+  "Whatchamacalling…",
+  "Shenaniganning…",
+  "Razzmatazzing…",
+  "Optum-izing…",
 ];
 
 const STALLED_LABELS = [
@@ -28,6 +42,7 @@ export function CCSSpinner({ isStalled = false, label: overrideLabel }: { isStal
   });
 
   const activeLabel = overrideLabel ?? label;
+  const baseColor = isStalled ? "red" : "cyan";
 
   useEffect(() => {
     const frameTimer = setInterval(() => {
@@ -53,9 +68,9 @@ export function CCSSpinner({ isStalled = false, label: overrideLabel }: { isStal
 
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={isStalled ? "#f87171" : "#d1d5db"}>{FRAMES[frame]}</Text>
+      <Text color={baseColor} bold>{FRAMES[frame]}</Text>
       <Box flexDirection="row" gap={1}>
-        <Text color={isStalled ? "#f87171" : "#f3f4f6"}>{activeLabel}</Text>
+        <ShimmerText text={activeLabel} color={baseColor} />
         <Text dimColor>({formatTime(seconds)})</Text>
       </Box>
     </Box>

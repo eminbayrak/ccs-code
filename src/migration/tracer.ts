@@ -640,7 +640,11 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(`${ns}: ${msg}`);
-      log(config, `✗ Failed to analyze ${ns}: ${msg}`);
+      // Log concise error summary for the UI
+      let summary = msg;
+      if (msg.includes("429")) summary = "LLM Quota Exceeded";
+      else if (msg.includes("403")) summary = "GitHub Rate Limit";
+      log(config, `✗ Failed: ${ns} (${summary})`);
     }
   }
 
@@ -686,7 +690,11 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     }
   }
 
-  log(config, `Scan complete. ${analyzed.length} services analyzed, ${unresolved.length} unresolved.`);
+  const analyzedCount = analyzed.length;
+  const errorCount = errors.length;
+  const unresolvedCount = unresolved.length;
+
+  log(config, `\n### ✻ Scan Results\n\n| Metric | Value |\n| :--- | :--- |\n| **Analyzed** | ${analyzedCount} services |\n| **Unresolved** | ${unresolvedCount} |\n| **Errors** | ${errorCount} |\n\n**Report:** [scan-report.md](file://${reportPath})\n`);
 
   return { analyzed, unresolved, errors, indexPath, scanReportPath: reportPath };
 }

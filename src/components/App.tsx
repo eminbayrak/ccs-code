@@ -150,6 +150,39 @@ function formatElapsed(ms: number): string {
   return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 }
 
+function formatError(raw: string): string {
+  try {
+    // Detect and format Gemini JSON errors
+    if (raw.includes('"error":') && raw.includes('{')) {
+      const jsonStart = raw.indexOf('{');
+      const jsonText = raw.slice(jsonStart);
+      const json = JSON.parse(jsonText);
+      const err = json.error || json;
+      const message = err.message || "Unknown error";
+      const status = err.status || "ERROR";
+      const code = err.code || "";
+      
+      let formatted = `### ✗ Request Failed (${status})\n\n**${message}**\n\n`;
+      
+      if (err.details) {
+        err.details.forEach((d: any) => {
+          if (d.violations) {
+            d.violations.forEach((v: any) => {
+              formatted += `· **${v.quotaMetric.split('/').pop()}**: ${v.quotaId} (${v.quotaValue})\n`;
+            });
+          }
+          if (d.retryDelay) {
+            formatted += `\n**Retry in:** ${d.retryDelay}\n`;
+          }
+        });
+      }
+      
+      return formatted;
+    }
+  } catch { /* fallback to raw */ }
+  return raw;
+}
+
 const DONE_VERBS = ["Completed", "Finished", "Done", "Processed", "Ready"];
 let doneVerbIdx = 0;
 function nextDoneVerb() {
@@ -939,7 +972,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       setIsProcessing(false);
       setIsStalled(false);
       setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
-      setMessages((prev) => [...prev, createUIMessage("assistant", `❌ Error: ${errorMsg}`)]);
+      setMessages((prev) => [...prev, createUIMessage("assistant", formatError(errorMsg))]);
     }
   };
 
@@ -1060,26 +1093,33 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     <Box flexDirection="column">
       {/* Messages — printed into terminal scrollback, never re-rendered */}
       <Static items={messages}>
-        {(msg) => (
-          <Box key={msg.id} flexDirection="column" marginTop={1} paddingX={2}>
-            {msg.role === "user" ? (
-              <Box flexDirection="row" gap={1}>
-                <Text color="cyan" bold>❯</Text>
-                <Text color="white">{msg.content}</Text>
-              </Box>
-            ) : (
-              <Box flexDirection="column">
+        {(msg, index) => {
+          const prevMsg = index > 0 ? messages[index - 1] : null;
+          const showHeader = msg.role === "assistant" && (!prevMsg || prevMsg.role === "user");
+
+          return (
+            <Box key={msg.id} flexDirection="column" marginTop={showHeader || msg.role === "user" ? 1 : 0} paddingX={2}>
+              {msg.role === "user" ? (
                 <Box flexDirection="row" gap={1}>
-                  <Text color="#f59e0b">◆</Text>
-                  <Text bold color="white">CCS Code</Text>
+                  <Text color="#6366f1" bold>❯</Text>
+                  <Text color="white" bold>{msg.content}</Text>
                 </Box>
-                <Box paddingLeft={2} flexDirection="column">
-                  <MarkdownText content={msg.content} width={terminalWidth - 6} />
+              ) : (
+                <Box flexDirection="column">
+                  {showHeader && (
+                    <Box flexDirection="row" gap={1} marginBottom={0}>
+                      <Text color="#f59e0b">◆</Text>
+                      <Text bold color="white">CCS Code</Text>
+                    </Box>
+                  )}
+                  <Box paddingLeft={2} flexDirection="column">
+                    <MarkdownText content={msg.content} width={terminalWidth - 6} />
+                  </Box>
                 </Box>
-              </Box>
-            )}
-          </Box>
-        )}
+              )}
+            </Box>
+          );
+        }}
       </Static>
 
       {/* Welcome screen — shown until user sends first message */}

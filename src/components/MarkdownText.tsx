@@ -355,9 +355,8 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "h1":
         elements.push(
-          <Box key={key++} flexDirection="column" marginTop={1} width={w}>
-            <Text bold color="blue">{cl.text.toUpperCase()}</Text>
-            <Text color="blue">{"━".repeat(Math.min(cl.text.length, w - 4))}</Text>
+          <Box key={key++} flexDirection="column" marginTop={1} marginBottom={0} width={w}>
+            <Text bold color="white">{cl.text.toUpperCase()}</Text>
           </Box>
         );
         break;
@@ -365,7 +364,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       case "h2":
         elements.push(
           <Box key={key++} marginTop={1} width={w}>
-            <Text bold color="cyan"># {cl.text}</Text>
+            <Text bold color="#fcd34d">{cl.text}</Text>
           </Box>
         );
         break;
@@ -381,7 +380,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       case "h4":
         elements.push(
           <Box key={key++} marginTop={1} width={w}>
-            <Text bold color="yellow">{cl.text}</Text>
+            <Text bold color="#9ca3af">{cl.text}</Text>
           </Box>
         );
         break;
@@ -389,15 +388,15 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
       case "h5":
         elements.push(
           <Box key={key++} marginTop={1} width={w}>
-            <Text bold color="magenta">{cl.text}</Text>
+            <Text bold italic color="#d1d5db">{cl.text}</Text>
           </Box>
         );
         break;
 
       case "bullet":
         elements.push(
-          <Box key={key++} flexDirection="row" flexWrap="wrap" paddingLeft={cl.indent > 0 ? cl.indent + 2 : 2} width={w}>
-            <Text color="green">{"› "}</Text>
+          <Box key={key++} flexDirection="row" paddingLeft={cl.indent + 1} width={w}>
+            <Text color="#9ca3af">{"• "}</Text>
             <Box flexShrink={1} flexGrow={0}><InlineText line={cl.text} /></Box>
           </Box>
         );
@@ -405,8 +404,8 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "numbered":
         elements.push(
-          <Box key={key++} flexDirection="row" paddingLeft={2} width={w}>
-            <Text color="cyan" dimColor>{`${cl.n}. `}</Text>
+          <Box key={key++} flexDirection="row" paddingLeft={1} width={w}>
+            <Text color="#9ca3af" dimColor>{`${cl.n}. `}</Text>
             <Box width={w - 6}><InlineText line={cl.text} /></Box>
           </Box>
         );
@@ -414,23 +413,31 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
       case "hr":
         elements.push(
-          <Box key={key++} marginY={0} width={w}>
+          <Box key={key++} marginY={1} width={w}>
             <Text dimColor>{"─".repeat(Math.min(w - 4, 72))}</Text>
           </Box>
         );
         break;
 
       case "blank":
-        elements.push(<Box key={key++} width={w}><Text>{" "}</Text></Box>);
+        elements.push(<Box key={key++} height={1} />);
         break;
 
-      case "text":
+      case "text": {
+        const isError = cl.text.includes("✗") || cl.text.includes("Failed") || cl.text.includes("Error:");
         elements.push(
-          <Box key={key++} width={w} flexWrap="wrap">
-            <InlineText line={cl.text} />
+          <Box key={key++} width={w} flexWrap="wrap" marginBottom={0}>
+            {isError ? (
+              <Text color="red" bold>
+                <InlineText line={cl.text} />
+              </Text>
+            ) : (
+              <InlineText line={cl.text} />
+            )}
           </Box>
         );
         break;
+      }
     }
   }
 
