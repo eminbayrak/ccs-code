@@ -39,20 +39,35 @@ export function buildApiBase(host?: string): string {
     return `https://${host}/api/v3`;
 }
 
+/** Helper to wrap fetch with a timeout using AbortController */
+async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const res = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(timer);
+        return res;
+    } catch (e) {
+        clearTimeout(timer);
+        if (e instanceof Error && e.name === "AbortError") {
+            throw new Error(`GitHub request timed out after ${timeoutMs / 1000}s: ${url}`);
+        }
+        throw e;
+    }
+}
+
 /** Fetch with exponential backoff — handles rate limits and transient errors */
 async function ghFetchWithRetry<T>(
     url: string,
     token?: string,
-    maxRetries = 4
+    maxRetries = 2
 ): Promise<T> {
     let attempt = 0;
     while (true) {
-        const res = await fetch(url, {
-            headers: ghHeaders(token),
-            signal: AbortSignal.timeout(30_000),
-        });
+        const res = await fetchWithTimeout(url, { headers: ghHeaders(token) }, 20_000);
 
         if (res.ok) return res.json() as Promise<T>;
+
 
         // Rate limit — only retry if the server tells us when to retry
         if (res.status === 429 || res.status === 403) {
@@ -63,8 +78,8 @@ async function ghFetchWithRetry<T>(
                 const waitMs = retryAfter
                     ? parseInt(retryAfter, 10) * 1000
                     : Math.max(0, parseInt(resetAt!, 10) * 1000 - Date.now()) + 1000;
-                // Cap wait at 30s to avoid multi-minute hangs
-                const cappedWait = Math.min(waitMs, 30_000);
+                // Cap wait at 10s to avoid multi-minute hangs
+                const cappedWait = Math.min(waitMs, 10_000);
                 if (attempt < maxRetries) {
                     await new Promise((r) => setTimeout(r, cappedWait));
                     attempt++;
@@ -72,22 +87,20 @@ async function ghFetchWithRetry<T>(
                 }
             }
             // No retry headers — fail immediately with a useful message
-            const body = await res.text();
             if (res.status === 403) {
-                throw new Error(`GitHub 403: Forbidden. Ensure GITHUB_PRIVATE_TOKEN is set in your .env. Detail: ${body.slice(0, 150)}`);
+                throw new Error(`GitHub 403: Forbidden. Set GITHUB_TOKEN or GITHUB_PRIVATE_TOKEN in your .env. Detail: ${body.slice(0, 150)}`);
             }
-            throw new Error(`GitHub ${res.status}: ${body.slice(0, 200)}`);
+            throw new Error(`GitHub rate limited (${res.status}). Set GITHUB_TOKEN in .env for higher limits. ${body.slice(0, 100)}`);
         }
 
-        // Transient server error — exponential backoff
+        // Transient server error — exponential backoff, capped at 5s
         if (res.status >= 500 && attempt < maxRetries) {
-            const wait = Math.min(1000 * 2 ** attempt, 30_000);
+            const wait = Math.min(1000 * 2 ** attempt, 5_000);
             await new Promise((r) => setTimeout(r, wait));
             attempt++;
             continue;
         }
 
-        const body = await res.text();
         throw new Error(`GitHub ${res.status}: ${body.slice(0, 200)}`);
     }
 }

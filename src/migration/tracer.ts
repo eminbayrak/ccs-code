@@ -55,6 +55,7 @@ async function fetchRepoFiles(
 ): Promise<Array<{ path: string; content: string }>> {
   const tree = await fetchFileTree(owner, repo, config.token, config.host);
   const extSet = new Set(extensions);
+  
   const jsFiles = tree.filter((p) => {
     const ext = p.slice(p.lastIndexOf("."));
     return extSet.has(ext);
