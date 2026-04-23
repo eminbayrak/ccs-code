@@ -188,24 +188,22 @@ async function handleScan(args: string[], onProgress?: (msg: string) => void): P
     }
 
     const summary = [
-      `### Scan Complete`,
-      ``,
-      ...logs,
-      ``,
+      `## ✓ Scan Complete`,
+      "",
       `**Results:**`,
-      `- Services analyzed: ${result.analyzed.length}`,
-      `- Unresolved: ${result.unresolved.length}`,
-      `- Errors: ${result.errors.length}`,
+      `- **Services analyzed:** ${result.analyzed.length}`,
+      `- **Unresolved:** ${result.unresolved.length}`,
+      `- **Errors:**     ${result.errors.length}`,
     ];
 
     if (result.indexPath) {
-      summary.push(``, `System index: \`${result.indexPath}\``);
+      summary.push(``, `**System index:** \`${result.indexPath}\``);
     }
     if (result.scanReportPath) {
-      summary.push(`Scan report: \`${result.scanReportPath}\``);
+      summary.push(`**Scan report:** \`${result.scanReportPath}\``);
     }
     if (result.unresolved.length > 0) {
-      summary.push(``, `⚠ Unresolved: ${result.unresolved.join(", ")}`);
+      summary.push(``, `⚠ **Unresolved:** ${result.unresolved.join(", ")}`);
     }
 
     summary.push(``, `Run \`/migrate status\` to see full progress.`);
@@ -436,34 +434,31 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
     }
 
     const summary = [
-      `### Rewrite KB Complete`,
-      ``,
-      ...logs,
-      ``,
+      `## ✓ Rewrite KB Complete`,
+      "",
       `**Framework:** ${result.frameworkInfo.sourceFramework} (${result.frameworkInfo.sourceLanguage}) → ${result.frameworkInfo.targetFramework} (${result.frameworkInfo.targetLanguage})`,
       `**Components analyzed:** ${result.components.length}`,
       `**Migration order:** ${result.migrationOrder.join(" → ")}`,
     ];
 
     if (result.unanalyzed.length > 0) {
-      summary.push(``, `⚠ Failed: ${result.unanalyzed.join(", ")}`);
+      summary.push(``, `⚠ **Failed:** ${result.unanalyzed.join(", ")}`);
     }
 
     const migDir = await getMigrationDir();
     summary.push(
       ``,
-      `**Generated files:**`,
-      `- Context docs:      \`${migDir}/rewrite/context/\``,
-      `- Claude Code cmds:  \`${migDir}/rewrite/.claude/commands/\`  ← copy to your new project`,
-      `- Codex context:     \`${migDir}/rewrite/AGENTS.md\``,
-      `- Execution guide:   \`${migDir}/rewrite/HOW-TO-MIGRATE.md\``,
-      `- Knowledge base:    \`${migDir}/rewrite/_index.md\``,
+      `### Generated Files`,
+      `- **Context docs:**      \`${migDir}/rewrite/context/\``,
+      `- **Claude Code cmds:**  \`${migDir}/rewrite/.claude/commands/\``,
+      `- **Codex context:**     \`${migDir}/rewrite/AGENTS.md\``,
+      `- **Execution guide:**   \`${migDir}/rewrite/HOW-TO-MIGRATE.md\``,
+      `- **Knowledge base:**    \`${migDir}/rewrite/_index.md\``,
       ``,
-      `**To start rewriting with Claude Code:**`,
-      `1. Scaffold your new ${result.frameworkInfo.targetLanguage} project`,
+      `### Next Steps`,
+      `1. Scaffold your new **${result.frameworkInfo.targetFramework}** project`,
       `2. Copy \`rewrite/.claude/\` into your new project root`,
-      `3. Open Claude Code there and run: \`/project:rewrite-${result.migrationOrder[0] ?? "FirstComponent"}\``,
-      `4. Continue in order: ${result.migrationOrder.slice(0, 4).join(" → ")}${result.migrationOrder.length > 4 ? "…" : ""}`,
+      `3. Run: \`/project:rewrite-${result.migrationOrder[0] ?? "FirstComponent"}\``,
     );
 
     return summary.join("\n");

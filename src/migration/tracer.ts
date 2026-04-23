@@ -672,7 +672,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   const errorCount = errors.length;
   const unresolvedCount = unresolved.length;
 
-  log(config, `\n### ✻ Scan Results\n\n| Metric | Value |\n| :--- | :--- |\n| **Analyzed** | ${analyzedCount} services |\n| **Unresolved** | ${unresolvedCount} |\n| **Errors** | ${errorCount} |\n\n**Report:** [scan-report.md](file://${reportPath})\n`);
+  // Final completion heartbeat
+  log(config, `✓ Scan complete: ${analyzedCount} services analyzed.`);
 
   return { analyzed, unresolved, errors, indexPath, scanReportPath: reportPath };
 }

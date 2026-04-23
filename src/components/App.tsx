@@ -458,6 +458,8 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
     // Dismiss welcome box on any command, regardless of how it was triggered
     setShowWelcome(false);
+    // Clear previous operation logs
+    setMigrateLogs([]);
 
     const vaultCommands = ["vault", "sync", "ingest", "graph", "lint", "rewrite", "index", "enrich", "ask", "harvest", "migrate"];
     if (vaultCommands.includes(id) && !vaultPath) {
