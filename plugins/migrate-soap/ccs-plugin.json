@@ -1,0 +1,6 @@
+{
+  "name": "migrate-soap",
+  "version": "1.0.0",
+  "description": "Scans for SOAP service call patterns and extracts namespace/method references.",
+  "entry": "index.js"
+}

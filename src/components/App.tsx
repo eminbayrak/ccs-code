@@ -572,15 +572,25 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       }
       case "migrate": {
         const subcommand = args[0] ?? "";
-        const startMsg = subcommand === "scan"
-          ? "Starting migration scan — this may take several minutes..."
-          : subcommand === "status"
-          ? "Loading migration status..."
-          : `Running /migrate ${subcommand}...`;
+        const startMsgMap: Record<string, string> = {
+          scan:    "Starting migration scan — this may take several minutes...",
+          status:  "Loading migration status...",
+          context: "Loading context doc...",
+          verify:  "Processing verification...",
+          done:    "Marking service as done...",
+          rescan:  "Preparing rescan instructions...",
+          plugin:  "Listing installed plugins...",
+        };
+        const startMsg = startMsgMap[subcommand] ?? `Running /migrate ${subcommand}...`;
         setMessages((prev) => [...prev, createUIMessage("assistant", startMsg)]);
-        handleMigrateCommand(args, process.cwd()).then((output) => {
-          setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
-        });
+        handleMigrateCommand(args, process.cwd())
+          .then((output) => {
+            setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${msg}`)]);
+          });
         break;
       }
       case "exit":

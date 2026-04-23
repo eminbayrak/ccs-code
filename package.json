@@ -6,6 +6,8 @@
   "scripts": {
     "start": "bun run src/main.tsx",
     "build": "bun build ./src/main.tsx --compile --outfile ccs",
+    "build:plugins": "bun build ./plugins/migrate-soap/index.ts --outfile ./plugins/migrate-soap/index.js --format esm",
+    "build:all": "bun run build && bun run build:plugins",
     "test": "bun test"
   },
   "devDependencies": {

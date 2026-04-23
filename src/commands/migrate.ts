@@ -1,7 +1,7 @@
 import { join } from "path";
-import * as readline from "readline";
 import { readVaultConfig } from "./vault.js";
 import { trace } from "../migration/tracer.js";
+import { loadPlugins, listPlugins } from "../migration/pluginLoader.js";
 import * as statusTracker from "../migration/statusTracker.js";
 
 // ---------------------------------------------------------------------------
@@ -15,45 +15,39 @@ async function getMigrationDir(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Interactive y/n prompt (non-TTY falls back to true for pipeline use)
-// ---------------------------------------------------------------------------
-
-async function confirm(question: string): Promise<boolean> {
-  if (!process.stdin.isTTY) return true;
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(question + " [y/n] ", (answer) => {
-      rl.close();
-      resolve(answer.trim().toLowerCase() === "y");
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
-// /migrate scan --repo <url> --lang <language>
+// /migrate scan --repo <url> --lang <language> [--org <org>] [--plugin <name>] [--yes]
 // ---------------------------------------------------------------------------
 
 async function handleScan(args: string[]): Promise<string> {
-  // Parse --repo and --lang from args
   let repoUrl = "";
   let lang = "csharp";
   let org = "";
+  let pluginName = "";
+  let autoConfirm = false;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--repo" && args[i + 1]) repoUrl = args[++i] ?? "";
-    if (args[i] === "--lang" && args[i + 1]) lang = args[++i] ?? lang;
-    if (args[i] === "--org" && args[i + 1]) org = args[++i] ?? "";
+    const a = args[i];
+    if ((a === "--repo"   || a === "-r") && args[i + 1]) repoUrl    = args[++i] ?? "";
+    if ((a === "--lang"   || a === "-l") && args[i + 1]) lang        = args[++i] ?? lang;
+    if ((a === "--org"    || a === "-o") && args[i + 1]) org         = args[++i] ?? "";
+    if ((a === "--plugin" || a === "-p") && args[i + 1]) pluginName  = args[++i] ?? "";
+    if (a === "--yes" || a === "-y") autoConfirm = true;
   }
 
   if (!repoUrl) {
     return [
-      "Usage: /migrate scan --repo <github-url> --lang <language> [--org <org-name>]",
+      "Usage: /migrate scan --repo <github-url> --lang <language> [options]",
+      "",
+      "Options:",
+      "  --org <name>     GitHub org to search for service repos (default: inferred from URL)",
+      "  --plugin <name>  Plugin to use for scanning (default: first installed)",
+      "  --yes            Skip cost preview confirmation and proceed immediately",
       "",
       "Examples:",
       "  /migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp",
-      "  /migrate scan --repo https://github.com/myorg/SoapServices --lang typescript",
+      "  /migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp --yes",
       "",
-      "Languages: csharp, typescript, java, python, go",
+      "Supported languages: csharp, typescript, java, python, go",
     ].join("\n");
   }
 
@@ -66,11 +60,30 @@ async function handleScan(args: string[]): Promise<string> {
   const migrationDir = await getMigrationDir();
   const logs: string[] = [];
 
+  // Select plugin
+  const allPlugins = await loadPlugins(process.cwd());
+  if (allPlugins.length === 0) {
+    return [
+      "No scanner plugin found.",
+      "",
+      "Install a plugin into `.ccs/plugins/<name>/` or `~/.ccs/plugins/<name>/`.",
+      "Each plugin folder needs a `ccs-plugin.json` manifest and a compiled `index.js`.",
+      "Run `/migrate plugin list` to see what is currently installed.",
+    ].join("\n");
+  }
+
+  const plugin = pluginName
+    ? (allPlugins.find((p) => p.name === pluginName) ?? allPlugins[0]!)
+    : allPlugins[0]!;
+
+  logs.push(`Using plugin: ${plugin.name} v${plugin.version}`);
+
   try {
     const result = await trace({
       entryRepoUrl: repoUrl,
       targetLanguage: lang,
       migrationDir,
+      plugin,
       githubConfig: {
         org,
         token: process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN,
@@ -78,9 +91,27 @@ async function handleScan(args: string[]): Promise<string> {
       onProgress: (msg) => logs.push(msg),
       onCostPreview: async (preview) => {
         logs.push(preview);
-        return confirm("Proceed with scan?");
+        if (autoConfirm) {
+          logs.push("Auto-confirmed (--yes flag).");
+          return true;
+        }
+        // Cannot do interactive stdin prompts inside the Ink UI.
+        // Show the estimate and ask the user to re-run with --yes.
+        return false;
       },
     });
+
+    // If scan was aborted by cost preview, result will have empty arrays
+    if (!result.analyzed.length && !result.unresolved.length && !result.errors.length && !result.scanReportPath) {
+      return [
+        "### Cost Estimate",
+        "",
+        ...logs,
+        "",
+        "Add `--yes` to proceed with the scan:",
+        `  /migrate scan --repo ${repoUrl} --lang ${lang}${org ? ` --org ${org}` : ""} --yes`,
+      ].join("\n");
+    }
 
     const summary = [
       `### Scan Complete`,
@@ -192,21 +223,15 @@ async function handleVerify(args: string[]): Promise<string> {
     `Confidence level: ${svc.confidence}`,
   ].join("\n");
 
-  if (svc.confidence === "low") {
-    return [
-      checklist,
-      ``,
-      `⚠ This service has LOW confidence — review the context doc carefully before verifying.`,
-      `Context doc: ${svc.contextDoc}`,
-      ``,
-      `To verify: /migrate verify ${name} --by <your-name>`,
-    ].join("\n");
-  }
+  const verifiedBy = args.find((_, i) => args[i - 1] === "--by") ?? "";
 
-  const verifiedBy = args.find((_, i) => args[i - 1] === "--by") ?? "unknown";
-  if (!args.includes("--by")) {
+  if (!verifiedBy) {
+    const lowNote = svc.confidence === "low"
+      ? [``, `⚠ LOW confidence — review the context doc before verifying: ${svc.contextDoc}`]
+      : [];
     return [
       checklist,
+      ...lowNote,
       ``,
       `To confirm verification, run:`,
       `  /migrate verify ${name} --by <your-name>`,
@@ -215,9 +240,60 @@ async function handleVerify(args: string[]): Promise<string> {
 
   const ok = await statusTracker.markVerified(migrationDir, svc.namespace, verifiedBy);
   if (ok) {
-    return `✓ ${svc.name} verified by ${verifiedBy}. Status updated to in-progress.`;
+    const lowWarn = svc.confidence === "low" ? " ⚠ Low confidence — double-check this doc before rewriting." : "";
+    return `✓ ${svc.name} verified by ${verifiedBy}. Status updated to in-progress.${lowWarn}`;
   }
   return `Failed to update verification status.`;
+}
+
+// ---------------------------------------------------------------------------
+// /migrate done <ServiceName>
+// ---------------------------------------------------------------------------
+
+async function handleDone(args: string[]): Promise<string> {
+  const name = args[0];
+  if (!name) return "Usage: /migrate done <ServiceName>";
+
+  const migrationDir = await getMigrationDir();
+  const current = await statusTracker.load(migrationDir);
+  if (!current) return "No migration status found. Run /migrate scan first.";
+
+  const svc = current.services.find(
+    (s) => s.name === name || s.namespace === name || s.namespace === `${name}Manager`
+  );
+  if (!svc) return `Service "${name}" not found. Run /migrate status to see available services.`;
+
+  try {
+    const ok = await statusTracker.markDone(migrationDir, svc.namespace);
+    return ok
+      ? `✓ ${svc.name} marked as done. Rewrite complete.`
+      : `Failed to update status.`;
+  } catch (e) {
+    return `Cannot mark done: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /migrate plugin list
+// ---------------------------------------------------------------------------
+
+async function handlePlugin(args: string[]): Promise<string> {
+  const sub = args[0];
+  if (!sub || sub === "list") {
+    const plugins = await listPlugins(process.cwd());
+    if (plugins.length === 0) {
+      return [
+        "No plugins installed.",
+        "",
+        "Built-in plugins live in `plugins/` in the ccs repo.",
+        "Run `npm run build:plugins` to compile them.",
+        "Or place a compiled plugin in `.ccs/plugins/<name>/` in your project.",
+      ].join("\n");
+    }
+    const rows = plugins.map((p) => `  ${p.name}@${p.version}  →  ${p.dir}`).join("\n");
+    return `Installed plugins:\n\n${rows}`;
+  }
+  return `Unknown plugin subcommand: ${sub}. Usage: /migrate plugin list`;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +329,9 @@ export async function handleMigrateCommand(
     case "status":  return handleStatus();
     case "context": return handleContext(rest);
     case "verify":  return handleVerify(rest);
+    case "done":    return handleDone(rest);
     case "rescan":  return handleRescan(rest);
+    case "plugin":  return handlePlugin(rest);
     default:
       return [
         "### /migrate — Migration Context Builder",
@@ -261,11 +339,13 @@ export async function handleMigrateCommand(
         "Scans a legacy codebase and generates AI rewrite context documents.",
         "",
         "**Subcommands:**",
-        "  `/migrate scan --repo <url> --lang <language>`  — scan a repo and build the knowledge base",
+        "  `/migrate scan --repo <url> --lang <language> [--yes]`  — scan a repo and build the knowledge base",
         "  `/migrate status`                               — show migration progress table",
         "  `/migrate context <ServiceName>`                — print a service context doc",
         "  `/migrate verify <ServiceName> --by <name>`     — mark a service as human-verified",
+        "  `/migrate done <ServiceName>`                    — mark a verified service as fully rewritten",
         "  `/migrate rescan <ServiceName>`                  — instructions to re-analyze a service",
+        "  `/migrate plugin list`                           — list installed scanner plugins",
         "",
         "**Supported languages:** csharp, typescript, java, python, go",
         "",

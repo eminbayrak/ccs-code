@@ -116,7 +116,7 @@ export function buildContextDoc(input: ContextBuildInput): string {
 
   return `# Migration Context: ${analysis.namespace}
 
-**Discovered via:** ${callerLink} → \`constructSoapRequest\`
+**Discovered via:** ${callerLink}
 **Service namespace:** \`${analysis.namespace}\`
 **Method:** \`${analysis.methodName}\`
 **Source repo:** ${resolved.repoFullName}

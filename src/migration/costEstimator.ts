@@ -1,5 +1,3 @@
-import type { SoapCallSite } from "./scanner.js";
-
 // ---------------------------------------------------------------------------
 // Token estimation — rough but reliable for planning purposes
 // Anthropic tokens ≈ 4 chars per token (English/code mix)

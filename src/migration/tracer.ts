@@ -6,8 +6,8 @@ import {
   parseRepoUrl,
 } from "../connectors/github.js";
 import { AnthropicProvider } from "../llm/providers/anthropic.js";
-import { scanFileForSoapCalls, groupByNamespace } from "./scanner.js";
-import type { SoapCallSite } from "./scanner.js";
+import { runPluginScan, groupByNamespace } from "./scanner.js";
+import type { MigratePlugin, ServiceReference } from "./types.js";
 import { resolveNamespace, findWsdlFiles } from "./resolver.js";
 import type { GithubConfig } from "./resolver.js";
 import { analyzeService } from "./analyzer.js";
@@ -25,6 +25,7 @@ export type TracerConfig = {
   targetLanguage: string;
   migrationDir: string;
   githubConfig: GithubConfig;
+  plugin: MigratePlugin;
   onProgress?: (msg: string) => void;
   onCostPreview?: (preview: string) => Promise<boolean>;
 };
@@ -48,12 +49,15 @@ function log(config: TracerConfig, msg: string) {
 async function fetchRepoFiles(
   owner: string,
   repo: string,
-  config: GithubConfig
+  config: GithubConfig,
+  extensions: string[]
 ): Promise<Array<{ path: string; content: string }>> {
   const tree = await fetchFileTree(owner, repo, config.token, config.host);
-  const jsFiles = tree.filter((p) =>
-    /\.(js|ts|jsx|tsx|mjs|cjs)$/.test(p)
-  );
+  const extSet = new Set(extensions);
+  const jsFiles = tree.filter((p) => {
+    const ext = p.slice(p.lastIndexOf("."));
+    return extSet.has(ext);
+  });
 
   const files: Array<{ path: string; content: string }> = [];
   for (const filePath of jsFiles) {
@@ -206,16 +210,12 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   const migStatus = await status.init(migrationDir, entryRepoUrl, targetLanguage);
 
   log(config, `Fetching file tree from ${entryRepoUrl}...`);
-  const entryFiles = await fetchRepoFiles(owner, repo, githubConfig);
-  log(config, `Found ${entryFiles.length} JS/TS files. Scanning for SOAP patterns...`);
+  const entryFiles = await fetchRepoFiles(owner, repo, githubConfig, config.plugin.fileExtensions);
+  log(config, `Found ${entryFiles.length} files. Scanning with plugin: ${config.plugin.name}...`);
 
-  // Tier 0 — static scan
-  const allCallSites: SoapCallSite[] = [];
-  for (const file of entryFiles) {
-    const sites = scanFileForSoapCalls(file.path, file.content);
-    allCallSites.push(...sites);
-  }
-
+  // Tier 0 — static scan via plugin
+  const scanResult = runPluginScan(entryFiles, config.plugin);
+  const allCallSites: ServiceReference[] = scanResult.references;
   const grouped = groupByNamespace(allCallSites);
   const uniqueNamespaces = [...grouped.keys()];
 
@@ -352,16 +352,13 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       for (const nested of analysis.nestedServiceCalls) {
         const nestedNs = nested.split(".")[0];
         if (nestedNs && !visited.has(nestedNs)) {
-          // Create a synthetic call site for the nested service
-          const nestedSite: SoapCallSite = {
+          // Create a synthetic reference for the nested service
+          const nestedSite: ServiceReference = {
             callerFile: resolved.filePath,
             lineNumber: 0,
             serviceNamespace: nestedNs,
             methodName: nested.split(".")[1] ?? "unknown",
-            actionName: null,
-            isXmlResponse: false,
-            parameterFlags: [],
-            rawConfig: "",
+            metadata: {},
           };
           if (!grouped.has(nestedNs)) {
             grouped.set(nestedNs, [nestedSite]);
@@ -381,7 +378,9 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   }
 
   // Load final status for index builder
-  const finalStatus = (await status.load(migrationDir)) as MigrationStatus;
+  const finalStatusOrNull = await status.load(migrationDir);
+  if (!finalStatusOrNull) throw new Error("Migration status file missing after scan — this is a bug.");
+  const finalStatus: MigrationStatus = finalStatusOrNull;
 
   // Build system index
   let indexPath: string | null = null;

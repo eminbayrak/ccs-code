@@ -1,5 +1,5 @@
 import { AnthropicProvider } from "../llm/providers/anthropic.js";
-import type { SoapCallSite } from "./scanner.js";
+import type { ServiceReference } from "./types.js";
 import type { WsdlParseResult } from "./wsdlParser.js";
 import { wsdlToPromptText } from "./wsdlParser.js";
 
@@ -38,11 +38,10 @@ Respond only with valid JSON matching the exact schema requested.`;
 // ---------------------------------------------------------------------------
 
 function buildPrompt(
-  callSite: SoapCallSite,
+  callSite: ServiceReference,
   serviceFiles: Array<{ path: string; content: string }>,
   wsdl: WsdlParseResult | null
 ): string {
-  // Bundle all service files with clear separators
   const fileBundle = serviceFiles
     .map((f) => `=== FILE: ${f.path} ===\n${f.content.slice(0, 8000)}`)
     .join("\n\n");
@@ -51,12 +50,14 @@ function buildPrompt(
     ? `\nWSDL Contract:\n${wsdlToPromptText(wsdl)}`
     : "";
 
+  const paramFlags = callSite.metadata["parameterFlags"] ?? "none";
+
   return `Analyze this legacy service for migration documentation.
 
 Caller file: ${callSite.callerFile} (line ${callSite.lineNumber})
 Service namespace: ${callSite.serviceNamespace}
 Method called: ${callSite.methodName}
-Parameter flags: ${callSite.parameterFlags.join(", ") || "none"}
+Parameter flags: ${paramFlags}
 ${wsdlSection}
 
 Service implementation:
@@ -99,7 +100,7 @@ type RawAnalysis = {
 
 function parseAnalysisResponse(
   raw: string,
-  callSite: SoapCallSite
+  callSite: ServiceReference
 ): Omit<ServiceAnalysis, "namespace" | "methodName" | "callerFile" | "callerLine" | "rawFiles"> {
   const jsonText = raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}";
   let parsed: RawAnalysis = {};
@@ -165,7 +166,7 @@ function parseAnalysisResponse(
 // ---------------------------------------------------------------------------
 
 export async function analyzeService(
-  callSite: SoapCallSite,
+  callSite: ServiceReference,
   serviceFiles: Array<{ path: string; content: string }>,
   wsdl: WsdlParseResult | null,
   provider: AnthropicProvider
@@ -194,7 +195,7 @@ export async function analyzeService(
 // ---------------------------------------------------------------------------
 
 export async function analyzeServices(
-  callSites: SoapCallSite[],
+  callSites: ServiceReference[],
   getServiceFiles: (
     namespace: string
   ) => Promise<Array<{ path: string; content: string }>>,
