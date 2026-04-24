@@ -20,6 +20,7 @@ import * as status from "./statusTracker.js";
 import type { ServiceRecord, MigrationStatus } from "./statusTracker.js";
 import { estimateScanCost, formatCostPreview } from "./costEstimator.js";
 import { generateScanIntegration } from "./aiIntegration.js";
+import { scanFilesForSecrets, formatSecurityWarnings } from "./securityScanner.js";
 
 export type TracerConfig = {
   entryRepoUrl: string;
@@ -51,31 +52,108 @@ function log(config: TracerConfig, msg: string) {
 // Git clone approach — no API rate limits, works for public repos without token
 // ---------------------------------------------------------------------------
 
+// Directories that are always skipped regardless of .gitignore.
+// Mirrors Repomix's defaultIgnore list — these are never source files.
+const ALWAYS_SKIP_DIRS = new Set([
+  "node_modules", ".git", ".svn", ".hg",
+  "bin", "obj",           // C# / .NET build output
+  "dist", "build", "out", // JS/TS build output
+  "target",               // Java/Maven/Rust
+  "__pycache__", ".venv", "venv", "env",
+  ".next", ".nuxt", ".output",
+  ".vs", ".idea", ".vscode",
+  "coverage", ".nyc_output",
+  "vendor",               // Go, PHP
+  "packages",             // monorepo nested installs
+]);
+
+// Parse a .gitignore file into a list of usable glob-ish patterns.
+// We only handle the common subset: exact names, wildcards, directory-
+// trailing slashes, and simple prefix paths. Good enough for ~95% of repos.
+function parseGitignore(content: string): string[] {
+  return content
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith("#") && !l.startsWith("!"))
+    .map((l) => l.replace(/\/$/, "")); // strip trailing slash
+}
+
+// Return true if `relativePath` (forward-slash, no leading slash) matches
+// any of the gitignore patterns. Handles `*` (single segment) and `**`
+// (multi-segment) wildcards plus exact name/path matching.
+function matchesGitignore(relativePath: string, patterns: string[]): boolean {
+  const parts = relativePath.split("/");
+  const name = parts[parts.length - 1] ?? "";
+
+  for (const pat of patterns) {
+    // Exact filename match anywhere in the tree
+    if (!pat.includes("/") && !pat.includes("*")) {
+      if (name === pat || parts.includes(pat)) return true;
+      continue;
+    }
+    // Pattern with ** — treat as "anywhere in path"
+    if (pat.includes("**")) {
+      const inner = pat.replace(/\*\*/g, "").replace(/^\/|\/$/g, "");
+      if (inner && relativePath.includes(inner)) return true;
+      continue;
+    }
+    // Pattern with single * — fnmatch-style segment match
+    if (pat.includes("*")) {
+      const escaped = pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*");
+      const re = new RegExp(`(^|/)${escaped}($|/)`);
+      if (re.test(relativePath)) return true;
+      continue;
+    }
+    // Rooted path match (pattern contains /) — match from root
+    if (relativePath === pat || relativePath.startsWith(`${pat}/`)) return true;
+  }
+  return false;
+}
+
 async function walkDir(
   dir: string,
   extSet: Set<string>,
   base: string,
-  out: Array<{ path: string; content: string }>
+  out: Array<{ path: string; content: string }>,
+  gitignorePatterns: string[] = [],
 ) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   await Promise.all(
     entries.map(async (entry) => {
       if (entry.name.startsWith(".")) return;
       const full = join(dir, entry.name);
+      const rel = full.slice(base.length + 1);
+
       if (entry.isDirectory()) {
-        await walkDir(full, extSet, base, out);
+        // Skip known build artifact / dependency directories immediately
+        if (ALWAYS_SKIP_DIRS.has(entry.name)) return;
+        // Skip if the directory matches a .gitignore pattern
+        if (gitignorePatterns.length > 0 && matchesGitignore(rel, gitignorePatterns)) return;
+        await walkDir(full, extSet, base, out, gitignorePatterns);
       } else {
+        // Skip files matched by .gitignore
+        if (gitignorePatterns.length > 0 && matchesGitignore(rel, gitignorePatterns)) return;
         const dot = entry.name.lastIndexOf(".");
         if (dot === -1) return;
         const ext = entry.name.slice(dot);
         if (!extSet.has(ext)) return;
         try {
           const content = await fs.readFile(full, "utf-8");
-          out.push({ path: full.slice(base.length + 1), content });
+          out.push({ path: rel, content });
         } catch { /* skip unreadable files */ }
       }
     })
   );
+}
+
+// Load and parse the repo's .gitignore (if present) into patterns.
+async function loadGitignore(repoDir: string): Promise<string[]> {
+  try {
+    const content = await fs.readFile(join(repoDir, ".gitignore"), "utf-8");
+    return parseGitignore(content);
+  } catch {
+    return [];
+  }
 }
 
 // Build an HTTPS clone URL, embedding the token so git never needs to prompt.
@@ -234,6 +312,39 @@ async function findWsdlInClone(repoDir: string): Promise<WsdlParseResult | null>
 }
 
 // ---------------------------------------------------------------------------
+// Token estimation helpers (chars/4 — standard industry approximation)
+// ---------------------------------------------------------------------------
+
+function estimateTokens(content: string): number {
+  return Math.ceil(content.length / 4);
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+// Measure token footprint of the generated knowledge base on disk.
+async function measureKbTokens(
+  migrationDir: string,
+  analyses: ServiceAnalysis[],
+): Promise<{ perService: Array<{ ns: string; tokens: number }>; total: number }> {
+  const perService: Array<{ ns: string; tokens: number }> = [];
+
+  for (const a of analyses) {
+    const docPath = join(migrationDir, "context", `${a.namespace}.md`);
+    try {
+      const content = await fs.readFile(docPath, "utf-8");
+      perService.push({ ns: a.namespace, tokens: estimateTokens(content) });
+    } catch { /* doc not written yet */ }
+  }
+
+  const total = perService.reduce((s, x) => s + x.tokens, 0);
+  return { perService, total };
+}
+
+// ---------------------------------------------------------------------------
 // Write scan report
 // ---------------------------------------------------------------------------
 
@@ -244,9 +355,18 @@ async function writeScanReport(
   callSitesFound: number,
   resolved: ServiceAnalysis[],
   unresolved: string[],
-  errors: string[]
+  errors: string[],
+  securityWarnings: number,
 ): Promise<string> {
   const reportPath = join(migrationDir, "scan-report.md");
+
+  // KB token stats
+  const kbStats = await measureKbTokens(migrationDir, resolved);
+  const claudeCtxWindow = 200_000; // Claude Sonnet context window
+  const ctxUsedPct = kbStats.total > 0
+    ? Math.round((kbStats.total / claudeCtxWindow) * 100)
+    : 0;
+
   const lines = [
     `# Scan Report`,
     ``,
@@ -255,7 +375,7 @@ async function writeScanReport(
     ``,
     `## Summary`,
     ``,
-    `| Metric | Count |`,
+    `| Metric | Value |`,
     `|--------|-------|`,
     `| Files scanned | ${filesScanned} |`,
     `| SOAP call sites found | ${callSitesFound} |`,
@@ -263,8 +383,39 @@ async function writeScanReport(
     `| Fully analyzed | ${resolved.length} |`,
     `| Unresolved (manual input needed) | ${unresolved.length} |`,
     `| Errors during analysis | ${errors.length} |`,
+    `| Security warnings | ${securityWarnings} |`,
     ``,
   ];
+
+  // KB token footprint section
+  if (kbStats.perService.length > 0) {
+    lines.push(`## Knowledge Base — Token Footprint`, ``);
+    lines.push(`| Service | Context Doc Tokens |`);
+    lines.push(`|---------|-------------------|`);
+    for (const { ns, tokens } of kbStats.perService) {
+      lines.push(`| ${ns} | ~${fmtTokens(tokens)} |`);
+    }
+    lines.push(`| **Total KB** | **~${fmtTokens(kbStats.total)}** |`);
+    lines.push(``);
+    lines.push(
+      `Total KB is ~${ctxUsedPct}% of Claude's ${fmtTokens(claudeCtxWindow)} context window.`,
+      ctxUsedPct > 80
+        ? `> ⚠ KB is large — use individual slash commands (\`/project:rewrite-<Service>\`) rather than loading all context docs at once.`
+        : `> ✓ Fits comfortably in a single Claude Code session.`,
+      ``,
+    );
+  }
+
+  if (securityWarnings > 0) {
+    lines.push(
+      `## Security Warnings`,
+      ``,
+      `${securityWarnings} potential secret(s) were detected in the source files that were analyzed.`,
+      `The context docs were written with the original content — review them before sharing.`,
+      `Check individual service logs above for file locations.`,
+      ``,
+    );
+  }
 
   if (unresolved.length > 0) {
     lines.push(`## Unresolved Services`, ``);
@@ -345,7 +496,13 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
 
   const extSet = new Set(config.plugin.fileExtensions);
   const entryFiles: Array<{ path: string; content: string }> = [];
-  await walkDir(entryCloneDir, extSet, entryCloneDir, entryFiles);
+
+  // Load .gitignore from entry repo so we skip build artifacts and vendored code
+  const entryGitignore = await loadGitignore(entryCloneDir);
+  if (entryGitignore.length > 0) {
+    log(config, `  .gitignore loaded — ${entryGitignore.length} patterns`);
+  }
+  await walkDir(entryCloneDir, extSet, entryCloneDir, entryFiles, entryGitignore);
 
   log(config, `Found ${entryFiles.length} source files → ${entryFiles.slice(0, 8).map(f => f.path.split("/").pop()).join(", ")}${entryFiles.length > 8 ? "..." : ""}`);
   log(config, `Running plugin: ${config.plugin.name}...`);
@@ -362,9 +519,11 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   }
   log(config, `Found ${allCallSites.length} SOAP call sites across ${uniqueNamespaces.length} services.`);
 
+  // Track total security findings across all services for the scan report
+  let totalSecurityWarnings = 0;
 
   if (uniqueNamespaces.length === 0) {
-    const report = await writeScanReport(migrationDir, entryRepoUrl, entryFiles.length, 0, [], [], []);
+    const report = await writeScanReport(migrationDir, entryRepoUrl, entryFiles.length, 0, [], [], [], 0);
     return { analyzed: [], unresolved: [], errors: [], indexPath: null, scanReportPath: report };
   }
 
@@ -488,6 +647,15 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       }
       if (wsdl) {
         log(config, `  Read: WSDL — ${wsdl.operations?.length ?? 0} operations`);
+      }
+
+      // Security pre-scan — detect secrets before they reach the LLM
+      if (serviceFiles.length > 0) {
+        const secFindings = scanFilesForSecrets(serviceFiles);
+        if (secFindings.length > 0) {
+          totalSecurityWarnings += secFindings.length;
+          log(config, formatSecurityWarnings(secFindings));
+        }
       }
 
       log(config, `AI Analysis: Analyzing ${ns} with LLM...`);
@@ -654,7 +822,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     allCallSites.length,
     analyzed,
     unresolved,
-    errors
+    errors,
+    totalSecurityWarnings,
   );
 
   // Generate Claude Code slash commands + AGENTS.md
