@@ -265,9 +265,25 @@ One per component. Embeds the full context doc so developers type `/project:rewr
 
 Full migration order, component summaries, install instructions for target dependencies, context doc locations.
 
+**Migration contract** — `rewrite/migration-contract.json`
+
+Machine-readable source of truth for agents: target role, implementation gate, evidence, risks, human questions, validation scenarios, and acceptance criteria.
+
+**Component disposition matrix** — `rewrite/component-disposition-matrix.md`
+
+Human-readable landing-zone map showing whether each legacy component should become workflow, Azure Function, Databricks job, API, common library, rules module, adapter, or human-review item.
+
+**Human questions** — `rewrite/human-questions.md`
+
+The decisions CCS Code cannot safely infer from source evidence alone. Components with unresolved questions are blocked from agent implementation.
+
+**Agent integration guide** — `rewrite/AGENT-INTEGRATION.md`
+
+Recommended usage model for Codex, Claude Code, future MCP/tool integration, and downstream multi-agent QA pipelines.
+
 **Step-by-step execution guide** — `rewrite/HOW-TO-MIGRATE.md`
 
-Human-readable numbered guide: each step is one component, with its context doc path, output file path, Claude Code command, Codex command, and the 3 most critical business rules.
+Human-readable numbered guide: each step is one component, with its context doc path, output file hint, implementation gate, Claude Code command, Codex prompt, and validation scenarios.
 
 ---
 

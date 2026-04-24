@@ -134,7 +134,7 @@ async function resolveWithSearch(
     const resolved: ResolvedService[] = candidates.map((c) => ({
       ...c,
       confidence,
-      htmlUrl: c.htmlUrl || `https://${host}/${c.repoFullName}/blob/main/${c.filePath}`,
+      htmlUrl: c.htmlUrl || `https://${host}/${c.repoFullName}/blob/HEAD/${c.filePath}`,
     }));
     if (resolved.length === 1) return resolved[0]!;
     // Prefer entry repo when confidence is equal
@@ -218,7 +218,7 @@ export async function resolveLocal(
       return {
         repoFullName,
         filePath: relative,
-        htmlUrl: `https://github.com/${repoFullName}/blob/main/${relative}`,
+        htmlUrl: `https://github.com/${repoFullName}/blob/HEAD/${relative}`,
         confidence: "exact",
       };
     }

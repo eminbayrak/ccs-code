@@ -34,6 +34,7 @@ Trust is not a nice-to-have. It is the entire point of the tool.
 
 - The LLM prompt explicitly instructs: "If uncertain, use `"unknown"` — do not guess"
 - Every extracted fact includes a `confidence` level: `high | medium | low`
+- Extracted facts are classified as `observed`, `inferred`, or `unknown`
 - `low` confidence fields are flagged in the context doc for human review — not presented as facts
 - JSON output from the LLM is validated — if parse fails, the service is marked `needs-review`, not silently passed through
 - No field is synthesized by combining information from unrelated files — the LLM only claims what it can directly see in the code provided
@@ -73,9 +74,11 @@ Trust is not a nice-to-have. It is the entire point of the tool.
 **How we enforce it:**
 
 - Every fact in a context document links to the exact source file and line range on GitHub using line anchors: `github.com/org/repo/file.cs#L42-L78`
+- Context docs include an evidence ledger with basis, confidence, source file, line range, and statement
+- Context docs include source coverage so truncated files are visible instead of hidden
 - The context doc header shows which files were used to produce it
 - The system index shows exactly where each service was discovered: `routes/foo.js:14`
-- No claim appears without a source reference
+- Any claim without a source reference is explicitly marked as uncited and must be manually verified
 
 ---
 
@@ -84,6 +87,8 @@ Trust is not a nice-to-have. It is the entire point of the tool.
 **How we enforce it:**
 
 - The tool never pretends to have analyzed something it did not analyze
+- If source was truncated before model analysis, the context doc records exactly how many lines were visible
+- System indexes call out runtime wiring gaps such as DI registrations, reflection, generated code, config-driven handlers, and production-only settings
 - If a service was found but not resolvable to a repo, it is listed as a gap — not omitted
 - Low-confidence services show a prominent warning in their context doc — not published as authoritative
 - The `verify` command requires explicit human sign-off before status advances

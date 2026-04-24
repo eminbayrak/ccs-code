@@ -2,6 +2,13 @@ import type { ServiceAnalysis, ServiceMethod } from "./analyzer.js";
 import type { ResolvedService } from "./resolver.js";
 import type { StaticDbFinding } from "./dbInterrogator.js";
 import { renderStaticDbSection } from "./dbInterrogator.js";
+import {
+  evidenceSourceLabel,
+  findEvidenceForStatement,
+  summarizeCoverage,
+  type EvidenceItem,
+  type SourceCoverage,
+} from "./evidence.js";
 
 export type ContextBuildInput = {
   analysis: ServiceAnalysis;
@@ -10,6 +17,8 @@ export type ContextBuildInput = {
   repoBaseUrl: string;
   analysisDate: string;
   dbStaticFinding?: StaticDbFinding;
+  entryRef?: string;
+  serviceRef?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -20,6 +29,7 @@ function ghLink(
   label: string,
   repoBaseUrl: string,
   filePath: string,
+  ref = "HEAD",
   startLine?: number,
   endLine?: number
 ): string {
@@ -27,7 +37,7 @@ function ghLink(
     startLine != null
       ? `#L${startLine}${endLine != null ? `-L${endLine}` : ""}`
       : "";
-  return `[${label}](${repoBaseUrl}/blob/main/${filePath}${anchor})`;
+  return `[${label}](${repoBaseUrl}/blob/${ref}/${filePath}${anchor})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +69,59 @@ function formatContract(contract: Record<string, string>): string {
       .join("\n") +
     "\n}"
   );
+}
+
+function escapeTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function formatEvidenceSource(
+  evidence: EvidenceItem,
+  repoBaseUrl: string,
+  ref: string,
+): string {
+  if (!evidence.sourceFile) return evidenceSourceLabel(evidence);
+  const anchor = evidence.lineStart
+    ? `#L${evidence.lineStart}${evidence.lineEnd && evidence.lineEnd !== evidence.lineStart ? `-L${evidence.lineEnd}` : ""}`
+    : "";
+  return `[${evidenceSourceLabel(evidence)}](${repoBaseUrl}/blob/${ref}/${evidence.sourceFile}${anchor})`;
+}
+
+function formatEvidenceLedger(
+  evidence: EvidenceItem[],
+  repoBaseUrl: string,
+  ref: string,
+): string {
+  if (evidence.length === 0) {
+    return "_No source-level evidence was returned by the analysis model. Treat all extracted facts as requiring manual verification._";
+  }
+
+  return [
+    "| Kind | Basis | Confidence | Source | Statement |",
+    "|------|-------|------------|--------|-----------|",
+    ...evidence.map((item) =>
+      `| ${escapeTableCell(item.kind)} | ${item.basis} | ${item.confidence} | ${formatEvidenceSource(item, repoBaseUrl, ref)} | ${escapeTableCell(item.statement)} |`
+    ),
+  ].join("\n");
+}
+
+function formatCoverageSection(coverage: SourceCoverage): string {
+  const lines = summarizeCoverage(coverage).map((line) => `- ${line}`).join("\n");
+  const warning = coverage.filesTruncated.length > 0
+    ? "\n> Some source was not visible to the analysis model. Uncited or inferred facts must be checked against the full source before migration."
+    : "";
+  return `${lines}${warning}`;
+}
+
+function formatRulesWithEvidence(rules: string[], evidence: EvidenceItem[]): string {
+  if (rules.length === 0) return "_No specific business rules extracted — verify manually._";
+  return rules.map((rule) => {
+    const item = findEvidenceForStatement(evidence, rule, "business_rule");
+    const suffix = item
+      ? ` _(basis: ${item.basis}, confidence: ${item.confidence}, source: ${evidenceSourceLabel(item)})_`
+      : " _(uncited by analysis; verify manually)_";
+    return `- ${rule}${suffix}`;
+  }).join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -96,7 +159,16 @@ ${rules}`;
 // ---------------------------------------------------------------------------
 
 export function buildContextDoc(input: ContextBuildInput): string {
-  const { analysis, resolved, targetLanguage, repoBaseUrl, analysisDate, dbStaticFinding } = input;
+  const {
+    analysis,
+    resolved,
+    targetLanguage,
+    repoBaseUrl,
+    analysisDate,
+    dbStaticFinding,
+    entryRef = "HEAD",
+    serviceRef = "HEAD",
+  } = input;
 
   const confidenceNote =
     analysis.confidence === "low"
@@ -111,9 +183,7 @@ export function buildContextDoc(input: ContextBuildInput): string {
       : "";
 
   const businessRulesSection =
-    analysis.businessRules.length > 0
-      ? analysis.businessRules.map((r) => `- ${r}`).join("\n")
-      : "_No specific business rules extracted — verify manually._";
+    formatRulesWithEvidence(analysis.businessRules, analysis.evidence);
 
   const dbSection =
     analysis.databaseInteractions.length > 0
@@ -148,6 +218,7 @@ export function buildContextDoc(input: ContextBuildInput): string {
     analysis.callerFile.split("/").pop() ?? analysis.callerFile,
     repoBaseUrl,
     analysis.callerFile,
+    entryRef,
     analysis.callerLine
   );
 
@@ -155,7 +226,7 @@ export function buildContextDoc(input: ContextBuildInput): string {
   const serviceFileLinks = analysis.rawFiles
     .map((f) => {
       const label = f.split("/").pop() ?? f;
-      return `| ${ghLink(label, serviceRepoBase, f)} | Service implementation |`;
+      return `| ${ghLink(label, serviceRepoBase, f, serviceRef)} | Service implementation |`;
     })
     .join("\n");
 
@@ -200,6 +271,21 @@ ${businessRulesSection}
 
 ---
 
+## Evidence & Source Coverage
+
+Facts in this document are classified as:
+- **observed** — directly supported by visible source lines
+- **inferred** — reasoned from visible code but not directly proven
+- **unknown** — not supported by visible source and requires manual review
+
+${formatCoverageSection(analysis.sourceCoverage)}
+
+### Evidence Ledger
+
+${formatEvidenceLedger(analysis.evidence, serviceRepoBase, serviceRef)}
+
+---
+
 ## Error Handling
 
 ${errorSection}
@@ -230,7 +316,7 @@ ${formatContract(analysis.outputContract)}
 
 ${dbSection}
 
-> Connect directly to the database in the rewrite — no SOAP calls.
+> Do not preserve legacy SOAP as a blind wrapper. Choose the replacement integration boundary from evidence: direct data-layer access only when the source clearly supports it; otherwise use the target service/API/queue boundary and document the decision.
 
 ---
 
@@ -269,7 +355,7 @@ ${analysis.businessRules.length > 0 ? analysis.businessRules.map((r) => `- ${r}`
 ${analysis.errorHandling.length > 0 ? analysis.errorHandling.map((e) => `- ${e}`).join("\n") : "- Verify error handling manually"}
 
 **Architecture:**
-- No legacy SOAP calls — connect to the data layer directly
+- No blind SOAP wrapper; replace the legacy boundary with the evidence-backed target integration pattern
 - ${langConventions(targetLanguage)}
 - Return proper HTTP status codes mapped from the error conditions above
 

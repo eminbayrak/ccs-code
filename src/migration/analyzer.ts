@@ -2,6 +2,14 @@ import type { LLMProvider } from "../llm/providers/base.js";
 import type { ServiceReference } from "./types.js";
 import type { WsdlParseResult } from "./wsdlParser.js";
 import { wsdlToPromptText } from "./wsdlParser.js";
+import {
+  buildNumberedSourceExcerpt,
+  buildSourceCoverage,
+  emptySourceCoverage,
+  normalizeEvidenceItems,
+  type EvidenceItem,
+  type SourceCoverage,
+} from "./evidence.js";
 
 export type ServiceMethod = {
   name: string;
@@ -20,6 +28,8 @@ export type ServiceAnalysis = {
   dataFlow: string;
   allMethods: ServiceMethod[];
   businessRules: string[];
+  evidence: EvidenceItem[];
+  sourceCoverage: SourceCoverage;
   errorHandling: string[];
   statusValues: string[];
   databaseInteractions: string[];
@@ -52,9 +62,13 @@ function buildPrompt(
   callSite: ServiceReference,
   serviceFiles: Array<{ path: string; content: string }>,
   wsdl: WsdlParseResult | null
-): string {
-  const fileBundle = serviceFiles
-    .map((f) => `=== FILE: ${f.path} ===\n${f.content.slice(0, 12000)}`)
+): { prompt: string; coverage: SourceCoverage } {
+  const excerpts = serviceFiles.map((f) =>
+    buildNumberedSourceExcerpt(f.path, f.content, 12000)
+  );
+  const coverage = buildSourceCoverage(excerpts);
+  const fileBundle = excerpts
+    .map((f) => `=== FILE: ${f.path} ===\n${f.content}`)
     .join("\n\n");
 
   const wsdlSection = wsdl
@@ -63,15 +77,22 @@ function buildPrompt(
 
   const paramFlags = callSite.metadata["parameterFlags"] ?? "none";
 
-  return `Analyze this legacy SOAP/COM service for migration. A developer must be able to rewrite it as a REST API using ONLY your output — no access to the original source.
+  const coverageNote = coverage.filesTruncated.length > 0
+    ? `\nIMPORTANT SOURCE COVERAGE LIMITATION:\n${coverage.filesTruncated.map((f) => `- ${f.path}: only lines 1-${f.providedLines} of ${f.originalLines} were visible to you.`).join("\n")}\nIf a business rule, contract, dependency, or error path could exist outside the visible lines, mark the related field as inferred or unknown and do not use high confidence for it.\n`
+    : "";
+
+  return {
+    coverage,
+    prompt: `Analyze this legacy SOAP/COM service for migration. A developer must be able to rewrite it as a REST API using ONLY your output — no access to the original source.
 
 Caller file: ${callSite.callerFile} (line ${callSite.lineNumber})
 Service namespace: ${callSite.serviceNamespace}
 Primary method called from caller: ${callSite.methodName}
 Parameter flags observed: ${paramFlags}
 ${wsdlSection}
+${coverageNote}
 
-Service implementation files:
+Service implementation files with line numbers:
 ${fileBundle}
 
 Respond ONLY with this JSON (use "unknown" string for anything you cannot determine):
@@ -88,6 +109,17 @@ Respond ONLY with this JSON (use "unknown" string for anything you cannot determ
     }
   ],
   "businessRules": ["every rule that applies across the whole service — validation, access control, thresholds, routing, masking"],
+  "evidence": [
+    {
+      "kind": "business_rule | data_contract | database | dependency | error_handling | status_value | purpose",
+      "statement": "same wording as the extracted fact this supports",
+      "basis": "observed | inferred | unknown",
+      "sourceFile": "relative/path/to/file.cs or null",
+      "lineStart": 42,
+      "lineEnd": 45,
+      "confidence": "high | medium | low"
+    }
+  ],
   "databaseInteractions": [
     "table: TableName — SELECT columns: col1, col2, col3",
     "proc: sp_ProcName — params: param1 (type), param2 (type); returns: col1, col2"
@@ -110,9 +142,11 @@ Extraction rules:
 - allMethods: document EVERY public method defined in the service, not just the one called from the entry point
 - businessRules: extract every concrete condition — numeric thresholds, role checks, status guards, tier exceptions, time limits, domain-specific overrides
 - databaseInteractions: include exact table names, column names where visible, stored proc names with their parameters
+- evidence: include one evidence item for every business rule and every important contract/dependency/error/database fact; use observed only when line-numbered source directly supports it
 - errorHandling: every exception type thrown, every early-return error condition, every SOAP fault
 - statusValues: every enum, status string, role name, or tier value referenced in the logic
-- confidence: "high" = you can see the full implementation; "medium" = some parts unclear or truncated; "low" = only got interface/partial code`;
+- confidence: "high" = you can see the full implementation; "medium" = some parts unclear or truncated; "low" = only got interface/partial code`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +160,7 @@ type RawAnalysis = {
   businessRules?: unknown;
   errorHandling?: unknown;
   statusValues?: unknown;
+  evidence?: unknown;
   databaseInteractions?: unknown;
   nestedServiceCalls?: unknown;
   inputContract?: unknown;
@@ -148,6 +183,8 @@ function parseAnalysisResponse(
       dataFlow: "unknown",
       allMethods: [],
       businessRules: [],
+      evidence: [],
+      sourceCoverage: emptySourceCoverage(),
       errorHandling: [],
       statusValues: [],
       databaseInteractions: [],
@@ -206,6 +243,8 @@ function parseAnalysisResponse(
     dataFlow: str(parsed.dataFlow),
     allMethods: parseMethods(parsed.allMethods),
     businessRules: strArr(parsed.businessRules),
+    evidence: normalizeEvidenceItems(parsed.evidence),
+    sourceCoverage: emptySourceCoverage(),
     errorHandling: strArr(parsed.errorHandling),
     statusValues: strArr(parsed.statusValues),
     databaseInteractions: strArr(parsed.databaseInteractions),
@@ -227,7 +266,7 @@ export async function analyzeService(
   wsdl: WsdlParseResult | null,
   provider: LLMProvider
 ): Promise<ServiceAnalysis> {
-  const prompt = buildPrompt(callSite, serviceFiles, wsdl);
+  const { prompt, coverage } = buildPrompt(callSite, serviceFiles, wsdl);
 
   const raw = await provider.chat(
     [{ role: "user", content: prompt }],
@@ -235,6 +274,10 @@ export async function analyzeService(
   );
 
   const parsed = parseAnalysisResponse(raw, callSite);
+  const confidence =
+    coverage.filesTruncated.length > 0 && parsed.confidence === "high"
+      ? "medium"
+      : parsed.confidence;
 
   return {
     namespace: callSite.serviceNamespace,
@@ -243,6 +286,8 @@ export async function analyzeService(
     callerLine: callSite.lineNumber,
     rawFiles: serviceFiles.map((f) => f.path),
     ...parsed,
+    confidence,
+    sourceCoverage: coverage,
   };
 }
 

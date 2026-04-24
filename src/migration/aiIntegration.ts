@@ -3,6 +3,13 @@ import { join } from "path";
 import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
 import type { ServiceAnalysis } from "./analyzer.js";
 import { compressSourceFile, formatCompressionStats } from "./sourceCompressor.js";
+import {
+  buildAgentIntegrationGuide,
+  buildDispositionMatrix,
+  buildHowToMigrate,
+  buildHumanQuestionsDoc,
+  buildMigrationContract,
+} from "./migrationContract.js";
 
 // ---------------------------------------------------------------------------
 // Generate AI tool integration files from migration KB.
@@ -127,8 +134,9 @@ ${commandList}
 1. Read the context doc for each service BEFORE writing any code
 2. Do not invent logic not present in the original source
 3. Preserve every business rule exactly — they are non-negotiable
-4. No SOAP wrappers — connect directly to the database
-5. Rewrite leaf services first (those with no dependencies)
+4. No blind SOAP wrappers — use the evidence-backed target integration boundary from the context doc
+5. Treat inferred, unknown, or uncited facts as review items before implementing
+6. Rewrite leaf services first (those with no dependencies)
 
 ## All Database Interactions
 
@@ -298,9 +306,10 @@ Rewriting external SOAP service calls from **${entryRepo.split("/").slice(-1)[0]
 1. Read the context doc for each service BEFORE writing any code
 2. Rewrite in the order listed — dependencies must exist before their callers
 3. Preserve EVERY business rule listed in each context doc exactly
-4. Replace all SOAP calls with direct database calls — no wrappers
-5. Do not invent any logic not visible in the original source or context doc
-6. After each service, verify the method signatures and contracts match the spec
+4. Replace SOAP calls with the evidence-backed target integration boundary — no blind wrappers
+5. Treat inferred, unknown, or uncited facts as review items before implementing
+6. Do not invent any logic not visible in the original source or context doc
+7. After each service, verify the method signatures and contracts match the spec
 
 ## Rewrite Order (dependencies first)
 
@@ -400,13 +409,22 @@ export async function generateRewriteIntegration(
       frameworkInfo.targetLanguage
     );
 
+    const gate = analysis.targetRole === "human_review" ||
+      analysis.targetRole === "unknown" ||
+      analysis.humanQuestions.length > 0
+      ? `\n> Implementation gate: BLOCKED. Resolve these first: ${analysis.humanQuestions.join("; ") || `target role is ${analysis.targetRole}`}.\n`
+      : "\n> Implementation gate: READY after reviewing source evidence.\n";
+
     const slashCommand = `${contextContent}
 
 ---
 
 ## Your Task
 
+${gate}
+
 Read every source file linked above before writing any code.
+If the implementation gate is BLOCKED, stop and report the required human decisions instead of writing code.
 
 Implement the complete **${component.name}** rewrite following all instructions in this document.
 
@@ -435,6 +453,20 @@ After writing the code:
     .join("\n");
 
   const allDeps = [...new Set(analyses.flatMap((a) => a.targetDependencies))];
+  const generatedAt = new Date().toISOString();
+  const contractInput = {
+    repoUrl,
+    frameworkInfo,
+    analyses,
+    migrationOrder,
+    generatedAt,
+  };
+
+  const contractPath = join(outputDir, "rewrite", "migration-contract.json");
+  const dispositionPath = join(outputDir, "rewrite", "component-disposition-matrix.md");
+  const questionsPath = join(outputDir, "rewrite", "human-questions.md");
+  const howToPath = join(outputDir, "rewrite", "HOW-TO-MIGRATE.md");
+  const integrationPath = join(outputDir, "rewrite", "AGENT-INTEGRATION.md");
 
   const agentsMd = `# Migration Agent Context
 
@@ -446,15 +478,25 @@ Migrating **${repoUrl.split("/").slice(-2).join("/")}** from **${frameworkInfo.s
 
 ## Rules
 
-1. Read the context doc for each component before writing any code
-2. Rewrite components in the order listed below — dependencies must be done first
-3. Preserve every business rule exactly — they are non-negotiable
-4. Do not invent functionality not present in the original code
-5. After each component, verify the input/output contract matches the context doc
+1. Read \`migration-contract.json\` first; it is the source of truth for target roles, risks, human questions, and validation scenarios
+2. Read the context doc for each component before writing any code
+3. Rewrite components in the order listed below — dependencies must be done first
+4. Preserve every observed business rule exactly — they are non-negotiable
+5. Do not implement components marked \`human_review\` or \`unknown\` until their human questions are answered
+6. Do not invent functionality not present in the original code or migration contract
+7. After each component, verify the input/output contract and validation scenarios match the context doc
 
 ## Migration Order
 
 ${componentSummary}
+
+## Contract Artifacts
+
+- \`migration-contract.json\` — machine-readable contract for Codex, Claude Code, QA agents, and downstream validation pipelines
+- \`component-disposition-matrix.md\` — target architecture landing-zone decisions
+- \`human-questions.md\` — decisions that require architect/product review before implementation
+- \`HOW-TO-MIGRATE.md\` — step-by-step execution guide
+- \`AGENT-INTEGRATION.md\` — how to use this contract with Codex, Claude Code, and future MCP/tool integrations
 
 ## Install These Packages First
 
@@ -468,6 +510,11 @@ ${analyses.map((a) => `- [\`${a.component.name}\`](context/${a.component.name}.m
 `;
 
   await fs.writeFile(join(outputDir, "rewrite", "AGENTS.md"), agentsMd, "utf-8");
+  await fs.writeFile(contractPath, buildMigrationContract(contractInput), "utf-8");
+  await fs.writeFile(dispositionPath, buildDispositionMatrix(contractInput), "utf-8");
+  await fs.writeFile(questionsPath, buildHumanQuestionsDoc(contractInput), "utf-8");
+  await fs.writeFile(howToPath, buildHowToMigrate(contractInput), "utf-8");
+  await fs.writeFile(integrationPath, buildAgentIntegrationGuide(contractInput), "utf-8");
 }
 
 // ---------------------------------------------------------------------------

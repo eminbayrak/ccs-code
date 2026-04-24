@@ -239,6 +239,21 @@ export async function fetchFileTree(
     return data.tree.filter((n) => n.type === "blob").map((n) => n.path);
 }
 
+/** Fetch the repository default branch for stable source links */
+export async function fetchDefaultBranch(
+    owner: string,
+    repo: string,
+    token?: string,
+    host?: string
+): Promise<string> {
+    const data = await ghFetch<{ default_branch?: string }>(
+        `/repos/${owner}/${repo}`,
+        token,
+        host
+    );
+    return data.default_branch || "HEAD";
+}
+
 /** Search code across the org — returns matches with repo and file path */
 export async function searchOrgCode(
     org: string,

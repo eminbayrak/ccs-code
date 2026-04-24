@@ -4,6 +4,8 @@
 // The actual rewriting is done by Claude Code / Codex using those docs.
 // ---------------------------------------------------------------------------
 
+import type { EvidenceItem, SourceCoverage } from "./evidence.js";
+
 export type ComponentType =
   | "controller"
   | "service"
@@ -17,6 +19,19 @@ export type ComponentType =
   | "unknown";
 
 export type Complexity = "low" | "medium" | "high";
+
+export type TargetArchitectureRole =
+  | "workflow"
+  | "azure_function"
+  | "databricks_job"
+  | "rest_api"
+  | "microservice"
+  | "common_library"
+  | "rules_engine"
+  | "data_model"
+  | "integration_adapter"
+  | "human_review"
+  | "unknown";
 
 /** A component identified in the source codebase */
 export type SourceComponent = {
@@ -42,12 +57,20 @@ export type ComponentAnalysis = {
   component: SourceComponent;
   purpose: string;
   businessRules: string[];
+  evidence: EvidenceItem[];
+  sourceCoverage: SourceCoverage;
   inputContract: Record<string, string>;
   outputContract: Record<string, string>;
   externalDependencies: string[];   // source-lang packages this component uses
   targetPattern: string;            // e.g. "FastAPI APIRouter with Pydantic schemas"
+  targetRole: TargetArchitectureRole;
+  targetRoleRationale: string;
+  targetIntegrationBoundary: string;
   targetDependencies: string[];     // pip/npm packages needed in the rewrite
   migrationNotes: string[];         // specific gotchas, replacements, warnings
+  migrationRisks: string[];
+  humanQuestions: string[];
+  validationScenarios: string[];
   complexity: Complexity;
   confidence: "high" | "medium" | "low";
   unknownFields: string[];

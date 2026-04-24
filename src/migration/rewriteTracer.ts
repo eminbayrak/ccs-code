@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import { join } from "path";
-import { fetchFileContent, fetchFileTree, parseRepoUrl } from "../connectors/github.js";
+import { fetchDefaultBranch, fetchFileContent, fetchFileTree, parseRepoUrl } from "../connectors/github.js";
 import { createProvider, type LLMProvider, loadConfig } from "../llm/index.js";
 import type { GithubConfig } from "./resolver.js";
 import type { ComponentAnalysis, FrameworkInfo, RewriteResult } from "./rewriteTypes.js";
@@ -140,12 +140,18 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
 
   const repoBaseUrl = `https://${host}/${owner}/${repo}`;
   const analysisDate = new Date().toISOString().slice(0, 10);
+  let defaultBranch = "HEAD";
+  try {
+    defaultBranch = await fetchDefaultBranch(owner, repo, githubConfig.token, githubConfig.host);
+  } catch {
+    defaultBranch = "HEAD";
+  }
 
   // --- Fetch file tree ---
   log(config, `Fetching file tree from ${repoUrl}...`);
   let tree: string[] = [];
   try {
-    tree = await fetchFileTree(owner, repo, githubConfig.token, githubConfig.host);
+    tree = await fetchFileTree(owner, repo, githubConfig.token, githubConfig.host, defaultBranch);
   } catch (e) {
     throw new Error(`Could not fetch repo tree: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -204,7 +210,7 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
       const analysis = await analyzeComponent(component, sourceFiles, frameworkInfo, sonnet);
       analyzed.push(analysis);
 
-      const doc = buildRewriteContextDoc(analysis, frameworkInfo, repoBaseUrl, analysisDate);
+      const doc = buildRewriteContextDoc(analysis, frameworkInfo, repoBaseUrl, analysisDate, defaultBranch);
       const docPath = join(contextDir, `${component.name}.md`);
       await fs.writeFile(docPath, doc, "utf-8");
 
@@ -261,10 +267,11 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
     errors.length > 0 ? `## Errors\n\n${errors.map((e) => `- ${e}`).join("\n")}\n` : "",
     `## Next Steps`,
     ``,
-    `1. Review \`rewrite/_index.md\` for the full migration plan`,
-    `2. Rewrite components in the order listed (dependencies first)`,
-    `3. For each component, open \`rewrite/context/<ComponentName>.md\` and paste into Claude Code`,
-    `4. Verify each rewritten component against the checklist in its context doc`,
+    `1. Review \`rewrite/migration-contract.json\` for the machine-readable agent contract`,
+    `2. Resolve any decisions in \`rewrite/human-questions.md\` before implementation`,
+    `3. Review \`rewrite/_index.md\` and \`rewrite/component-disposition-matrix.md\` for the migration plan`,
+    `4. Rewrite ready components in the order listed (dependencies first)`,
+    `5. Verify each rewritten component against the validation scenarios in its context doc`,
   ].join("\n");
 
   await fs.writeFile(reportPath, report, "utf-8");
@@ -275,6 +282,10 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
     await generateRewriteIntegration(outputDir, analyzed, frameworkInfo, migrationOrder, repoUrl);
     log(config, `✓ Claude Code commands written to rewrite/.claude/commands/`);
     log(config, `✓ AGENTS.md written for Codex`);
+    log(config, `✓ migration-contract.json written`);
+    log(config, `✓ component-disposition-matrix.md written`);
+    log(config, `✓ human-questions.md written`);
+    log(config, `✓ AGENT-INTEGRATION.md written`);
     log(config, `✓ HOW-TO-MIGRATE.md written`);
   } catch (e) {
     errors.push(`ai-integration: ${e instanceof Error ? e.message : String(e)}`);

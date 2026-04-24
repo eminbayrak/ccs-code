@@ -165,6 +165,12 @@ ${lowConfSection || "_All services have medium or high confidence._"}
 
 ---
 
+## Discovery Limits
+
+This KB is strongest for source paths the scanner observed directly. Runtime wiring such as DI registrations, reflection, config-driven handlers, generated code, and production-only settings must be reviewed separately before treating the migration plan as complete.
+
+---
+
 _Read the individual context docs in \`context/\` for full rewrite instructions per service._
 `;
 

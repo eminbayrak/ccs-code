@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import {
   parseRepoUrl,
   checkRateLimit,
@@ -24,6 +24,7 @@ import { scanFilesForSecrets, formatSecurityWarnings } from "./securityScanner.j
 import { packRepo, formatPackStats } from "./repoPacker.js";
 import { mapDependencies, formatDepSummary } from "./dependencyMapper.js";
 import { analyzeDbStatic, renderStaticDbSection } from "./dbInterrogator.js";
+import { emptySourceCoverage } from "./evidence.js";
 
 export type TracerConfig = {
   entryRepoUrl: string;
@@ -49,6 +50,20 @@ export type TraceResult = {
 
 function log(config: TracerConfig, msg: string) {
   config.onProgress?.(msg);
+}
+
+function getCurrentBranch(repoDir: string | null): string {
+  if (!repoDir) return "HEAD";
+  try {
+    const branch = execFileSync("git", ["-C", repoDir, "branch", "--show-current"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+    }).trim();
+    return branch || "HEAD";
+  } catch {
+    return "HEAD";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -518,6 +533,7 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
     `${owner}/${repo}`, githubConfig, migrationDir, (msg) => log(config, msg)
   );
   if (!entryCloneDir) throw new Error(`Failed to clone entry repo: ${entryRepoUrl}`);
+  const entryRef = getCurrentBranch(entryCloneDir);
 
   const extSet = new Set(config.plugin.fileExtensions);
   const entryFiles: Array<{ path: string; content: string }> = [];
@@ -656,6 +672,7 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
       const svcCloneDir = await cloneRepoOnce(
         resolved.repoFullName, githubConfig, migrationDir, (m) => log(config, `  ${m}`)
       );
+      const serviceRef = getCurrentBranch(svcCloneDir);
 
       // Pack the cloned repo into a single file for easy AI attachment.
       // Skips if packed.md already exists from a previous run.
@@ -751,6 +768,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
           dataFlow: "unknown",
           allMethods: [],
           businessRules: [],
+          evidence: [],
+          sourceCoverage: emptySourceCoverage(),
           errorHandling: [],
           statusValues: [],
           databaseInteractions: [],
@@ -789,6 +808,8 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         repoBaseUrl,
         analysisDate: new Date().toISOString().slice(0, 10),
         dbStaticFinding: dbStaticFinding ?? undefined,
+        entryRef,
+        serviceRef,
       });
 
       const docPath = join(contextDir, `${analysis.namespace}.md`);

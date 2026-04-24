@@ -4,8 +4,14 @@ import type {
   SourceComponent,
   FrameworkInfo,
   ComponentAnalysis,
+  TargetArchitectureRole,
 } from "./rewriteTypes.js";
 import { getFrameworkMapping, formatMappingForPrompt } from "./frameworkMapper.js";
+import {
+  buildNumberedSourceExcerpt,
+  buildSourceCoverage,
+  normalizeEvidenceItems,
+} from "./evidence.js";
 
 // ---------------------------------------------------------------------------
 // Step 1 — Detect source framework from file tree + key file contents
@@ -143,6 +149,26 @@ const ANALYSIS_SYSTEM = `You are a senior software architect documenting a legac
 Extract accurate, complete information. Use "unknown" for anything you cannot determine from the code.
 Respond only with valid JSON.`;
 
+const TARGET_ROLES = [
+  "workflow",
+  "azure_function",
+  "databricks_job",
+  "rest_api",
+  "microservice",
+  "common_library",
+  "rules_engine",
+  "data_model",
+  "integration_adapter",
+  "human_review",
+  "unknown",
+] as const satisfies readonly TargetArchitectureRole[];
+
+function normalizeTargetRole(value: unknown): TargetArchitectureRole {
+  return TARGET_ROLES.includes(value as TargetArchitectureRole)
+    ? value as TargetArchitectureRole
+    : "unknown";
+}
+
 export async function analyzeComponent(
   component: SourceComponent,
   sourceFiles: Array<{ path: string; content: string }>,
@@ -157,9 +183,16 @@ export async function analyzeComponent(
     ? `\nFramework migration reference:\n${formatMappingForPrompt(mapping)}\n`
     : "";
 
-  const fileBundle = sourceFiles
-    .map((f) => `=== FILE: ${f.path} ===\n${f.content.slice(0, 6000)}`)
+  const excerpts = sourceFiles.map((f) =>
+    buildNumberedSourceExcerpt(f.path, f.content, 6000)
+  );
+  const sourceCoverage = buildSourceCoverage(excerpts);
+  const fileBundle = excerpts
+    .map((f) => `=== FILE: ${f.path} ===\n${f.content}`)
     .join("\n\n");
+  const coverageNote = sourceCoverage.filesTruncated.length > 0
+    ? `\nIMPORTANT SOURCE COVERAGE LIMITATION:\n${sourceCoverage.filesTruncated.map((f) => `- ${f.path}: only lines 1-${f.providedLines} of ${f.originalLines} were visible to you.`).join("\n")}\nIf a business rule, dependency, or contract could live outside the visible lines, mark the related field as inferred or unknown and do not use high confidence for it.\n`
+    : "";
 
   const raw = await provider.chat(
     [
@@ -171,25 +204,47 @@ Component: ${component.name} (${component.type})
 Description: ${component.description}
 Dependencies: ${component.dependencies.join(", ") || "none"}
 ${mappingSection}
-Source files:
+${coverageNote}
+Source files with line numbers:
 ${fileBundle}
 
 Respond with ONLY this JSON (use "unknown" for anything you cannot determine):
 {
   "purpose": "one sentence — business intent, not code mechanics",
   "businessRules": ["concrete rule extracted from code logic"],
+  "evidence": [
+    {
+      "kind": "business_rule | data_contract | dependency | external_dependency | migration_note | purpose",
+      "statement": "same wording as the extracted fact this supports",
+      "basis": "observed | inferred | unknown",
+      "sourceFile": "relative/path/to/file.cs or null",
+      "lineStart": 42,
+      "lineEnd": 45,
+      "confidence": "high | medium | low"
+    }
+  ],
   "inputContract": { "fieldName": "type and constraint" },
   "outputContract": { "fieldName": "type" },
   "externalDependencies": ["NuGet/npm package names used"],
   "targetPattern": "exact pattern to use in ${frameworkInfo.targetLanguage} (e.g. FastAPI APIRouter with Pydantic schemas)",
+  "targetRole": "workflow | azure_function | databricks_job | rest_api | microservice | common_library | rules_engine | data_model | integration_adapter | human_review | unknown",
+  "targetRoleRationale": "why this component should land in that target architecture role; cite evidence when possible",
+  "targetIntegrationBoundary": "event/topic/API/database/file boundary this component should expose or consume in the target architecture, or unknown",
   "targetDependencies": ["pip/npm package names needed in the rewrite"],
   "migrationNotes": ["specific things to watch out for when rewriting"],
+  "migrationRisks": ["specific risk that could break behaviour during migration"],
+  "humanQuestions": ["question an architect/product owner must answer before implementation"],
+  "validationScenarios": ["critical scenario QA should test to prove behaviour matches legacy"],
   "complexity": "low | medium | high",
   "confidence": "high | medium | low"
 }
 
 Rules:
 - businessRules: only rules visible in code (validation, access control, conditional logic, calculations)
+- evidence: include one evidence item for every business rule and every important contract/dependency/migration note; use observed only when line-numbered source directly supports it
+- targetRole: classify the component by target architecture responsibility, not just target language; if the right landing zone depends on business/architecture decisions, use "human_review"
+- humanQuestions: include questions for unknown trigger semantics, completion signals, data ownership, retry policy, and target integration boundaries
+- validationScenarios: include high-value behaviour tests, not just unit-level cases
 - migrationNotes: specific replacements (e.g. "Replace AutoMapper with Pydantic .model_validate()")
 - complexity: low = straightforward mapping, medium = non-trivial patterns, high = complex business logic or framework-specific behaviour
 - confidence: high = full code visible, medium = partial, low = too complex or incomplete`,
@@ -234,18 +289,71 @@ Rules:
       ? (p["confidence"] as "high" | "medium" | "low")
       : "low";
 
+    const confidence = sourceCoverage.filesTruncated.length > 0 && validConfidence === "high"
+      ? "medium"
+      : validConfidence;
+
+    const purpose = str(p["purpose"], "purpose");
+    const businessRules = strArr(p["businessRules"]);
+    const targetRole = normalizeTargetRole(p["targetRole"]);
+    if (targetRole === "unknown" && !unknownFields.includes("targetRole")) {
+      unknownFields.push("targetRole");
+    }
+
+    const targetRoleRationale = str(p["targetRoleRationale"], "targetRoleRationale");
+    const targetIntegrationBoundary = str(p["targetIntegrationBoundary"], "targetIntegrationBoundary");
+    const migrationRisks = strArr(p["migrationRisks"]);
+    const humanQuestions = strArr(p["humanQuestions"]);
+    const validationScenarios = strArr(p["validationScenarios"]);
+
+    if ((targetRole === "human_review" || targetRole === "unknown") && humanQuestions.length === 0) {
+      humanQuestions.push(
+        `Decide the target landing zone for ${component.name}; the source evidence was not enough to safely classify it.`
+      );
+    }
+
+    if (targetIntegrationBoundary === "unknown") {
+      humanQuestions.push(
+        `Define the target integration boundary for ${component.name}: API, event/topic, workflow state, batch job, database, or file contract.`
+      );
+    }
+
+    if (sourceCoverage.filesTruncated.length > 0) {
+      migrationRisks.push(
+        `Analysis only saw truncated source for ${sourceCoverage.filesTruncated.map((f) => f.path).join(", ")}; verify uncited rules against the full files before implementation.`
+      );
+    }
+
+    if (validationScenarios.length === 0) {
+      if (businessRules.length > 0) {
+        validationScenarios.push(...businessRules.map((rule) => `Prove parity for rule: ${rule}`));
+      } else {
+        validationScenarios.push(
+          `Run a representative legacy-vs-target parity test for ${component.name} using the documented input and output contract.`
+        );
+      }
+    }
+
     return {
       component,
-      purpose:              str(p["purpose"], "purpose"),
-      businessRules:        strArr(p["businessRules"]),
+      purpose,
+      businessRules,
+      evidence:             normalizeEvidenceItems(p["evidence"]),
+      sourceCoverage,
       inputContract:        strRecord(p["inputContract"]),
       outputContract:       strRecord(p["outputContract"]),
       externalDependencies: strArr(p["externalDependencies"]),
       targetPattern:        str(p["targetPattern"], "targetPattern"),
+      targetRole,
+      targetRoleRationale,
+      targetIntegrationBoundary,
       targetDependencies:   strArr(p["targetDependencies"]),
       migrationNotes:       strArr(p["migrationNotes"]),
+      migrationRisks,
+      humanQuestions,
+      validationScenarios,
       complexity:           validComplexity,
-      confidence:           validConfidence,
+      confidence,
       unknownFields,
     };
   } catch {
@@ -253,15 +361,23 @@ Rules:
       component,
       purpose: "unknown",
       businessRules: [],
+      evidence: [],
+      sourceCoverage,
       inputContract: {},
       outputContract: {},
       externalDependencies: [],
       targetPattern: "unknown",
+      targetRole: "unknown",
+      targetRoleRationale: "unknown",
+      targetIntegrationBoundary: "unknown",
       targetDependencies: [],
       migrationNotes: [],
+      migrationRisks: [],
+      humanQuestions: ["Review this component manually; automated analysis failed."],
+      validationScenarios: [],
       complexity: "high",
       confidence: "low",
-      unknownFields: ["purpose", "targetPattern"],
+      unknownFields: ["purpose", "targetPattern", "targetRole"],
     };
   }
 }

@@ -150,9 +150,17 @@ Orchestrator for the rewrite pipeline: fetch tree → detect framework → disco
 
 ### ✅ 20. `src/migration/aiIntegration.ts` (new)
 Generates Claude Code slash commands and Codex agent context automatically after any scan or rewrite. Exports:
-- `generateRewriteIntegration(outputDir, analyses, frameworkInfo, migrationOrder, repoUrl)` — writes `rewrite/.claude/commands/`, `rewrite/AGENTS.md`, `rewrite/HOW-TO-MIGRATE.md`
+- `generateRewriteIntegration(outputDir, analyses, frameworkInfo, migrationOrder, repoUrl)` — writes `rewrite/.claude/commands/`, `rewrite/AGENTS.md`, `rewrite/migration-contract.json`, `rewrite/component-disposition-matrix.md`, `rewrite/human-questions.md`, `rewrite/AGENT-INTEGRATION.md`, `rewrite/HOW-TO-MIGRATE.md`
 - `generateScanIntegration(outputDir, analyses, targetLanguage, entryRepo)` — writes `.claude/commands/`, `AGENTS.md`
 - `inferTargetFilePath(name, type, targetLanguage)` — maps component name+type → output file path
+
+### ✅ 20a. `src/migration/migrationContract.ts` (new)
+Builds the agent-facing migration contract layer:
+- `buildMigrationContract(input)` — JSON contract with target roles, implementation gates, risks, evidence, human questions, validation scenarios, and acceptance criteria
+- `buildDispositionMatrix(input)` — markdown landing-zone matrix for architects and reviewers
+- `buildHumanQuestionsDoc(input)` — markdown decision backlog for product/architecture review
+- `buildHowToMigrate(input)` — execution guide with Codex prompts and Claude Code commands
+- `buildAgentIntegrationGuide(input)` — recommended Codex, Claude Code, MCP/tool, and QA-pipeline integration model
 
 ### ✅ 21. `src/commands/migrate.ts` (complete)
 Full subcommand routing: `scan`, `rewrite`, `status`, `context`, `verify`, `done`, `rescan`, `plugin`.

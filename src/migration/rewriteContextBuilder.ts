@@ -1,4 +1,11 @@
 import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
+import {
+  evidenceSourceLabel,
+  findEvidenceForStatement,
+  summarizeCoverage,
+  type EvidenceItem,
+  type SourceCoverage,
+} from "./evidence.js";
 
 // ---------------------------------------------------------------------------
 // Build a per-component migration context document.
@@ -12,11 +19,81 @@ function formatContract(contract: Record<string, string>): string {
     .join("\n");
 }
 
+function escapeTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function sourceUrl(repoBaseUrl: string, ref: string, path: string, evidence?: EvidenceItem): string {
+  const anchor = evidence?.lineStart
+    ? `#L${evidence.lineStart}${evidence.lineEnd && evidence.lineEnd !== evidence.lineStart ? `-L${evidence.lineEnd}` : ""}`
+    : "";
+  return `${repoBaseUrl}/blob/${ref}/${path}${anchor}`;
+}
+
+function formatEvidenceSource(evidence: EvidenceItem, repoBaseUrl: string, ref: string): string {
+  if (!evidence.sourceFile) return evidenceSourceLabel(evidence);
+  return `[${evidenceSourceLabel(evidence)}](${sourceUrl(repoBaseUrl, ref, evidence.sourceFile, evidence)})`;
+}
+
+function formatCoverageSection(coverage: SourceCoverage): string {
+  const lines = summarizeCoverage(coverage).map((line) => `- ${line}`).join("\n");
+  const warning = coverage.filesTruncated.length > 0
+    ? "\n> Some source was not visible to the analysis model. Uncited or inferred facts must be checked against the full source before migration."
+    : "";
+  return `${lines}${warning}`;
+}
+
+function formatEvidenceLedger(evidence: EvidenceItem[], repoBaseUrl: string, ref: string): string {
+  if (evidence.length === 0) {
+    return "_No source-level evidence was returned by the analysis model. Treat all extracted facts as requiring manual verification._";
+  }
+
+  return [
+    "| Kind | Basis | Confidence | Source | Statement |",
+    "|------|-------|------------|--------|-----------|",
+    ...evidence.map((item) =>
+      `| ${escapeTableCell(item.kind)} | ${item.basis} | ${item.confidence} | ${formatEvidenceSource(item, repoBaseUrl, ref)} | ${escapeTableCell(item.statement)} |`
+    ),
+  ].join("\n");
+}
+
+function formatRulesWithEvidence(rules: string[], evidence: EvidenceItem[]): string {
+  if (rules.length === 0) return "_No specific business rules extracted — verify manually._";
+  return rules.map((rule) => {
+    const item = findEvidenceForStatement(evidence, rule, "business_rule");
+    const suffix = item
+      ? ` _(basis: ${item.basis}, confidence: ${item.confidence}, source: ${evidenceSourceLabel(item)})_`
+      : " _(uncited by analysis; verify manually)_";
+    return `- ${rule}${suffix}`;
+  }).join("\n");
+}
+
+function formatList(items: string[], empty: string): string {
+  return items.length > 0
+    ? items.map((item) => `- ${item}`).join("\n")
+    : empty;
+}
+
+function implementationGate(analysis: ComponentAnalysis): string {
+  const blockedByRole = analysis.targetRole === "human_review" || analysis.targetRole === "unknown";
+  const blockedByQuestions = analysis.humanQuestions.length > 0;
+  if (!blockedByRole && !blockedByQuestions) {
+    return "This component is ready for agent implementation after the source files and evidence ledger are reviewed.";
+  }
+
+  return [
+    "Do not implement this component yet.",
+    blockedByRole ? `The target role is \`${analysis.targetRole}\`, which requires an architecture decision first.` : "",
+    blockedByQuestions ? "Resolve the Human Questions section before asking a coding agent to write code." : "",
+  ].filter(Boolean).join(" ");
+}
+
 export function buildRewriteContextDoc(
   analysis: ComponentAnalysis,
   frameworkInfo: FrameworkInfo,
   repoBaseUrl: string,
-  analysisDate: string
+  analysisDate: string,
+  repoRef = "HEAD"
 ): string {
   const { component, confidence, unknownFields } = analysis;
 
@@ -33,13 +110,11 @@ export function buildRewriteContextDoc(
       : "";
 
   const sourceLinks = component.filePaths
-    .map((p) => `- [${p}](${repoBaseUrl}/blob/main/${p})`)
+    .map((p) => `- [${p}](${sourceUrl(repoBaseUrl, repoRef, p)})`)
     .join("\n");
 
   const businessRulesSection =
-    analysis.businessRules.length > 0
-      ? analysis.businessRules.map((r) => `- ${r}`).join("\n")
-      : "_No specific business rules extracted — verify manually._";
+    formatRulesWithEvidence(analysis.businessRules, analysis.evidence);
 
   const migrationNotesSection =
     analysis.migrationNotes.length > 0
@@ -73,11 +148,40 @@ ${analysis.purpose}
 
 ---
 
+## Target Architecture Disposition
+
+**Recommended role:** \`${analysis.targetRole}\`
+
+**Rationale:** ${analysis.targetRoleRationale}
+
+**Target integration boundary:** ${analysis.targetIntegrationBoundary}
+
+> This is a migration recommendation, not a silent rewrite instruction. If the role is \`human_review\`, \`unknown\`, inferred, or uncited, resolve the questions below before implementation.
+
+**Implementation gate:** ${implementationGate(analysis)}
+
+---
+
 ## Business Rules
 
 ${businessRulesSection}
 
 > These rules are non-negotiable. Preserve them exactly in the rewrite.
+
+---
+
+## Evidence & Source Coverage
+
+Facts in this document are classified as:
+- **observed** — directly supported by visible source lines
+- **inferred** — reasoned from visible code but not directly proven
+- **unknown** — not supported by visible source and requires manual review
+
+${formatCoverageSection(analysis.sourceCoverage)}
+
+### Evidence Ledger
+
+${formatEvidenceLedger(analysis.evidence, repoBaseUrl, repoRef)}
 
 ---
 
@@ -122,6 +226,24 @@ ${targetDepsSection}
 ## Migration Notes
 
 ${migrationNotesSection}
+
+---
+
+## Migration Risks
+
+${formatList(analysis.migrationRisks, "_No specific migration risks identified._")}
+
+---
+
+## Human Questions
+
+${formatList(analysis.humanQuestions, "_No open human questions identified._")}
+
+---
+
+## Validation Scenarios
+
+${formatList(analysis.validationScenarios, "_No critical validation scenarios identified._")}
 
 ---
 
@@ -186,7 +308,7 @@ export function buildRewriteIndex(
       if (!a) return null;
       const deps = a.component.dependencies.join(", ") || "—";
       const pkgs = a.targetDependencies.join(", ") || "—";
-      return `| ${a.component.name} | ${a.component.type} | ${a.complexity} | ${a.confidence} | ${deps} | ${pkgs} |`;
+      return `| ${escapeTableCell(a.component.name)} | ${a.component.type} | ${a.targetRole} | ${a.complexity} | ${a.confidence} | ${escapeTableCell(deps)} | ${escapeTableCell(pkgs)} |`;
     })
     .filter(Boolean)
     .join("\n");
@@ -197,6 +319,9 @@ export function buildRewriteIndex(
 
   const lowConfidence = analyses.filter((a) => a.confidence === "low");
   const highComplexity = analyses.filter((a) => a.complexity === "high");
+  const allHumanQuestions = analyses.flatMap((a) =>
+    a.humanQuestions.map((q) => `- **${a.component.name}**: ${q}`)
+  );
 
   const unanalyzedSection =
     unanalyzed.length > 0
@@ -233,9 +358,25 @@ ${migrationOrder.map((name, i) => {
 
 ## Component Map
 
-| Component | Type | Complexity | Confidence | Depends On | Target Packages |
-|-----------|------|------------|------------|------------|-----------------|
+| Component | Type | Target Role | Complexity | Confidence | Depends On | Target Packages |
+|-----------|------|-------------|------------|------------|------------|-----------------|
 ${componentRows}
+
+---
+
+## Component Disposition
+
+This is the target-architecture landing-zone view. Review anything marked \`human_review\` or \`unknown\` before asking a coding agent to implement it.
+
+| Component | Recommended Target Role | Integration Boundary | Rationale |
+|-----------|-------------------------|----------------------|-----------|
+${analyses.map((a) => `| ${escapeTableCell(a.component.name)} | ${a.targetRole} | ${escapeTableCell(a.targetIntegrationBoundary)} | ${escapeTableCell(a.targetRoleRationale)} |`).join("\n")}
+
+---
+
+## Human Questions
+
+${allHumanQuestions.length > 0 ? allHumanQuestions.join("\n") : "_No open human questions identified._"}
 
 ---
 
@@ -261,6 +402,12 @@ See individual context docs in \`context/\` for per-component mapping details.
 ${lowConfidence.length > 0
   ? lowConfidence.map((a) => `- **${a.component.name}** — low confidence (${a.unknownFields.join(", ")})`).join("\n")
   : "_All components have medium or high confidence._"}
+
+---
+
+## Discovery Limits
+
+This KB is strongest for source paths the analyzer observed directly. Runtime wiring such as DI registrations, reflection, config-driven handlers, generated code, and production-only settings must be reviewed separately before treating the migration plan as complete.
 
 ---
 
