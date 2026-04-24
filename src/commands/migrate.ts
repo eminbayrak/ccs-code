@@ -6,6 +6,9 @@ import { analyze } from "../migration/rewriteTracer.js";
 import { loadPlugins, listPlugins } from "../migration/pluginLoader.js";
 import * as statusTracker from "../migration/statusTracker.js";
 import { loadConfig } from "../llm/index.js";
+import { routeIntent, formatRouterConfirmation } from "../migration/intentRouter.js";
+import { analyzeDbStatic, runLiveInterrogation, renderStaticDbSection } from "../migration/dbInterrogator.js";
+import { promises as fs } from "fs";
 
 // ---------------------------------------------------------------------------
 // Resolve the migration output directory.
@@ -509,6 +512,157 @@ async function handleRescan(args: string[]): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// /migrate db --service <name> [--yes]
+// Phase 2 of the DB interrogation workflow: live schema extraction.
+// Requires explicit user approval and read-only credentials.
+// ---------------------------------------------------------------------------
+
+async function handleDb(args: string[], onProgress?: (msg: string) => void): Promise<string> {
+  let serviceName = "";
+  let autoApprove = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === "--service" || a === "-s") && args[i + 1]) serviceName = args[++i] ?? "";
+    if (a === "--yes" || a === "-y") autoApprove = true;
+  }
+
+  if (!serviceName) {
+    return [
+      "Usage: /migrate db --service <ServiceName> [--yes]",
+      "",
+      "Performs live database schema extraction for a scanned service.",
+      "Requires explicit approval and READ-ONLY database credentials.",
+      "",
+      "What this does:",
+      "  1. Shows static DB analysis findings from the scan",
+      "  2. Asks for your approval before connecting",
+      "  3. Prompts for read-only credentials (input is masked)",
+      "  4. Connects and extracts table/column definitions only",
+      "  5. Writes db-schema.md to the service context folder",
+      "",
+      "Safety guarantees:",
+      "  • Never auto-connects using connection strings found in source code",
+      "  • Never reads actual table data — schema metadata only",
+      "  • Credentials are never stored or logged",
+      "",
+      "Supported databases: PostgreSQL, MySQL/MariaDB, MS SQL Server",
+    ].join("\n");
+  }
+
+  const migrationDir = await getMigrationDir();
+  const current = await statusTracker.load(migrationDir);
+
+  if (!current) {
+    return "No migration scan found. Run `/migrate scan` first.";
+  }
+
+  const svc = current.services.find(
+    (s) => s.name === serviceName || s.namespace === serviceName || s.namespace === `${serviceName}Manager`
+  );
+
+  if (!svc) {
+    return `Service "${serviceName}" not found. Run \`/migrate status\` to see available services.`;
+  }
+
+  if (!svc.contextDoc) {
+    return `No context doc for "${serviceName}" — run \`/migrate scan\` to analyze it first.`;
+  }
+
+  // Read the existing context doc to show static findings
+  let contextContent = "";
+  try {
+    contextContent = await fs.readFile(svc.contextDoc, "utf-8");
+  } catch {
+    contextContent = "";
+  }
+
+  // Check if there's already a db-schema.md next to the context doc
+  const contextDir = join(migrationDir, "context");
+  const schemaPath = join(contextDir, "db-schema.md");
+  try {
+    await fs.access(schemaPath);
+    if (!autoApprove) {
+      return [
+        `DB schema already extracted for ${serviceName}.`,
+        `Schema file: \`${schemaPath}\``,
+        ``,
+        `To re-extract, delete the file and run this command again.`,
+      ].join("\n");
+    }
+  } catch { /* no existing schema — proceed */ }
+
+  // Show what we found statically
+  const dbSection = contextContent.match(/## Database Analysis \(Static\)([\s\S]*?)(?=\n---\n|\n## )/)?.[0] ?? "";
+
+  if (!autoApprove) {
+    return [
+      `## DB Interrogation — ${serviceName}`,
+      ``,
+      dbSection || "No static DB analysis found in context doc.",
+      ``,
+      `---`,
+      ``,
+      `⚠️  IMPORTANT: Use READ-ONLY credentials only.`,
+      ``,
+      `To proceed with live schema extraction:`,
+      `  /migrate db --service ${serviceName} --yes`,
+      ``,
+      `This will prompt for masked credentials in the terminal.`,
+    ].join("\n");
+  }
+
+  // Phase 2: live interrogation
+  // We need service files to redo the static analysis for dialect detection
+  // Use what we know from the context doc
+  const dialectMatch = contextContent.match(/\*\*Dialect detected:\*\* (\w+)/);
+  const rawDialect = dialectMatch?.[1] ?? "unknown";
+  const validDialects = ["mssql", "postgresql", "mysql", "oracle", "sqlite", "unknown"] as const;
+  type DbDialect = typeof validDialects[number];
+  const dialectHint: DbDialect = (validDialects as readonly string[]).includes(rawDialect)
+    ? rawDialect as DbDialect
+    : "unknown";
+
+  const staticFinding: import("../migration/dbInterrogator.js").StaticDbFinding = {
+    dialect: dialectHint,
+    tables: [],
+    queries: [],
+    ormHints: [],
+    connectionPatterns: [],
+    confidence: "medium",
+  };
+
+  // Extract table names from context doc if available
+  const tableMatches = contextContent.matchAll(/^- `([^`]+)`$/gm);
+  for (const m of tableMatches) {
+    if (m[1] && !m[1].includes(" ")) staticFinding.tables.push(m[1]);
+  }
+
+  onProgress?.(`Starting live DB interrogation for ${serviceName}...`);
+
+  try {
+    const result = await runLiveInterrogation(staticFinding, contextDir, onProgress);
+    if (!result) {
+      return "DB interrogation cancelled or failed.";
+    }
+
+    return [
+      `## ✓ DB Schema Extracted — ${serviceName}`,
+      ``,
+      `**Tables:** ${result.tables.length}`,
+      `**Schema file:** \`${result.outputPath}\``,
+      ``,
+      `To include this schema in your rewrite context:`,
+      `1. The schema is already referenced in the context doc`,
+      `2. Open \`${result.outputPath}\` to review column definitions`,
+      `3. Cross-reference with the queries in the static analysis section`,
+    ].join("\n");
+  } catch (e) {
+    return `DB interrogation failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main command handler — exported for App.tsx
 // ---------------------------------------------------------------------------
 
@@ -528,16 +682,32 @@ export async function handleMigrateCommand(
     case "done":    return handleDone(rest);
     case "rescan":  return handleRescan(rest);
     case "plugin":  return handlePlugin(rest);
-    default:
+    case "db":      return handleDb(rest, onProgress);
+    default: {
+      // Feature 1: Semantic intent routing — detect natural language migration requests
+      const fullInput = [subcommand, ...rest].filter(Boolean).join(" ");
+      if (fullInput.trim()) {
+        try {
+          const decision = await routeIntent(fullInput);
+          if (decision) {
+            return formatRouterConfirmation(decision);
+          }
+        } catch { /* routing is best-effort — fall through to help text */ }
+      }
+
       return [
         "### /migrate — Migration Intelligence Platform",
         "",
         "Analyzes legacy codebases and generates AI rewrite context documents.",
         "Actual rewriting is done by Claude Code / Codex using those docs.",
         "",
+        "**Tip:** Describe your migration in plain English and the tool will auto-detect your intent.",
+        "  e.g. `/migrate I need to convert this .NET repo to Python: https://github.com/org/repo`",
+        "",
         "**Subcommands:**",
         "  `/migrate scan --repo <url> --lang <language> [--yes]`       — scan external SOAP services called by a Node.js repo",
         "  `/migrate rewrite --repo <url> --to <language> [--yes]`      — analyze a full codebase for framework-to-framework migration",
+        "  `/migrate db --service <name> [--yes]`                       — live database schema extraction (read-only, user-approved)",
         "  `/migrate status`                                              — show migration progress table",
         "  `/migrate context <ServiceName>`                               — print a service context doc",
         "  `/migrate verify <ServiceName> --by <name>`                   — mark a service as human-verified",
@@ -548,6 +718,8 @@ export async function handleMigrateCommand(
         "**Examples:**",
         "  `/migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp --yes`",
         "  `/migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --yes`",
+        "  `/migrate db --service OrderManager --yes`",
       ].join("\n");
+    }
   }
 }

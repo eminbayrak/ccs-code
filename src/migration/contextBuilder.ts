@@ -1,5 +1,7 @@
 import type { ServiceAnalysis, ServiceMethod } from "./analyzer.js";
 import type { ResolvedService } from "./resolver.js";
+import type { StaticDbFinding } from "./dbInterrogator.js";
+import { renderStaticDbSection } from "./dbInterrogator.js";
 
 export type ContextBuildInput = {
   analysis: ServiceAnalysis;
@@ -7,6 +9,7 @@ export type ContextBuildInput = {
   targetLanguage: string;
   repoBaseUrl: string;
   analysisDate: string;
+  dbStaticFinding?: StaticDbFinding;
 };
 
 // ---------------------------------------------------------------------------
@@ -93,7 +96,7 @@ ${rules}`;
 // ---------------------------------------------------------------------------
 
 export function buildContextDoc(input: ContextBuildInput): string {
-  const { analysis, resolved, targetLanguage, repoBaseUrl, analysisDate } = input;
+  const { analysis, resolved, targetLanguage, repoBaseUrl, analysisDate, dbStaticFinding } = input;
 
   const confidenceNote =
     analysis.confidence === "low"
@@ -230,6 +233,8 @@ ${dbSection}
 > Connect directly to the database in the rewrite — no SOAP calls.
 
 ---
+
+${dbStaticFinding ? renderStaticDbSection(dbStaticFinding) + "\n\n---\n" : ""}
 
 ## Nested Service Calls
 

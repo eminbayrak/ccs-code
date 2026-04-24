@@ -21,6 +21,9 @@ import type { ServiceRecord, MigrationStatus } from "./statusTracker.js";
 import { estimateScanCost, formatCostPreview } from "./costEstimator.js";
 import { generateScanIntegration } from "./aiIntegration.js";
 import { scanFilesForSecrets, formatSecurityWarnings } from "./securityScanner.js";
+import { packRepo, formatPackStats } from "./repoPacker.js";
+import { mapDependencies, formatDepSummary } from "./dependencyMapper.js";
+import { analyzeDbStatic, renderStaticDbSection } from "./dbInterrogator.js";
 
 export type TracerConfig = {
   entryRepoUrl: string;
@@ -146,14 +149,27 @@ async function walkDir(
   );
 }
 
-// Load and parse the repo's .gitignore (if present) into patterns.
-async function loadGitignore(repoDir: string): Promise<string[]> {
+// Load and parse .gitignore from the repo + .ccsignore from the migration dir.
+// .ccsignore lets users add project-specific exclusion patterns (e.g. generated
+// code dirs, internal tooling, vendor paths not covered by .gitignore).
+async function loadGitignore(repoDir: string, migrationDir?: string): Promise<string[]> {
+  const patterns: string[] = [];
+
+  // Repo's own .gitignore
   try {
     const content = await fs.readFile(join(repoDir, ".gitignore"), "utf-8");
-    return parseGitignore(content);
-  } catch {
-    return [];
+    patterns.push(...parseGitignore(content));
+  } catch { /* no .gitignore — fine */ }
+
+  // User's .ccsignore in the migration workspace (applies to all repos)
+  if (migrationDir) {
+    try {
+      const content = await fs.readFile(join(migrationDir, ".ccsignore"), "utf-8");
+      patterns.push(...parseGitignore(content));
+    } catch { /* no .ccsignore — fine */ }
   }
+
+  return patterns;
 }
 
 // Build an HTTPS clone URL, embedding the token so git never needs to prompt.
@@ -233,7 +249,8 @@ async function readServiceFilesFromClone(
 ): Promise<Array<{ path: string; content: string }>> {
   const nsLower = namespace.toLowerCase();
   const baseName = nsLower.replace("manager", "").replace("service", "");
-  const implExtensions = /\.(cs|vb|cls|bas|java|py|asmx)$/;
+  // Extended to cover legacy enterprise languages: Delphi, VB6, C++, COBOL
+  const implExtensions = /\.(cs|vb|cls|bas|java|py|asmx|pas|dpr|dpk|frm|ctl|cpp|hpp|cob|cbl)$/i;
 
   function pickFiles(tree: string[]): string[] {
     const exact = tree.filter((p) => {
@@ -245,7 +262,15 @@ async function readServiceFilesFromClone(
         fileLower === `${nsLower}.cs` || fileLower === `${nsLower}.vb` ||
         fileLower === `${nsLower}.cls` || fileLower === `${nsLower}.java` ||
         fileLower === `${nsLower}.py` || fileLower === `${nsLower}.bas` ||
-        fileLower === `${nsLower}.asmx.cs`
+        fileLower === `${nsLower}.asmx.cs` ||
+        // Delphi / Pascal
+        fileLower === `${nsLower}.pas` || fileLower === `${nsLower}.dpr` ||
+        // VB6
+        fileLower === `${nsLower}.frm` || fileLower === `${nsLower}.ctl` ||
+        // C++
+        fileLower === `${nsLower}.cpp` || fileLower === `${nsLower}.h` ||
+        // COBOL
+        fileLower === `${nsLower}.cob` || fileLower === `${nsLower}.cbl`
       );
     });
     const supplementary = tree.filter((p) => {
@@ -497,10 +522,10 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
   const extSet = new Set(config.plugin.fileExtensions);
   const entryFiles: Array<{ path: string; content: string }> = [];
 
-  // Load .gitignore from entry repo so we skip build artifacts and vendored code
-  const entryGitignore = await loadGitignore(entryCloneDir);
+  // Load .gitignore + .ccsignore so we skip build artifacts and user-defined paths
+  const entryGitignore = await loadGitignore(entryCloneDir, migrationDir);
   if (entryGitignore.length > 0) {
-    log(config, `  .gitignore loaded — ${entryGitignore.length} patterns`);
+    log(config, `  .gitignore + .ccsignore loaded — ${entryGitignore.length} patterns`);
   }
   await walkDir(entryCloneDir, extSet, entryCloneDir, entryFiles, entryGitignore);
 
@@ -632,6 +657,35 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         resolved.repoFullName, githubConfig, migrationDir, (m) => log(config, `  ${m}`)
       );
 
+      // Pack the cloned repo into a single file for easy AI attachment.
+      // Skips if packed.md already exists from a previous run.
+      if (svcCloneDir) {
+        const packedPath = `${svcCloneDir}/packed.md`;
+        try {
+          await fs.access(packedPath);
+          log(config, `  Packed repo already exists — skipping`);
+        } catch {
+          try {
+            const packResult = await packRepo(svcCloneDir, "markdown");
+            log(config, `  Packed repo: ${formatPackStats(packResult)}`);
+          } catch { /* non-fatal — packing is a bonus, not required */ }
+        }
+
+        // Dependency modernization mapping (Feature 3) — runs once per service repo
+        const contextDir = join(migrationDir, "context");
+        try {
+          const depResult = await mapDependencies(
+            svcCloneDir,
+            targetLanguage,
+            contextDir,
+            (msg) => log(config, msg),
+          );
+          if (depResult) {
+            log(config, `  ${formatDepSummary(depResult)}`);
+          }
+        } catch { /* non-fatal */ }
+      }
+
       // Read ALL implementation files from local clone — no size limits, no API calls
       log(config, `AI Analysis: Reading ${ns} implementation...`);
       const [serviceFiles, wsdl] = await Promise.all([
@@ -655,6 +709,15 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         if (secFindings.length > 0) {
           totalSecurityWarnings += secFindings.length;
           log(config, formatSecurityWarnings(secFindings));
+        }
+      }
+
+      // DB static analysis (Feature 4 — Phase 1) — runs synchronously, no LLM, no user input
+      let dbStaticFinding = null;
+      if (serviceFiles.length > 0) {
+        dbStaticFinding = analyzeDbStatic(serviceFiles);
+        if (dbStaticFinding.dialect !== "unknown" || dbStaticFinding.tables.length > 0) {
+          log(config, `  DB: ${dbStaticFinding.dialect} detected — ${dbStaticFinding.tables.length} table(s), ${dbStaticFinding.ormHints.join(", ") || "no ORM"}`);
         }
       }
 
@@ -725,6 +788,7 @@ export async function trace(config: TracerConfig): Promise<TraceResult> {
         targetLanguage,
         repoBaseUrl,
         analysisDate: new Date().toISOString().slice(0, 10),
+        dbStaticFinding: dbStaticFinding ?? undefined,
       });
 
       const docPath = join(contextDir, `${analysis.namespace}.md`);

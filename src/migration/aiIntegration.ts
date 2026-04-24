@@ -2,6 +2,7 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
 import type { ServiceAnalysis } from "./analyzer.js";
+import { compressSourceFile, formatCompressionStats } from "./sourceCompressor.js";
 
 // ---------------------------------------------------------------------------
 // Generate AI tool integration files from migration KB.
@@ -158,17 +159,53 @@ function buildSlashCommand(
   sourceFiles: Array<{ path: string; content: string }>,
   targetLanguage: string,
 ): string {
+  // Compress source files before embedding: keep method signatures and key logic,
+  // omit boilerplate in the middle of long method bodies.
+  // The main implementation file (exact namespace name match) is kept UNCOMPRESSED
+  // — it contains the business logic Claude must read fully.
+  const nsLower = analysis.namespace.toLowerCase();
+  const compressedFiles = sourceFiles.map((f) => {
+    const fileName = f.path.split("/").pop()?.toLowerCase() ?? "";
+    const isMainImpl =
+      fileName === `${nsLower}.cs` ||
+      fileName === `${nsLower}.java` ||
+      fileName === `${nsLower}.py` ||
+      fileName === `${nsLower}.go` ||
+      fileName === `${nsLower}.ts`;
+    if (isMainImpl) return { ...f, compressed: false, savedLines: 0 };
+    const result = compressSourceFile(f.content, f.path);
+    return { ...f, content: result.content, compressed: result.compressed, savedLines: result.savedLines };
+  });
+
+  const compressionNote = (() => {
+    const stats = compressedFiles.map(f => ({
+      content: f.content,
+      originalLines: f.content.split("\n").length + (f.savedLines ?? 0),
+      compressedLines: f.content.split("\n").length,
+      savedLines: f.savedLines ?? 0,
+      compressed: f.compressed ?? false,
+    }));
+    return formatCompressionStats(stats);
+  })();
+
   const ext = sourceFiles[0]?.path.split(".").pop() ?? "cs";
 
   const sourceBlock =
-    sourceFiles.length > 0
-      ? sourceFiles
-          .map(
-            (f) =>
-              `### \`${f.path}\` (${f.content.split("\n").length} lines)\n\`\`\`${ext}\n${f.content}\n\`\`\``
-          )
+    compressedFiles.length > 0
+      ? compressedFiles
+          .map((f) => {
+            const lines = f.content.split("\n").length;
+            const note = f.compressed && f.savedLines
+              ? ` — compressed, ${f.savedLines} lines omitted`
+              : "";
+            return `### \`${f.path}\` (${lines} lines${note})\n\`\`\`${ext}\n${f.content}\n\`\`\``;
+          })
           .join("\n\n")
       : "_Source files not available locally — refer to the links in the context doc above._";
+
+  const compressionFootnote = compressionNote
+    ? `\n> _${compressionNote}. Full source is in \`repos/\` — open it if you need the omitted lines._\n`
+    : "";
 
   return `${contextDocContent}
 
@@ -178,7 +215,7 @@ function buildSlashCommand(
 
 The original implementation files are included below for reference.
 Read these carefully — your rewrite must preserve all logic visible here.
-
+${compressionFootnote}
 ${sourceBlock}
 
 ---
