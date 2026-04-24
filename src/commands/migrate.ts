@@ -50,12 +50,20 @@ async function validateSetup(requireGithub: boolean): Promise<SetupIssue[]> {
       message: "CCS_GEMINI_API_KEY is not set. Get a key at https://aistudio.google.com/",
     });
   } else if (config.provider === "enterprise") {
-     if (!process.env.CCS_ENTERPRISE_CLIENT_ID || !process.env.CCS_ENTERPRISE_CLIENT_SECRET) {
-        issues.push({
-          severity: "error",
-          message: "Enterprise credentials (ID/Secret) are missing in .env.",
-        });
-     }
+    const missing = [
+      ["CCS_ENTERPRISE_CLIENT_ID", process.env.CCS_ENTERPRISE_CLIENT_ID],
+      ["CCS_ENTERPRISE_CLIENT_SECRET", process.env.CCS_ENTERPRISE_CLIENT_SECRET],
+      ["CCS_ENTERPRISE_AUTH_URL", process.env.CCS_ENTERPRISE_AUTH_URL],
+      ["CCS_ENTERPRISE_SCOPE", process.env.CCS_ENTERPRISE_SCOPE],
+      ["CCS_ENTERPRISE_API_BASE", process.env.CCS_ENTERPRISE_API_BASE],
+    ].filter(([, value]) => !value).map(([name]) => name);
+
+    if (missing.length > 0) {
+      issues.push({
+        severity: "error",
+        message: `Enterprise provider configuration is incomplete. Missing: ${missing.join(", ")}.`,
+      });
+    }
   }
 
   if (requireGithub) {
