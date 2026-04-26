@@ -546,8 +546,113 @@ flowchart TD
           <td>Open this guide</td>
           <td>Any time</td>
         </tr>
+        <tr>
+          <td style="color:#94a3b8">/setup</td>
+          <td>Codex / Claude Code MCP setup snippets</td>
+          <td>Wiring an agent to CCS</td>
+        </tr>
       </tbody>
     </table>
+  </div>
+</div>
+
+<!-- ── Migration commands ─────────────────────────────────────────────────── -->
+<div class="section">
+  <div class="section-label">Migration intelligence</div>
+  <h2>Migration commands &amp; flags</h2>
+  <p>Every <code style="background:rgba(56,189,248,0.1);color:#38bdf8;padding:1px 5px;border-radius:3px">/migrate</code> subcommand and the flags it accepts. Type <code>/m</code> in CCS to autocomplete the full menu.</p>
+
+  <div class="card" style="overflow-x:auto;">
+    <table class="cmd-table">
+      <thead>
+        <tr>
+          <th>Subcommand</th>
+          <th>Flags</th>
+          <th>Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="color:#38bdf8">/migrate rewrite</td>
+          <td><code>--repo &lt;url&gt;</code> · <code>--to &lt;lang&gt;</code> · <code>--from &lt;fw&gt;</code> · <code>--context &lt;path&gt;</code> (repeatable) · <code>--yes</code></td>
+          <td>Full pipeline: scan → reverse-engineer → analyze → verify → contract</td>
+        </tr>
+        <tr>
+          <td style="color:#38bdf8">/migrate reverse-eng</td>
+          <td><code>--repo &lt;url&gt;</code> · <code>--to &lt;lang&gt;</code> · <code>--context &lt;path&gt;</code> · <code>--yes</code></td>
+          <td>Just the reverse-engineering and graph artifacts (no agent contract)</td>
+        </tr>
+        <tr>
+          <td style="color:#38bdf8">/migrate scan</td>
+          <td><code>--repo &lt;url&gt;</code> · <code>--lang &lt;lang&gt;</code> · <code>--yes</code></td>
+          <td>Scan external SOAP / service calls in a Node.js repo</td>
+        </tr>
+        <tr>
+          <td style="color:#4ade80">/migrate open</td>
+          <td><code>[&lt;slug&gt;]</code> · <code>--dashboard</code></td>
+          <td>Open the latest run folder, or its dashboard.html</td>
+        </tr>
+        <tr>
+          <td style="color:#4ade80">/migrate dashboard</td>
+          <td><code>[&lt;slug&gt;]</code> · <code>--open</code></td>
+          <td>Show or open the dashboard for a run</td>
+        </tr>
+        <tr>
+          <td style="color:#fb923c">/migrate clean</td>
+          <td><code>[&lt;slug&gt;]</code> · <code>--all</code> · <code>--yes</code></td>
+          <td>Remove old run folders under your migration root</td>
+        </tr>
+        <tr>
+          <td style="color:#94a3b8">/migrate status</td>
+          <td>—</td>
+          <td>Show migration progress table</td>
+        </tr>
+        <tr>
+          <td style="color:#94a3b8">/migrate context</td>
+          <td><code>&lt;ServiceName&gt;</code></td>
+          <td>Print a single service context doc</td>
+        </tr>
+        <tr>
+          <td style="color:#94a3b8">/migrate verify</td>
+          <td><code>&lt;ServiceName&gt;</code></td>
+          <td>Mark a service as verified</td>
+        </tr>
+        <tr>
+          <td style="color:#94a3b8">/migrate db</td>
+          <td><code>--service &lt;name&gt;</code> · <code>--yes</code></td>
+          <td>Live database schema extraction (read-only, user-approved)</td>
+        </tr>
+        <tr>
+          <td style="color:#94a3b8">/migrate plugin</td>
+          <td>—</td>
+          <td>List installed migration plugins</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <p style="margin:0 0 8px 0;font-weight:600;">Natural language also works.</p>
+    <p style="margin:0;color:var(--muted);font-size:14px;">CCS detects migration intent in plain English. Typing <code style="background:rgba(56,189,248,0.1);color:#38bdf8;padding:1px 5px;border-radius:3px">migrate https://github.com/org/repo to csharp</code> auto-runs the rewrite pipeline. If the target language is missing, CCS asks for it once instead of dumping a re-run instruction.</p>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <p style="margin:0 0 8px 0;font-weight:600;">What lands in the run folder</p>
+    <p style="margin:0 0 6px 0;color:var(--muted);font-size:14px;">Every run produces a single repo-scoped folder named after the slug. Inside:</p>
+    <ul style="margin:6px 0 0 18px;color:var(--muted);font-size:14px;line-height:1.7;">
+      <li><code style="color:var(--text)">README.md</code> — start here, table of contents</li>
+      <li><code style="color:var(--text)">AGENTS.md</code> — entry point for Codex / Claude</li>
+      <li><code style="color:var(--text)">migration-contract.json</code> — machine-readable contract (the source of truth)</li>
+      <li><code style="color:var(--text)">verification-summary.md</code> — trust gate across all components</li>
+      <li><code style="color:var(--text)">human-questions.md</code> — open architecture decisions</li>
+      <li><code style="color:var(--text)">architecture-baseline.md</code>, <code style="color:var(--text)">preflight-readiness.md</code>, <code style="color:var(--text)">component-disposition-matrix.md</code></li>
+      <li><code style="color:var(--text)">system-graph.json</code> + <code style="color:var(--text)">.mmd</code> — dependency graph</li>
+      <li><code style="color:var(--text)">components/&lt;Name&gt;.md</code> — per-component context with verification inline</li>
+      <li><code style="color:var(--text)">reverse-engineering/</code> — extracted business logic</li>
+      <li><code style="color:var(--text)">architecture-context/</code> — copies of your <code>--context</code> docs</li>
+      <li><code style="color:var(--text)">claude-commands/</code> — Claude Code slash commands per component</li>
+      <li><code style="color:var(--text)">dashboard.html</code> — interactive viewer (light/dark)</li>
+    </ul>
   </div>
 </div>
 

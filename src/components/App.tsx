@@ -88,37 +88,95 @@ type SuggestionMode = "file" | "command" | null;
 // ---------------------------------------------------------------------------
 
 const SLASH_COMMANDS: SuggestionItem[] = [
-  // CCS Code vault commands
-  { id: "vault", label: "/vault <init|status|audit>", description: "Initialize, inspect, or audit the CCS Code vault" },
-  { id: "sync", label: "/sync", description: "Sync configured sources (GitHub, Confluence) into raw/" },
-  { id: "ingest", label: "/ingest", description: "Process raw/ files into wiki pages" },
-  { id: "graph", label: "/graph", description: "Build interactive knowledge graph (pyvis)" },
-  { id: "lint", label: "/lint", description: "Run wiki health checks (broken links, orphans, staleness)" },
-  { id: "rewrite", label: "/rewrite <service|order>", description: "Generate rewrite brief or system-wide rewrite order" },
-  { id: "index", label: "/index", description: "Rebuild wiki/_master-index.md" },
-  { id: "enrich", label: "/enrich", description: "Use AI to add summaries, tags, and links to wiki pages" },
-  { id: "ask", label: "/ask <question>", description: "Ask a question answered from your wiki knowledge base" },
-  { id: "harvest", label: "/harvest", description: "Mine AI chat logs (Claude, Cursor, Copilot) into the vault" },
-  { id: "guide", label: "/guide", description: "Open interactive how-to guide with diagrams in browser" },
-  { id: "setup", label: "/setup", description: "Print Codex / Claude Code MCP setup snippets" },
-  { id: "migrate", label: "/migrate <rewrite|open|dashboard|reverse-eng|scan|clean>", description: "Analyze a legacy codebase and open verified migration artifacts" },
-  // Core commands
-  { id: "clear", label: "/clear", description: "Clear conversation history" },
-  { id: "skills", label: "/skills", description: "List loaded skills" },
-  { id: "model", label: "/model", description: "Show active model" },
-  { id: "approvals", label: "/approvals", description: "List pending approvals" },
-  { id: "approve", label: "/approve <id>", description: "Approve a pending action" },
-  { id: "reject", label: "/reject <id>", description: "Reject a pending action" },
-  { id: "tasks", label: "/tasks", description: "List background agent tasks" },
-  { id: "mode", label: "/mode <default|plan|permissive>", description: "Set permission mode" },
-  { id: "hooks", label: "/hooks <list|enable|disable|clear>", description: "Manage event hooks" },
-  { id: "help", label: "/help", description: "Toggle keyboard shortcuts" },
-  { id: "exit", label: "/exit", description: "Exit CCS Code" },
+  // ---- /migrate (the main migration surface) ------------------------------
+  // Each subcommand is its own entry so typing `/m` shows the full menu and
+  // arrow-key navigation lands on the exact action the user wants.
+  { id: "migrate.rewrite",     label: "/migrate rewrite --repo <url> --to <lang> [--from <fw>] [--context <path>] [--yes]",
+    description: "Scan, reverse-engineer, and verify a legacy repo end-to-end" },
+  { id: "migrate.reverse-eng", label: "/migrate reverse-eng --repo <url> [--to <lang>] [--context <path>] [--yes]",
+    description: "Persist reverse-engineering and graph artifacts only (no agent contract)" },
+  { id: "migrate.scan",        label: "/migrate scan --repo <url> --lang <lang> [--yes]",
+    description: "Scan external SOAP/service calls in a Node.js repo" },
+  { id: "migrate.open",        label: "/migrate open [<slug>] [--dashboard]",
+    description: "Open the latest run folder, or its dashboard.html" },
+  { id: "migrate.dashboard",   label: "/migrate dashboard [<slug>] [--open]",
+    description: "Show or open the dashboard for a run" },
+  { id: "migrate.clean",       label: "/migrate clean [<slug>|--all] [--yes]",
+    description: "Remove old run folders under your migration root" },
+  { id: "migrate.status",      label: "/migrate status",
+    description: "Show migration progress table" },
+  { id: "migrate.context",     label: "/migrate context <ServiceName>",
+    description: "Print a service context doc" },
+  { id: "migrate.verify",      label: "/migrate verify <ServiceName>",
+    description: "Mark a service as verified" },
+  { id: "migrate.db",          label: "/migrate db --service <name> [--yes]",
+    description: "Live database schema extraction (read-only, user-approved)" },
+  { id: "migrate.plugin",      label: "/migrate plugin",
+    description: "List installed migration plugins" },
+  { id: "migrate",             label: "/migrate",
+    description: "Migration intelligence — type /m to see all subcommands" },
+
+  // ---- Agent / setup -------------------------------------------------------
+  { id: "setup",       label: "/setup",       description: "Codex / Claude Code MCP setup snippets" },
+  { id: "guide",       label: "/guide",       description: "Open the interactive how-to guide" },
+
+  // ---- Vault / knowledge base ---------------------------------------------
+  { id: "vault.init",   label: "/vault init [<path>]",  description: "Create a new CCS vault" },
+  { id: "vault.status", label: "/vault status",         description: "Show active vault counts" },
+  { id: "vault.audit",  label: "/vault audit",          description: "Health check: ensure harvested memories were ingested" },
+  { id: "vault",        label: "/vault <init|status|audit>", description: "Manage the CCS vault" },
+  { id: "sync",         label: "/sync",                 description: "Sync configured sources (GitHub, Confluence) into raw/" },
+  { id: "harvest",      label: "/harvest",              description: "Mine AI chat logs (Claude, Cursor, Copilot) into the vault" },
+  { id: "ingest",       label: "/ingest",               description: "Process raw/ files into wiki pages" },
+  { id: "enrich",       label: "/enrich",               description: "AI summaries, tags, and links for wiki pages" },
+  { id: "graph",        label: "/graph",                description: "Build the knowledge-base graph (vis.js)" },
+  { id: "index",        label: "/index",                description: "Rebuild wiki/_master-index.md" },
+  { id: "ask",          label: "/ask <question>",       description: "Answer a question from your wiki" },
+  { id: "lint",         label: "/lint",                 description: "Wiki health checks (broken links, orphans, staleness)" },
+  { id: "rewrite",      label: "/rewrite <service|order>", description: "Generate a rewrite brief or system rewrite order" },
+
+  // ---- Core / runtime ------------------------------------------------------
+  { id: "clear",      label: "/clear",      description: "Clear conversation history" },
+  { id: "skills",     label: "/skills",     description: "List loaded skills" },
+  { id: "model",      label: "/model",      description: "Show active model" },
+  { id: "approvals",  label: "/approvals",  description: "List pending approvals" },
+  { id: "approve",    label: "/approve <id>", description: "Approve a pending action" },
+  { id: "reject",     label: "/reject <id>",  description: "Reject a pending action" },
+  { id: "tasks",      label: "/tasks",        description: "List background agent tasks" },
+  { id: "mode",       label: "/mode <default|plan|permissive>", description: "Set permission mode" },
+  { id: "hooks",      label: "/hooks <list|enable|disable|clear>", description: "Manage event hooks" },
+  { id: "help",       label: "/help",       description: "Toggle keyboard shortcuts" },
+  { id: "exit",       label: "/exit",       description: "Exit CCS Code" },
 ];
 
+/**
+ * Match a slash query against the registry.
+ *
+ * The registry contains both top-level commands (e.g. `/migrate`) and
+ * dot-prefixed subcommand entries (e.g. `/migrate rewrite`). The user types
+ * the slash command they want — `/m`, `/mig`, `/migrate r`, etc. — and we
+ * compare the query against the visible label, ignoring the separator
+ * difference between `migrate.rewrite` (registry id) and `migrate rewrite`
+ * (label). Multi-word queries match every word as a contiguous prefix.
+ */
 function filterCommands(query: string): SuggestionItem[] {
-  const q = query.toLowerCase();
-  return SLASH_COMMANDS.filter((c) => c.label.includes(q));
+  const q = query.toLowerCase().trim();
+  if (!q) return SLASH_COMMANDS;
+  // Score by where the match lands: prefix match on the label wins, otherwise
+  // any-substring match. This keeps `/m` showing every /migrate row first.
+  const scored = SLASH_COMMANDS
+    .map((c) => {
+      const label = c.label.toLowerCase();
+      const start = label.indexOf("/" + q);
+      const anywhere = label.indexOf(q);
+      if (start === 0) return { item: c, rank: 0 };
+      if (start > 0)  return { item: c, rank: 1 };
+      if (anywhere >= 0) return { item: c, rank: 2 };
+      return null;
+    })
+    .filter((x): x is { item: SuggestionItem; rank: number } => x !== null)
+    .sort((a, b) => a.rank - b.rank || a.item.label.length - b.item.label.length);
+  return scored.map((s) => s.item);
 }
 
 // ---------------------------------------------------------------------------
@@ -137,9 +195,7 @@ function detectAtTrigger(value: string): { triggerStart: number; query: string; 
 /** Detect a / trigger at the start of the line. */
 function detectSlashTrigger(value: string): { query: string; } | null {
   if (!value.startsWith("/")) return null;
-  const after = value.slice(1);
-  if (after.includes(" ")) return null;
-  return { query: after };
+  return { query: value.slice(1) };
 }
 
 // ---------------------------------------------------------------------------
@@ -423,14 +479,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       setSelectedIdx(0);
 
       // Claude-like help behavior: show help only while the input is exactly '?'.
-      const isHelpTrigger = value.trim() === "?";
+      const isHelpTrigger = cleaned.trim() === "?";
       if (!isProcessing) {
         if (isHelpTrigger && !helpOpen) setHelpOpen(true);
         if (!isHelpTrigger && helpOpen) setHelpOpen(false);
       }
 
       // --- @ file trigger ---
-      const atResult = detectAtTrigger(value);
+      const atResult = detectAtTrigger(cleaned);
       if (atResult) {
         setSuggestionMode("file");
         setAtTriggerStart(atResult.triggerStart);
@@ -440,7 +496,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       }
 
       // --- / command trigger ---
-      const slashResult = detectSlashTrigger(value);
+      const slashResult = detectSlashTrigger(cleaned);
       if (slashResult) {
         setSuggestionMode("command");
         setSuggestions(filterCommands(slashResult.query));
@@ -482,6 +538,8 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       setSuggestions([]);
       return;
     }
+
+    if (suggestions.length === 0) return;
 
     // ↑ / ↓ navigation
     if (key.upArrow) {
@@ -525,12 +583,29 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           // Silently ignore unreadable files
         }
       } else if (suggestionMode === "command") {
-        // Commands that require arguments should populate the input for editing.
-        if (item.id === "approve" || item.id === "reject" || item.id === "mode" || item.id === "vault" || item.id === "rewrite" || item.id === "ask" || item.id === "migrate") {
-          setInput(`/${item.id} `);
+        // Decide whether to execute the command immediately or pre-fill the
+        // input so the user can supply arguments. We look at the LABEL — if it
+        // contains a placeholder (`<...>` or `[...]`), we populate the editable
+        // static prefix and leave the cursor at the end.
+        // Otherwise we run it.
+        const label = item.label;
+        const placeholderIdx = (() => {
+          const candidates = [label.indexOf("<"), label.indexOf("[")];
+          const valid = candidates.filter((i) => i > 0);
+          return valid.length > 0 ? Math.min(...valid) : -1;
+        })();
+
+        if (placeholderIdx > 0) {
+          // Trim the label up to the first placeholder/flag and use that as
+          // the editable starting text.
+          const prefix = label.slice(0, placeholderIdx).trim();
+          setInput(`${prefix} `);
           setInputKey((k) => k + 1);
         } else {
-          executeSlashCommand(item.id);
+          // No placeholder — extract the bare command from the label
+          // (e.g. "/sync") and dispatch it.
+          const command = label.replace(/^\//, "").trim();
+          executeSlashCommand(command);
           setInput("");
         }
       }
@@ -1474,6 +1549,15 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             <Text dimColor>ctrl+u clear</Text>
           )}
         </Box>
+
+        {/* Autocomplete */}
+        {suggestionMode && suggestions.length > 0 && !isProcessing && (
+          <SuggestionList
+            items={suggestions}
+            selectedIndex={selectedIdx}
+            mode={suggestionMode}
+          />
+        )}
 
         {/* Status Bar */}
         <Box marginBottom={0}>

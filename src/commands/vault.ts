@@ -537,36 +537,139 @@ export async function handleAskCommand(question: string, cwd: string): Promise<s
 // ---------------------------------------------------------------------------
 
 export async function handleGuideCommand(): Promise<string> {
-  return `# CCS Code
+  return `# CCS Code Guide
 
-Sync repos + files → build a wiki → ask questions about it.
+CCS has two surfaces:
 
-## Pipeline
+1. **Migration intelligence** — analyze a legacy repo, produce a verified migration contract, graph, dashboard, and agent handoff files.
+2. **Knowledge vault** — ingest docs/repos into a local wiki and ask questions over it.
 
-1. \`/vault init\` — create your knowledge base
-2. \`/sync\` — pull from GitHub *(or drop files into \`raw/uploads/\`)*
-3. \`/ingest\` — convert files into wiki pages
-4. \`/enrich\` — add AI summaries + links
-5. \`/graph\` — open visual knowledge graph
-6. \`/ask <question>\` — query your wiki
-7. \`/migrate scan\` — scan legacy code for migration
+## Fastest Migration Path
 
-## Example
+Use plain English:
 
-\`\`\`bash
-/vault init
-/sync
-/ingest
-/enrich
-/ask what does auth-svc depend on?
-
-# Migration flow
-/migrate scan --repo https://github.com/org/repo --lang csharp
-/migrate status
-/migrate verify CustomerManager --by "John Doe"
+\`\`\`text
+migrate https://github.com/org/repo to csharp
 \`\`\`
 
-Type \`?\` for all commands.`;
+Or use the explicit command:
+
+\`\`\`text
+/migrate rewrite --repo https://github.com/org/repo --to csharp --context docs/modern-use-case.md --yes
+\`\`\`
+
+After the run:
+
+\`\`\`text
+/migrate open --dashboard
+/migrate open
+\`\`\`
+
+## Slash Autocomplete
+
+Type \`/m\` to see every migration command. Type more to narrow:
+
+\`\`\`text
+/migrate r
+/migrate rewrite --r
+\`\`\`
+
+Use arrow keys to move, Enter or Tab to accept, Esc to close.
+
+## Migration Commands And Flags
+
+| Command | Flags | Purpose |
+|---|---|---|
+| \`/migrate rewrite\` | \`--repo <url>\`, \`--to <lang>\`, \`--from <framework>\`, \`--context <path>\` repeatable, \`--no-context\`, \`--yes\` | Full analysis: scan, reverse-engineer, verify, write contract, dashboard, agent files |
+| \`/migrate reverse-eng\` | \`--repo <url>\`, \`--to <lang>\`, \`--context <path>\`, \`--no-context\`, \`--yes\` | Reverse-engineering artifacts and graph only |
+| \`/migrate scan\` | \`--repo <url>\`, \`--lang <lang>\`, \`--org <org>\`, \`--plugin <name>\`, \`--yes\` | Legacy service/SOAP scan path |
+| \`/migrate dashboard\` | \`<run-folder-or-repo-url>\`, \`--open\` | Regenerate \`dashboard.html\` for an existing run |
+| \`/migrate open\` | \`<run-folder-or-repo-url>\`, \`--dashboard\`, \`--folder\` | Open the latest or selected result folder/dashboard |
+| \`/migrate clean\` | \`<slug>\`, \`--all\`, \`--yes\` | Remove generated migration run folders |
+| \`/migrate status\` | none | Show legacy service scan status |
+| \`/migrate context\` | \`<ServiceName>\` | Print a service context doc |
+| \`/migrate verify\` | \`<ServiceName>\`, \`--by <name>\` | Mark a legacy service as human-verified |
+| \`/migrate done\` | \`<ServiceName>\` | Mark a service as fully rewritten |
+| \`/migrate rescan\` | \`<ServiceName>\` | Show rescan instructions |
+| \`/migrate db\` | \`--service <name>\`, \`--yes\` | Read-only database schema extraction, with approval |
+| \`/migrate plugin list\` | none | List installed migration scanner plugins |
+
+## Regenerate Dashboard
+
+For a brand-new scan, run rewrite again. It creates a fresh \`dashboard.html\`:
+
+\`\`\`text
+/migrate rewrite --repo https://github.com/gothinkster/node-express-realworld-example-app --to csharp --context docs/realworld-benchmark-design.md --yes
+\`\`\`
+
+For an existing run, regenerate and open only the dashboard:
+
+\`\`\`text
+/migrate dashboard gothinkster-node-express-realworld-example-app --open
+\`\`\`
+
+For your smaller test repo:
+
+\`\`\`text
+/migrate rewrite --repo https://github.com/eminbayrak/node-orders-api --to csharp --yes
+/migrate dashboard eminbayrak-node-orders-api --open
+\`\`\`
+
+## What The Graph Is For
+
+The system graph is a structured map of the repo and migration plan:
+
+- **Nodes:** components, source files, source packages, target roles, target packages.
+- **Edges:** dependency, definition, package usage, and target-role recommendation links.
+
+It is useful in three ways:
+
+1. Humans can see migration shape faster than reading every markdown file.
+2. The migration contract uses dependency edges to produce implementation order.
+3. Agents can query dependency impact through MCP, for example \`ccs_get_dependency_impact\`.
+
+Important: today this is a lightweight graph, not full Neo4j-style memory. It supports useful dependency impact and visualization, but not deep BFS/DFS call-chain analysis yet.
+
+## MCP Setup
+
+\`\`\`text
+/setup
+ccs-code mcp
+codex mcp add ccs -- ccs-code mcp
+\`\`\`
+
+Claude Code can use the same server through \`.mcp.json\`.
+
+## Knowledge Vault Commands
+
+| Command | Purpose |
+|---|---|
+| \`/vault init [path]\` | Create/select the local vault |
+| \`/vault status\` | Show vault counts |
+| \`/vault audit\` | Health check harvested and ingested content |
+| \`/sync\` | Pull configured sources |
+| \`/harvest\` | Mine local AI chat histories |
+| \`/ingest\` | Convert raw files to wiki pages |
+| \`/enrich\` | Add AI summaries, tags, and links |
+| \`/graph\` | Build/open the vault graph |
+| \`/index\` | Rebuild the wiki master index |
+| \`/ask <question>\` | Ask a question over the wiki |
+| \`/lint\` | Check wiki health |
+
+## Runtime Commands
+
+| Command | Purpose |
+|---|---|
+| \`/clear\` | Clear conversation history |
+| \`/skills\` | List loaded skills |
+| \`/model\` | Show active model and permission mode |
+| \`/mode <default|plan|permissive>\` | Change permission mode |
+| \`/approvals\`, \`/approve <id>\`, \`/reject <id>\` | Review pending approvals |
+| \`/tasks\` | List background agent tasks |
+| \`/hooks <list|enable|disable|clear>\` | Manage hooks |
+| \`/help\` or \`?\` | Keyboard shortcuts |
+| \`/exit\` | Exit CCS |
+`;
 }
 
 

@@ -322,7 +322,7 @@ body {
   line-height: 1.55;
 }
 
-.app { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+.app { display: grid; grid-template-columns: 240px 1fr; height: 100vh; transition: grid-template-columns .18s ease; }
 .sidebar {
   border-right: 1px solid var(--border);
   background: var(--bg-elev);
@@ -363,6 +363,67 @@ body {
 .theme-toggle:hover { border-color: var(--border-strong); color: var(--fg); }
 
 .main { overflow-y: auto; padding: 32px 40px 80px; }
+body[data-route="graph"] .app { grid-template-columns: 76px 1fr; }
+body[data-route="graph"] .main { padding: 24px 28px 80px; }
+body[data-route="graph"] .sidebar-head { padding: 14px 8px 10px; text-align: center; }
+body[data-route="graph"] .sidebar-head h1 {
+  font-size: 0;
+  margin: 0;
+}
+body[data-route="graph"] .sidebar-head h1::after {
+  content: "CCS";
+  font-size: 12px;
+  letter-spacing: .08em;
+  color: var(--fg-muted);
+}
+body[data-route="graph"] .sidebar-head .repo,
+body[data-route="graph"] .sidebar-head .meta,
+body[data-route="graph"] .nav-section,
+body[data-route="graph"] .sidebar-foot span,
+body[data-route="graph"] .nav .badge {
+  display: none;
+}
+body[data-route="graph"] .nav { padding: 8px; }
+body[data-route="graph"] .nav a {
+  justify-content: center;
+  padding: 9px 0;
+  position: relative;
+  min-height: 34px;
+}
+body[data-route="graph"] .nav a span:first-child { font-size: 0; }
+body[data-route="graph"] .nav a::before {
+  content: attr(data-short);
+  font-size: 12px;
+  font-weight: 700;
+}
+body[data-route="graph"] .nav a:hover::after {
+  content: attr(data-label);
+  position: absolute;
+  left: 56px;
+  top: 3px;
+  z-index: 20;
+  white-space: nowrap;
+  color: var(--fg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 9px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+}
+body[data-route="graph"] .sidebar-foot {
+  justify-content: center;
+  padding: 10px 6px;
+}
+body[data-route="graph"] .theme-toggle {
+  width: 38px;
+  padding: 4px 0;
+  font-size: 0;
+}
+body[data-route="graph"] .theme-toggle::after {
+  content: "◐";
+  font-size: 13px;
+}
 .main h1 { font-size: 22px; margin: 0 0 4px; }
 .main h2 { font-size: 16px; margin: 28px 0 10px; }
 .main h3 { font-size: 14px; margin: 22px 0 8px; color: var(--fg-muted); }
@@ -385,6 +446,96 @@ body {
 .card {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
   padding: 16px 20px; box-shadow: var(--shadow); margin: 12px 0;
+}
+.method-hero {
+  background:
+    radial-gradient(circle at 12% 20%, var(--accent-bg), transparent 28%),
+    linear-gradient(180deg, var(--bg-card), var(--bg-elev));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 24px;
+  margin: 16px 0 20px;
+  box-shadow: var(--shadow);
+}
+.method-hero .eyebrow {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.method-hero h2 {
+  margin: 6px 0 8px;
+  font-size: 22px;
+  color: var(--fg);
+}
+.method-hero p {
+  max-width: 860px;
+  color: var(--fg-muted);
+}
+.method-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.method-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 15px 16px;
+  box-shadow: var(--shadow);
+}
+.method-card h3 {
+  margin: 0 0 8px;
+  color: var(--fg);
+}
+.method-card p,
+.method-card li {
+  color: var(--fg-muted);
+}
+.method-steps {
+  display: grid;
+  gap: 10px;
+  counter-reset: method-step;
+}
+.method-step {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 12px;
+  align-items: start;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 13px 15px;
+  box-shadow: var(--shadow);
+}
+.method-step::before {
+  counter-increment: method-step;
+  content: counter(method-step);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  color: white;
+  background: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+.method-step strong {
+  color: var(--fg);
+}
+.method-step p {
+  margin: 3px 0 0;
+  color: var(--fg-muted);
+}
+.boundary-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.boundary-list .method-card {
+  border-left: 3px solid var(--border-strong);
 }
 
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
@@ -635,6 +786,57 @@ tr.clickable:hover td { background: var(--accent-bg); }
   font-size: 11px;
   pointer-events: none;
 }
+.graph-info {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  margin: 10px 0 16px;
+  overflow: hidden;
+}
+.graph-info summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+.graph-info summary::-webkit-details-marker { display: none; }
+.graph-info summary::before {
+  content: "›";
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1;
+  transition: transform .12s ease;
+}
+.graph-info[open] summary::before { transform: rotate(90deg); }
+.graph-info .graph-info-body {
+  padding: 0 16px 14px 40px;
+  color: var(--fg-muted);
+}
+.graph-note,
+.json-note {
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-muted);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.graph-note {
+  margin: 12px 0 22px;
+  border-left: 3px solid var(--accent);
+}
+.json-note {
+  margin: 8px 0 10px;
+  border-left: 3px solid var(--border-strong);
+}
+.json-note strong,
+.graph-note strong {
+  color: var(--fg);
+}
 
 .banner-error {
   background: var(--blocked-bg); color: var(--blocked); border: 1px solid var(--blocked);
@@ -744,6 +946,7 @@ tr.clickable:hover td { background: var(--accent-bg); }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .main { padding: 16px; }
+  .method-grid, .boundary-list { grid-template-columns: 1fr; }
   .graph-workspace { grid-template-columns: 1fr; height: auto; }
   .graph-filter-panel, .graph-panel { border: 0; border-bottom: 1px solid var(--graph-border); }
   #graph-host { height: 560px; }
@@ -936,6 +1139,96 @@ function renderOverview() {
   \`;
 }
 
+function renderMethodology() {
+  return \`
+    <h1>How This Report Was Created</h1>
+    <div class="method-hero">
+      <div class="eyebrow">Modernization Intelligence Layer</div>
+      <h2>From legacy repo to verified migration contract</h2>
+      <p>CCS creates the missing planning layer between a legacy codebase and an implementation agent. Instead of asking Codex or Claude to infer business intent from raw files alone, this report gives them a source-cited contract: what the system does, what must be preserved, which components are ready, which decisions need review, and what order is safest to modernize.</p>
+    </div>
+
+    <div class="method-grid">
+      <div class="method-card">
+        <h3>The gap this fills</h3>
+        <p>Legacy modernization usually starts with scattered knowledge: source code, architecture diagrams, meeting notes, package files, tribal assumptions, and partial migration goals. General coding agents are strong at implementation, but they need a reliable brief before writing code.</p>
+      </div>
+      <div class="method-card">
+        <h3>The CCS approach</h3>
+        <p>CCS does not try to be the code writer. It acts as the analysis, evidence, and contract layer. The result is a repeatable migration packet that humans can review and agents can consume through markdown, JSON, and MCP.</p>
+      </div>
+    </div>
+
+    <h2>Report generation pipeline</h2>
+    <div class="method-steps">
+      <div class="method-step">
+        <div><strong>Input capture and baseline context</strong><p>CCS records the repo URL, target language/framework, and any architecture or business context documents supplied with the run. Those files are copied into the run folder so the report remains reproducible.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>Static inventory and framework detection</strong><p>The scanner builds a file inventory, detects source framework/language signals, reads dependency manifests, and separates production code from tests and generated noise.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>Component discovery</strong><p>Controllers, services, middleware, repositories, clients, models, and route handlers are grouped into migration components. Each component becomes a unit of analysis, readiness, and handoff.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>Reverse engineering</strong><p>CCS extracts business rules, data contracts, dependencies, package usage, target-role candidates, and validation scenarios. This is where raw code begins turning into a modernization brief.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>System graph construction</strong><p>Components, source files, packages, and recommended target roles are represented as nodes and edges. Dependency edges drive implementation order and support one-hop impact queries for agents.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>Architecture disposition</strong><p>The analyzer maps each legacy component to a target role such as API endpoint, integration adapter, common library, workflow, or human-review item. The decision is grounded in code evidence plus the supplied modernization context.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>Verification gate</strong><p>A second pass re-checks load-bearing claims against cited source lines. Unsupported or weakly evidenced claims demote a component to needs review or blocked, instead of letting an agent implement from an untrusted assumption.</p></div>
+      </div>
+      <div class="method-step">
+        <div><strong>Agent-ready outputs</strong><p>The run writes a human dashboard, component reports, a machine-readable migration contract, graph JSON, reverse-engineering JSON, test scaffolds, dependency risk notes, and MCP-readable artifacts.</p></div>
+      </div>
+    </div>
+
+    <h2>Design principles</h2>
+    <div class="method-grid">
+      <div class="method-card">
+        <h3>Evidence before implementation</h3>
+        <p>Important claims are tied back to source evidence or explicit context documents. The goal is not just a summary; it is a migration record that can be challenged and reviewed.</p>
+      </div>
+      <div class="method-card">
+        <h3>Contract before code</h3>
+        <p>CCS produces the contract. Codex, Claude Code, or another engineering agent can then implement against that contract with clearer scope and fewer architecture guesses.</p>
+      </div>
+      <div class="method-card">
+        <h3>Graph-assisted planning</h3>
+        <p>The graph is used for visual review, dependency-aware migration order, and agent impact queries. It keeps implementation sequencing visible instead of burying it in prose.</p>
+      </div>
+      <div class="method-card">
+        <h3>Honest uncertainty</h3>
+        <p>When the code or context does not support a claim, the report says so. A needs-review verdict is a quality control signal, not a failure of the run.</p>
+      </div>
+    </div>
+
+    <h2>Current boundaries</h2>
+    <div class="boundary-list">
+      <div class="method-card">
+        <h3>Not an automatic code migrator</h3>
+        <p>This tool prepares the migration packet. It does not replace implementation agents or engineers who write and validate the target application.</p>
+      </div>
+      <div class="method-card">
+        <h3>Static-first analysis</h3>
+        <p>The report is generated from source files, manifests, and supplied context. Runtime traces, production telemetry, and live database semantics still need explicit inputs or follow-up integrations.</p>
+      </div>
+      <div class="method-card">
+        <h3>Lightweight graph today</h3>
+        <p>The graph supports visualization, migration ordering, and one-hop impact. Deep call-chain traversal, clustering, transitive blast radius, and graph-database queries are the next maturity layer.</p>
+      </div>
+      <div class="method-card">
+        <h3>Human review where it matters</h3>
+        <p>Architecture choices with missing evidence are intentionally surfaced. That keeps the tool useful in enterprise settings where wrong confidence is more dangerous than a clear review queue.</p>
+      </div>
+    </div>
+  \`;
+}
+
 function escapeText(s) { return String(s).replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 
 function jsonWhitespace(ch) {
@@ -994,6 +1287,10 @@ function renderJson(value) {
     i++;
   }
   return '<div class="json-viewer"><pre class="json-pre"><code>' + html + '</code></pre></div>';
+}
+
+function jsonNote(title, body) {
+  return '<div class="json-note"><strong>' + escapeText(title) + '</strong> ' + escapeText(body) + '</div>';
 }
 
 function renderTrustGate() {
@@ -1058,6 +1355,30 @@ function renderGraph() {
   return \`
     <h1>System Graph</h1>
     <p>Explore the migration graph by component, file, package, and target architecture role.</p>
+
+    <details class="graph-info">
+      <summary>What is this graph and what is it for?</summary>
+      <div class="markdown graph-info-body">
+        <p>This is a <strong>structural map</strong> of your legacy repo and its migration plan. It is <em>not</em> a vector database, agent memory, or retrieval index. It does not store embeddings and it is not used for similarity search.</p>
+        <p><strong>Nodes</strong> are the things CCS extracted from the repo and the contract:</p>
+        <ul>
+          <li><strong>component</strong> — a logical unit (controller, service, repository, model, middleware…) that CCS analyzed and produced a context doc for</li>
+          <li><strong>source file</strong> — a file that defines one of those components</li>
+          <li><strong>source package</strong> — a third-party dep used by the legacy code (npm, pip, NuGet…)</li>
+          <li><strong>target role</strong> — the recommended landing zone for a component (azure_function, aks_service, common_library, human_review…)</li>
+          <li><strong>target package</strong> — a dep the rewrite will need</li>
+        </ul>
+        <p><strong>Edges</strong> are the relationships between them: <code>depends_on</code>, <code>defined_in</code>, <code>recommended_role</code>, <code>uses_source_package</code>, <code>needs_target_package</code>.</p>
+        <p><strong>Where it is actually used today</strong>:</p>
+        <ul>
+          <li>Humans review it before approving a migration order — easier than reading every component doc.</li>
+          <li>Codex / Claude Code call <code>ccs_get_dependency_impact(componentName)</code> through MCP — that does a one-hop graph query and returns "components to implement before this one" + "components to retest after changing this one." That <em>is</em> a graph query for the agent. Just one hop, not BFS/DFS at depth.</li>
+          <li>The migration order is computed via topological sort over the <code>depends_on</code> edges.</li>
+        </ul>
+        <p><strong>What it is not (yet)</strong>: not a Neo4j-style queryable graph DB, not a memory layer the agent reads on every prompt, not an index for RAG. It is a planning aid plus a one-hop impact tool. Expanding it into deeper queries (full transitive impact, blast radius, cluster detection) is a future feature, not what it does today.</p>
+      </div>
+    </details>
+
     <div class="graph-workspace">
       <aside class="graph-filter-panel">
         <h3>Search</h3>
@@ -1101,6 +1422,9 @@ function renderGraph() {
       </section>
       <aside class="graph-panel" id="graph-detail"></aside>
     </div>
+    <div class="graph-note">
+      <strong>How to read this:</strong> use the canvas for quick architecture review, then click a component node to see its trust gate, verified-claim count, dependencies, and link to the component report. Agents use the same graph data through MCP for one-hop dependency impact, but this is not yet a deep graph database or vector memory layer.
+    </div>
     <h2>Mermaid diagram</h2>
     <div class="mermaid-render" id="mermaid-render"></div>
     <details class="source-details">
@@ -1108,6 +1432,7 @@ function renderGraph() {
       <div class="mermaid-source">\${escapeText(data.docs.systemGraphMermaid || 'No system-graph.mmd was generated.')}</div>
     </details>
     <h2>system-graph.json</h2>
+    \${jsonNote('Machine-readable graph.', 'This is the structured source behind the canvas and Mermaid view: nodes, edges, component roles, package links, and dependency relationships. MCP tools read this shape when answering dependency-impact questions.')}
     \${renderJson(data.graph || {})}
   \`;
 }
@@ -1140,6 +1465,7 @@ function renderReverse() {
     <h2>Details</h2>
     <div class="card markdown">\${renderMarkdown(data.docs.reverseEngineeringDetails || '_(empty)_')}</div>
     <h2>business-logic.json</h2>
+    \${jsonNote('Reverse-engineered business rules.', 'This JSON is meant for agents and reviewers. It captures extracted rules, contracts, and evidence in a format that is easier to query than markdown.')}
     \${bl}
   \`;
 }
@@ -1175,6 +1501,7 @@ function renderRaw() {
   return \`
     <h1>Migration Contract</h1>
     <p>The full machine-readable contract Codex / Claude / MCP read.</p>
+    \${jsonNote('Source of truth for agents.', 'This contract tells Codex or Claude which components are ready, which need review, what must be preserved, and what validation scenarios should pass.')}
     \${renderJson(data.contractJson || { message: 'No migration contract was generated.' })}
   \`;
 }
@@ -1856,8 +2183,10 @@ function renderMermaidDiagram() {
 function renderRoute() {
   if (!main) return;
   const route = currentRoute;
+  document.body.setAttribute('data-route', route.startsWith('component:') ? 'component' : route);
 
   if (route === 'overview')         main.innerHTML = renderOverview();
+  else if (route === 'method')      main.innerHTML = renderMethodology();
   else if (route === 'trust')       main.innerHTML = renderTrustGate();
   else if (route === 'components')  main.innerHTML = renderComponents();
   else if (route.startsWith('component:')) main.innerHTML = renderComponent(decodeURIComponent(route.slice('component:'.length)));
@@ -1883,24 +2212,43 @@ renderRoute();
 `;
 
 function buildHtml(data: DashboardData): string {
-  const navItems: Array<{ id: string; label: string; badge?: string }> = [
-    { id: "overview",     label: "Overview" },
-    { id: "trust",        label: "Trust gate", badge: `${data.meta.posture.needsReview + data.meta.posture.blocked}` },
-    { id: "components",   label: "Components", badge: `${data.components.length}` },
-    { id: "graph",        label: "System graph" },
-    { id: "reverse",      label: "Reverse engineering" },
-    { id: "architecture", label: "Architecture" },
-    { id: "human",        label: "Human questions", badge: `${data.components.reduce((n, c) => n + c.humanQuestions, 0)}` },
-    { id: "validation",   label: "Validation & risk" },
-    { id: "agents",       label: "Agent handoff" },
-    { id: "contract",     label: "Migration contract" },
+  const navGroups: Array<{ title: string; items: Array<{ id: string; label: string; short: string; badge?: string }> }> = [
+    {
+      title: "Report",
+      items: [
+        { id: "overview", label: "Overview", short: "OV" },
+        { id: "method",   label: "How it works", short: "HW" },
+      ],
+    },
+    {
+      title: "Analysis",
+      items: [
+        { id: "trust",        label: "Trust gate",           short: "TG", badge: `${data.meta.posture.needsReview + data.meta.posture.blocked}` },
+        { id: "components",   label: "Components",           short: "CO", badge: `${data.components.length}` },
+        { id: "graph",        label: "System graph",         short: "GR" },
+        { id: "reverse",      label: "Reverse engineering",  short: "RE" },
+        { id: "architecture", label: "Architecture",         short: "AR" },
+        { id: "human",        label: "Human questions",      short: "HQ", badge: `${data.components.reduce((n, c) => n + c.humanQuestions, 0)}` },
+        { id: "validation",   label: "Validation & risk",    short: "VR" },
+      ],
+    },
+    {
+      title: "Handoff",
+      items: [
+        { id: "agents",   label: "Agent handoff",      short: "AG" },
+        { id: "contract", label: "Migration contract", short: "MC" },
+      ],
+    },
   ];
 
-  const nav = navItems.map((item) =>
-    `<a data-route="${item.id}" href="#${item.id}">
-       <span>${escapeHtml(item.label)}</span>
-       ${item.badge && item.badge !== "0" ? `<span class="badge">${escapeHtml(item.badge)}</span>` : ""}
-     </a>`
+  const nav = navGroups.map((group) =>
+    `<div class="nav-section">${escapeHtml(group.title)}</div>` +
+    group.items.map((item) =>
+      `<a data-route="${item.id}" data-short="${escapeHtml(item.short)}" data-label="${escapeHtml(item.label)}" href="#${item.id}">
+         <span>${escapeHtml(item.label)}</span>
+         ${item.badge && item.badge !== "0" ? `<span class="badge">${escapeHtml(item.badge)}</span>` : ""}
+       </a>`
+    ).join("")
   ).join("");
 
   return `<!doctype html>
@@ -1920,7 +2268,6 @@ function buildHtml(data: DashboardData): string {
       <div class="meta">${escapeHtml(data.meta.framework.sourceFramework)} → ${escapeHtml(data.meta.framework.targetFramework)}</div>
     </div>
     <nav class="nav">
-      <div class="nav-section">Sections</div>
       ${nav}
     </nav>
     <div class="sidebar-foot">

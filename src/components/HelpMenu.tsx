@@ -10,6 +10,7 @@ export function HelpMenu({ terminalWidth }: { terminalWidth?: number }) {
   const col1 = [
     ["@file", "attach file to message"],
     ["/cmd", "run a slash command"],
+    ["/m", "show migration commands"],
     ["?", "toggle this menu"],
     ["↑↓", "navigate suggestions"],
     ["Tab", "accept suggestion"],
@@ -22,7 +23,8 @@ export function HelpMenu({ terminalWidth }: { terminalWidth?: number }) {
     ["/ingest", "process raw/ inbox"],
     ["/graph", "build knowledge graph"],
     ["/lint", "wiki health check"],
-    ["/migrate", "migration platform"],
+    ["/migrate rewrite", "analyze legacy repo"],
+    ["/migrate open", "open latest results"],
     ["/rewrite <svc>", "rewrite brief"],
     ["/index", "rebuild master index"],
   ];
@@ -30,6 +32,8 @@ export function HelpMenu({ terminalWidth }: { terminalWidth?: number }) {
   const col3 = [
     ["/clear", "clear history"],
     ["/skills", "list skills"],
+    ["/guide", "full command reference"],
+    ["/setup", "MCP setup"],
     ["/model", "active model"],
     ["/mode <mode>", "default · plan · permissive"],
     ["/approvals", "pending approvals"],
