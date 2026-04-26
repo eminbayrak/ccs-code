@@ -1,5 +1,5 @@
 import { promises as fs } from "fs";
-import { join } from "path";
+import { basename, join, resolve } from "path";
 import { fetchDefaultBranch, fetchFileContent, fetchFileTree, parseRepoUrl } from "../connectors/github.js";
 import { createProvider, type LLMProvider, loadConfig } from "../llm/index.js";
 import type { GithubConfig } from "./resolver.js";
@@ -12,10 +12,26 @@ import {
 } from "./rewriteAnalyzer.js";
 import {
   buildRewriteContextDoc,
-  buildRewriteIndex,
 } from "./rewriteContextBuilder.js";
 import { generateRewriteIntegration } from "./aiIntegration.js";
 import { estimateScanCost, formatCostPreview } from "./costEstimator.js";
+import {
+  buildArchitectureBaselineDoc,
+  buildPreflightReadinessReport,
+  formatModernizationContextForPrompt,
+  loadModernizationContext,
+} from "./modernizationContext.js";
+import {
+  loadPriorReverseEngineeringContext,
+  writeReverseEngineeringArtifacts,
+} from "./reverseEngineeringArtifacts.js";
+import {
+  buildVerificationSummary,
+  verifyComponent,
+  type ComponentVerification,
+} from "./rewriteVerifier.js";
+import { buildRunLayout, type RunLayout } from "./runLayout.js";
+import { writeDashboard } from "./webDashboard.js";
 
 export type RewriteTracerConfig = {
   repoUrl: string;
@@ -23,6 +39,8 @@ export type RewriteTracerConfig = {
   sourceFrameworkHint?: string;   // optional override for auto-detection
   outputDir: string;
   githubConfig: GithubConfig;
+  contextPaths?: string[];
+  noContext?: boolean;
   onProgress?: (msg: string) => void;
   onCostPreview?: (preview: string) => Promise<boolean>;
 };
@@ -122,6 +140,153 @@ Respond with ONLY the overview paragraph. No headers, no lists.`,
   return response.trim();
 }
 
+function implementationStatusFor(
+  analysis: ComponentAnalysis,
+  verification: ComponentVerification | undefined,
+): "ready" | "needs_review" | "blocked" {
+  if (
+    analysis.targetRole === "human_review" ||
+    analysis.targetRole === "unknown"
+  ) {
+    return "blocked";
+  }
+  if (verification?.trustVerdict === "blocked") return "blocked";
+  if (verification?.trustVerdict === "needs_review") return "needs_review";
+  if (analysis.humanQuestions.length > 0 || analysis.confidence === "low" || analysis.sourceCoverage.filesTruncated.length > 0) {
+    return "needs_review";
+  }
+  return "ready";
+}
+
+/**
+ * Copy each user-provided --context doc into the run's architecture-context/
+ * folder so the run is reproducible without depending on files that may move
+ * or be deleted on the developer's machine.
+ */
+async function copyUserContextDocs(
+  contextPaths: string[],
+  destDir: string,
+): Promise<void> {
+  for (const path of contextPaths) {
+    try {
+      const absolute = resolve(process.cwd(), path);
+      const content = await fs.readFile(absolute, "utf-8");
+      const safeName = basename(absolute).replace(/[^a-zA-Z0-9._-]+/g, "-");
+      const target = join(destDir, safeName);
+      await fs.writeFile(target, content, "utf-8");
+    } catch {
+      // Best-effort copy; the original analysis already consumed the doc, so
+      // a copy failure is non-fatal.
+    }
+  }
+}
+
+function buildReadmeDoc(input: {
+  repoUrl: string;
+  generatedAt: string;
+  frameworkInfo: FrameworkInfo;
+  analyses: ComponentAnalysis[];
+  migrationOrder: string[];
+  verifications: ComponentVerification[];
+  overview: string;
+  errors: string[];
+  contextDocCount: number;
+}): string {
+  const verificationByName = new Map(input.verifications.map((v) => [v.component, v]));
+  const statuses = input.analyses.map((analysis) => ({
+    name: analysis.component.name,
+    status: implementationStatusFor(analysis, verificationByName.get(analysis.component.name)),
+    questions: analysis.humanQuestions.length,
+    verified: verificationByName.get(analysis.component.name)?.totals.verified ?? 0,
+    checked: verificationByName.get(analysis.component.name)?.totals.claimsChecked ?? 0,
+  }));
+  const ready = statuses.filter((s) => s.status === "ready").length;
+  const needsReview = statuses.filter((s) => s.status === "needs_review").length;
+  const blocked = statuses.filter((s) => s.status === "blocked").length;
+  const nextReady = input.migrationOrder.find((name) =>
+    statuses.find((s) => s.name === name)?.status === "ready"
+  );
+
+  const componentRows = input.migrationOrder.map((name) => {
+    const status = statuses.find((s) => s.name === name);
+    if (!status) return `| ${name} | unknown | — | — |`;
+    const gate = status.status === "ready"
+      ? "ready"
+      : status.status === "needs_review"
+        ? "needs_review"
+        : "blocked";
+    return `| ${name} | ${gate} | ${status.verified}/${status.checked} | ${status.questions} |`;
+  });
+
+  return [
+    `# ${input.repoUrl.split("/").slice(-2).join("/")} — Migration Analysis`,
+    "",
+    `**Repo:** ${input.repoUrl}`,
+    `**Generated:** ${input.generatedAt}`,
+    `**Migration:** ${input.frameworkInfo.sourceFramework} (${input.frameworkInfo.sourceLanguage}) → ${input.frameworkInfo.targetFramework} (${input.frameworkInfo.targetLanguage})`,
+    `**Architecture context loaded:** ${input.contextDocCount} doc(s)`,
+    "",
+    "## Executive Summary",
+    "",
+    input.overview,
+    "",
+    `**Implementation posture:** ${ready} ready · ${needsReview} needs_review · ${blocked} blocked`,
+    input.errors.length > 0 ? `**Pipeline errors:** ${input.errors.length}` : "**Pipeline errors:** 0",
+    "",
+    "## What To Open First",
+    "",
+    "1. `verification-summary.md` — trust gate: what is ready, needs review, or blocked.",
+    "2. `human-questions.md` — decisions an architect or product owner must answer before coding.",
+    "3. `migration-contract.json` — machine-readable contract for Codex, Claude Code, MCP tools, and validation.",
+    "4. `reverse-engineering/reverse-engineering-details.md` — business rules, data contracts, and use-case understanding.",
+    "5. `system-graph.mmd` — quick architecture graph for human review.",
+    "",
+    "Treat this file as the table of contents. You do not need to read everything.",
+    "",
+    "## Component Gate",
+    "",
+    "| Component | Gate | Verified claims | Human questions |",
+    "|-----------|------|-----------------|-----------------|",
+    ...componentRows,
+    "",
+    "## Agent Handoff",
+    "",
+    nextReady
+      ? `First ready component: \`${nextReady}\`. Hand off the run folder to Codex or Claude Code; tell them to read \`AGENTS.md\`, \`migration-contract.json\`, and \`components/${nextReady}.md\` before writing any code.`
+      : "No component is ready for coding yet. Resolve `human-questions.md` and review `verification-summary.md` first.",
+    "",
+    "For MCP setup, run `/setup` in CCS. Agents call `ccs_list_ready_components`, `ccs_get_component_context`, and `ccs_get_verification_report` before implementation.",
+    "",
+    "## Workflow",
+    "",
+    "1. Skim this README.",
+    "2. Open `verification-summary.md` and `human-questions.md` — accept, rewrite, or reject any flagged claim.",
+    "3. Pick the first `ready` component from the table above.",
+    "4. Run the agent (`codex` or Claude Code) with `AGENTS.md` as the entry instruction.",
+    "5. After implementation, validate the new code against `validationScenarios` in `migration-contract.json`.",
+    "6. Move on to the next `ready` component in `migrationOrder`.",
+    "",
+    "## Folder Map",
+    "",
+    "| Need | Where |",
+    "|------|-------|",
+    "| Human entry point | `README.md` (this file) |",
+    "| Agent entry point | `AGENTS.md` |",
+    "| Machine-readable contract | `migration-contract.json` |",
+    "| Trust gate | `verification-summary.md` |",
+    "| Per-component analysis | `components/<Name>.md` |",
+    "| Reverse-engineered behavior | `reverse-engineering/` |",
+    "| Dependency graph | `system-graph.json`, `system-graph.mmd` |",
+    "| Architecture baseline | `architecture-baseline.md` |",
+    "| Open decisions | `human-questions.md` |",
+    "| Target landing zones | `component-disposition-matrix.md` |",
+    "| User-provided context (copies) | `architecture-context/` |",
+    "| Claude Code slash commands | `claude-commands/` |",
+    "| Run logs | `logs/` |",
+    "",
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -140,6 +305,42 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
 
   const repoBaseUrl = `https://${host}/${owner}/${repo}`;
   const analysisDate = new Date().toISOString().slice(0, 10);
+  const generatedAt = new Date().toISOString();
+
+  // Build the repo-scoped run layout. Every artifact for THIS analysis lives
+  // under one folder named after the repo, with clear subdirectories.
+  const layout = buildRunLayout(outputDir, repoUrl);
+  await fs.mkdir(layout.runDir, { recursive: true });
+  await fs.mkdir(layout.componentsDir, { recursive: true });
+  await fs.mkdir(layout.architectureContextDir, { recursive: true });
+  await fs.mkdir(layout.logsDir, { recursive: true });
+
+  const modernizationContext = config.noContext
+    ? await loadModernizationContext([], { includeWellKnown: false })
+    : await loadModernizationContext(config.contextPaths);
+  // Copy each user-provided --context doc into architecture-context/ so the
+  // run folder is self-contained and reproducible.
+  if (!config.noContext) {
+    await copyUserContextDocs(config.contextPaths ?? [], layout.architectureContextDir);
+  }
+
+  const priorReverseEngineeringContext = await loadPriorReverseEngineeringContext(layout.runDir, repoUrl);
+  const modernizationPromptContext = [
+    formatModernizationContextForPrompt(modernizationContext),
+    priorReverseEngineeringContext,
+  ].filter(Boolean).join("\n\n---\n\n");
+  await fs.writeFile(
+    layout.architectureBaselinePath,
+    buildArchitectureBaselineDoc(modernizationContext, repoUrl, targetLanguage, generatedAt),
+    "utf-8"
+  );
+  log(
+    config,
+    modernizationContext.docs.length > 0
+      ? `Loaded ${modernizationContext.docs.length} modernization context doc(s).`
+      : "No modernization context docs found; using the default architecture profile."
+  );
+
   let defaultBranch = "HEAD";
   try {
     defaultBranch = await fetchDefaultBranch(owner, repo, githubConfig.token, githubConfig.host);
@@ -172,6 +373,20 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
   const nonTestComponents = components.filter((c) => c.type !== "test");
   log(config, `Found ${nonTestComponents.length} components (excluding tests).`);
 
+  await fs.writeFile(
+    layout.preflightReadinessPath,
+    buildPreflightReadinessReport({
+      repoUrl,
+      generatedAt,
+      tree,
+      keyFiles,
+      frameworkInfo,
+      components: nonTestComponents,
+      context: modernizationContext,
+    }),
+    "utf-8"
+  );
+
   if (nonTestComponents.length === 0) {
     return {
       frameworkInfo,
@@ -198,23 +413,66 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
 
   // --- Analyze each component (Sonnet) ---
   const analyzed: ComponentAnalysis[] = [];
+  const verifications: ComponentVerification[] = [];
   const unanalyzed: string[] = [];
   const errors: string[] = [];
-  const contextDir = join(outputDir, "rewrite", "context");
-  await fs.mkdir(contextDir, { recursive: true });
 
   for (const component of nonTestComponents) {
     log(config, `Analyzing ${component.name} (${component.type})...`);
     try {
       const sourceFiles = await fetchFiles(owner, repo, component.filePaths, githubConfig);
-      const analysis = await analyzeComponent(component, sourceFiles, frameworkInfo, sonnet);
+      const analysis = await analyzeComponent(
+        component,
+        sourceFiles,
+        frameworkInfo,
+        sonnet,
+        modernizationPromptContext
+      );
       analyzed.push(analysis);
 
-      const doc = buildRewriteContextDoc(analysis, frameworkInfo, repoBaseUrl, analysisDate, defaultBranch);
-      const docPath = join(contextDir, `${component.name}.md`);
-      await fs.writeFile(docPath, doc, "utf-8");
+      // Verification pass: re-read every cited source range and confirm each
+      // load-bearing claim before we tell Codex/Claude this component is ready.
+      log(config, `Verifying claims for ${component.name}...`);
+      let verification: ComponentVerification;
+      try {
+        verification = await verifyComponent(analysis, sourceFiles, haiku, { generatedAt });
+      } catch (verifyError) {
+        const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+        verification = {
+          component: component.name,
+          generatedAt,
+          verifierModel: haiku.name,
+          trustVerdict: "needs_review",
+          trustReasons: [`Verifier crashed: ${msg}`],
+          totals: { claimsChecked: 0, verified: 0, unsupported: 0, inconclusive: 0, noEvidence: 0 },
+          claims: [],
+          error: msg,
+        };
+      }
+      verifications.push(verification);
 
-      log(config, `✓ ${component.name} (${analysis.complexity} complexity, ${analysis.confidence} confidence)`);
+      // Per-component doc with verification rendered inline. We no longer
+      // write a separate verification/<Name>.md — the context doc carries the
+      // full verification block, so the duplicate file was pure noise.
+      const doc = buildRewriteContextDoc(
+        analysis,
+        frameworkInfo,
+        repoBaseUrl,
+        analysisDate,
+        defaultBranch,
+        modernizationContext,
+        verification,
+      );
+      await fs.writeFile(join(layout.componentsDir, `${component.name}.md`), doc, "utf-8");
+
+      const verdictIcon =
+        verification.trustVerdict === "ready" ? "✓"
+        : verification.trustVerdict === "needs_review" ? "⚠"
+        : "✗";
+      log(
+        config,
+        `${verdictIcon} ${component.name} (${analysis.complexity} complexity, ${analysis.confidence} confidence, ${verification.totals.verified}/${verification.totals.claimsChecked} verified, verdict=${verification.trustVerdict})`,
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       errors.push(`${component.name}: ${msg}`);
@@ -223,30 +481,52 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
     }
   }
 
+  // Persist the verification summary so reviewers can scan trust state in one place.
+  if (verifications.length > 0) {
+    await fs.writeFile(
+      layout.verificationSummaryPath,
+      buildVerificationSummary(verifications, { repoUrl, generatedAt }),
+      "utf-8"
+    );
+  }
+
   // --- Topological sort ---
   const migrationOrder = sortByDependency(nonTestComponents).filter(
     (name) => !unanalyzed.includes(name)
   );
 
-  // --- System overview + index ---
+  // --- System overview + README (single human entry point) ---
   log(config, "Generating migration knowledge base index...");
   const overview = await generateSystemOverview(analyzed, frameworkInfo, sonnet);
-  const indexContent = buildRewriteIndex(
-    analyzed,
+  const reverseEngineeringArtifacts = await writeReverseEngineeringArtifacts({
+    runDir: layout.runDir,
+    reverseEngineeringDir: layout.reverseEngineeringDir,
+    systemGraphJsonPath: layout.systemGraphJsonPath,
+    systemGraphMermaidPath: layout.systemGraphMermaidPath,
+    repoUrl,
+    generatedAt,
     frameworkInfo,
+    analyses: analyzed,
     migrationOrder,
-    unanalyzed,
-    overview,
-    analysisDate,
-    repoBaseUrl
+  });
+
+  await fs.writeFile(
+    layout.readmePath,
+    buildReadmeDoc({
+      repoUrl,
+      generatedAt,
+      frameworkInfo,
+      analyses: analyzed,
+      migrationOrder,
+      verifications,
+      overview,
+      errors,
+      contextDocCount: modernizationContext.docs.length,
+    }),
+    "utf-8",
   );
 
-  const kbDir = join(outputDir, "rewrite");
-  const indexPath = join(kbDir, "_index.md");
-  await fs.writeFile(indexPath, indexContent, "utf-8");
-
-  // --- Scan report ---
-  const reportPath = join(outputDir, "rewrite", "report.md");
+  // --- Scan report (terse, lives in logs/) ---
   const report = [
     `# Rewrite Analysis Report`,
     ``,
@@ -267,31 +547,43 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
     errors.length > 0 ? `## Errors\n\n${errors.map((e) => `- ${e}`).join("\n")}\n` : "",
     `## Next Steps`,
     ``,
-    `1. Review \`rewrite/migration-contract.json\` for the machine-readable agent contract`,
-    `2. Resolve any decisions in \`rewrite/human-questions.md\` before implementation`,
-    `3. Review \`rewrite/_index.md\` and \`rewrite/component-disposition-matrix.md\` for the migration plan`,
-    `4. Rewrite ready components in the order listed (dependencies first)`,
-    `5. Verify each rewritten component against the validation scenarios in its context doc`,
+    `Open \`README.md\` for the full guided walkthrough.`,
   ].join("\n");
 
-  await fs.writeFile(reportPath, report, "utf-8");
+  await fs.writeFile(layout.reportPath, report, "utf-8");
 
   // Generate Claude Code slash commands + AGENTS.md
   log(config, "Generating AI tool integration files...");
   try {
-    await generateRewriteIntegration(outputDir, analyzed, frameworkInfo, migrationOrder, repoUrl);
-    log(config, `✓ Claude Code commands written to rewrite/.claude/commands/`);
-    log(config, `✓ AGENTS.md written for Codex`);
-    log(config, `✓ migration-contract.json written`);
-    log(config, `✓ component-disposition-matrix.md written`);
-    log(config, `✓ human-questions.md written`);
-    log(config, `✓ AGENT-INTEGRATION.md written`);
-    log(config, `✓ HOW-TO-MIGRATE.md written`);
+    const verificationByName = new Map(verifications.map((v) => [v.component, v]));
+    await generateRewriteIntegration(layout, analyzed, frameworkInfo, migrationOrder, repoUrl, {
+      modernizationContext,
+      verifications: verificationByName,
+    });
+    log(config, `✓ migration-contract.json, AGENTS.md, claude-commands/ written`);
+    log(config, `✓ reverse-engineering written to ${basename(reverseEngineeringArtifacts.reverseEngineeringDir)}/`);
   } catch (e) {
     errors.push(`ai-integration: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  log(config, `\nAnalysis complete. ${analyzed.length} components documented, ${unanalyzed.length} failed.`);
+  try {
+    const { dashboardPath } = await writeDashboard({
+      layout,
+      repoUrl,
+      generatedAt,
+      frameworkInfo,
+      analyses: analyzed,
+      verifications,
+      migrationOrder,
+      errors,
+    });
+    log(config, `✓ dashboard.html written to ${basename(dashboardPath)}`);
+  } catch (e) {
+    errors.push(`dashboard: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
-  return { frameworkInfo, components: analyzed, migrationOrder, unanalyzed, errors, indexPath, reportPath };
+  log(config, `\nAnalysis complete. ${analyzed.length} components documented, ${unanalyzed.length} failed.`);
+  log(config, `Output: ${layout.runDir}`);
+
+  return { frameworkInfo, components: analyzed, migrationOrder, unanalyzed, errors, indexPath: layout.readmePath, reportPath: layout.reportPath };
 }

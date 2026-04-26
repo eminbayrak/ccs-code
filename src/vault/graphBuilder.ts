@@ -1,5 +1,5 @@
 import { promises as fs } from "fs";
-import { join, basename, extname } from "path";
+import { dirname, join, basename, extname } from "path";
 
 type Node = { id: string; label: string; group: string; title: string; keywords: string[]; path: string };
 type Edge = { from: string; to: string; label?: string };
@@ -614,7 +614,7 @@ function filterGroup(group) {
 </body>
 </html>`;
 
-  await fs.mkdir(outputPath.replace(/\/[^/]+$/, ""), { recursive: true });
+  await fs.mkdir(dirname(outputPath), { recursive: true });
   await fs.writeFile(outputPath, html, "utf-8");
   return { nodeCount: nodes.length, edgeCount: edges.length };
 }

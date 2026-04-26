@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import { join } from "path";
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import {
   parseRepoUrl,
   checkRateLimit,
@@ -242,7 +242,7 @@ async function cloneRepoOnce(
 
   onLog?.(`  Cloning ${repoFullName}...`);
   try {
-    execSync(`git clone --depth 1 --single-branch --quiet '${cloneUrl}' '${repoDir}'`, {
+    execFileSync("git", ["clone", "--depth", "1", "--single-branch", "--quiet", cloneUrl, repoDir], {
       env: GIT_ENV,
       stdio: ["ignore", "ignore", "ignore"],
       timeout: 120_000,

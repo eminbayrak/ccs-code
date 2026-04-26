@@ -3,6 +3,7 @@ import { homedir } from "os";
 import { join } from "path";
 import { z } from "zod";
 import { HookEngine } from "./engine.js";
+import { AGENT_TYPES } from "../orchestrator/types.js";
 import type { Hook, HookEventType, HookMatcher, HookHandler } from "./types.js";
 
 // Zod schemas for validation
@@ -37,7 +38,7 @@ const HttpHookSchema = z.object({
 
 const AgentHookSchema = z.object({
     type: z.literal("agent"),
-    agentType: z.enum(["research", "implementation", "review"]),
+    agentType: z.enum(AGENT_TYPES),
     prompt: z.string(),
 });
 
@@ -163,7 +164,7 @@ export function loadHooksFromJson(
  */
 export function loadHooksFromProject(projectRoot: string, engine: HookEngine): void {
     try {
-        const hooksPath = `${projectRoot}/.ccs-hooks.json`;
+        const hooksPath = join(projectRoot, ".ccs-hooks.json");
         const content = readFileSync(hooksPath, "utf-8");
         const hooksConfig = JSON.parse(content);
         loadHooksFromJson(hooksConfig, engine);

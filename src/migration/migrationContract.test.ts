@@ -109,6 +109,21 @@ describe("migration contract artifacts", () => {
     expect(contract.components[1].requiredReviewBeforeImplementation).toContain("target role is human_review");
   });
 
+  test("treats human questions as needs_review when target role is known", () => {
+    const withQuestion: MigrationContractInput = {
+      ...input,
+      migrationOrder: ["FileRouter"],
+      analyses: [{
+        ...input.analyses[0]!,
+        humanQuestions: ["Should this stay one API or split by bounded context?"],
+      }],
+    };
+    const contract = JSON.parse(buildMigrationContract(withQuestion));
+
+    expect(contract.components[0].implementationStatus).toBe("needs_review");
+    expect(contract.components[0].requiredReviewBeforeImplementation).toContain("human questions require review");
+  });
+
   test("builds human and agent-facing guidance", () => {
     const matrix = buildDispositionMatrix(input);
     const questions = buildHumanQuestionsDoc(input);

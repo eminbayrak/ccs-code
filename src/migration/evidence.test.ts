@@ -15,8 +15,14 @@ describe("migration evidence helpers", () => {
     );
 
     expect(excerpt.content).toContain("1 | first");
+    expect(excerpt.content).toContain("4 | fourth");
+    expect(excerpt.content).toContain("TRUNCATED MIDDLE");
     expect(excerpt.truncated).toBe(true);
     expect(excerpt.providedLines).toBeLessThan(excerpt.originalLines);
+    expect(excerpt.segments).toEqual([
+      { startLine: 1, endLine: 1 },
+      { startLine: 4, endLine: 4 },
+    ]);
   });
 
   test("normalizes evidence and rejects unsupported shapes", () => {

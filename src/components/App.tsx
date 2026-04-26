@@ -48,6 +48,15 @@ import {
 } from "../commands/vault";
 import { handleHarvestCommand } from "../commands/harvest";
 import { handleMigrateCommand } from "../commands/migrate";
+import {
+  routeIntent,
+  decisionToSlashCommand,
+  formatRouterAck,
+  formatRouterClarification,
+  isSupportedTargetLanguage,
+  normaliseLang,
+  type RouterDecision,
+} from "../migration/intentRouter";
 import { ScanProgressLog } from "./ScanProgressLog";
 
 // ---------------------------------------------------------------------------
@@ -93,7 +102,8 @@ const SLASH_COMMANDS: SuggestionItem[] = [
   { id: "ask", label: "/ask <question>", description: "Ask a question answered from your wiki knowledge base" },
   { id: "harvest", label: "/harvest", description: "Mine AI chat logs (Claude, Cursor, Copilot) into the vault" },
   { id: "guide", label: "/guide", description: "Open interactive how-to guide with diagrams in browser" },
-  { id: "migrate", label: "/migrate <scan|status|context|verify>", description: "Scan a legacy codebase and generate AI rewrite context" },
+  { id: "setup", label: "/setup", description: "Print Codex / Claude Code MCP setup snippets" },
+  { id: "migrate", label: "/migrate <rewrite|dashboard|reverse-eng|scan|clean>", description: "Analyze a legacy codebase and generate verified migration artifacts" },
   // Core commands
   { id: "clear", label: "/clear", description: "Clear conversation history" },
   { id: "skills", label: "/skills", description: "List loaded skills" },
@@ -183,6 +193,28 @@ function formatError(raw: string): string {
   return raw;
 }
 
+function taskStatusIcon(status: string): string {
+  const s = status.toLowerCase();
+  if (s.includes("error") || s.includes("fail")) return "✗";
+  if (s.includes("complete") || s.includes("done") || s.includes("success")) return "✓";
+  if (s.includes("running") || s.includes("active") || s.includes("processing")) return "●";
+  return "⎿";
+}
+
+function formatAgentTasks(runs: ReturnType<typeof listAgentRuns>): string {
+  if (runs.length === 0) return "No agent tasks yet.";
+
+  return [
+    `### Agent tasks (${runs.length})`,
+    "",
+    ...runs.flatMap((r) => {
+      const status = `${taskStatusIcon(r.status)} ${r.status}`;
+      const firstLine = `- **${r.agentType}** \`${r.id}\` - ${status}`;
+      return r.error ? [firstLine, `  - Error: ${r.error}`] : [firstLine];
+    }),
+  ].join("\n");
+}
+
 const DONE_VERBS = ["Completed", "Finished", "Done", "Processed", "Ready"];
 let doneVerbIdx = 0;
 function nextDoneVerb() {
@@ -221,8 +253,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const [migrateWizardStep, setMigrateWizardStep] = useState(0);
   const [migrateWizardData, setMigrateWizardData] = useState({ repo: "", lang: "csharp" });
 
+  // Pending migration decision: set when the user types a natural-language
+  // request that has a repo but no target language. The next user message
+  // (a single language word, or "cancel") completes or drops it.
+  const [pendingMigration, setPendingMigration] = useState<RouterDecision | null>(null);
+
   // Migration scan live log (accumulated progress lines shown during scan)
   const [migrateLogs, setMigrateLogs] = useState<string[]>([]);
+  const [operationLogs, setOperationLogs] = useState<string[]>([]);
 
   // Environment
   const [instructions, setInstructions] = useState<ConfigFile[]>([]);
@@ -252,6 +290,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       const target = activeInputRef.current;
       if (target === "main") {
         setInput((prev) => prev + text);
+        setInputKey((k) => k + 1);
       } else if (target === "setup") {
         setSetupInput((prev) => prev + text);
       } else if (target === "wizard") {
@@ -460,6 +499,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     setShowWelcome(false);
     // Clear previous operation logs
     setMigrateLogs([]);
+    setOperationLogs([]);
 
     if (!id) return;
 
@@ -476,14 +516,17 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       case "vault": {
         setIsProcessing(true);
         setActiveTools([{ id: "vault", name: "Managing vault", isComplete: false }]);
+        setOperationLogs(["Managing vault"]);
         processingStartRef.current = Date.now();
         handleVaultCommand(args, process.cwd()).then((output) => {
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
@@ -491,37 +534,41 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       case "sync": {
         setIsProcessing(true);
         setActiveTools([{ id: "sync", name: "Syncing sources", isComplete: false }]);
+        setOperationLogs(["Syncing sources"]);
         processingStartRef.current = Date.now();
         handleSyncCommand(args, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Syncing sources...")]);
         break;
       }
       case "ingest": {
         setIsProcessing(true);
         setActiveTools([{ id: "ingest", name: "Processing raw files", isComplete: false }]);
+        setOperationLogs(["Scanning raw inbox", "Processing raw files"]);
         processingStartRef.current = Date.now();
         handleIngestCommand(args, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Scanning raw/ inbox...")]);
         break;
       }
       case "graph": {
@@ -547,10 +594,11 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         break;
       }
       case "index": {
+        setOperationLogs(["Rebuilding master index"]);
         handleIndexCommand(args, process.cwd()).then((output) => {
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setOperationLogs([]);
         });
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Rebuilding master index...")]);
         break;
       }
       case "ask": {
@@ -562,12 +610,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         setShowWelcome(false);
         setIsProcessing(true);
         setActiveTools([{ id: "1", name: `Searching wiki for: ${question}`, isComplete: false }]);
+        setOperationLogs([`Searching wiki for: ${question}`]);
         processingStartRef.current = Date.now();
         handleAskCommand(question, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setActiveTools([]);
           setIsProcessing(false);
+          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         });
         break;
@@ -575,42 +625,47 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       case "harvest": {
         setIsProcessing(true);
         setActiveTools([{ id: "harvest", name: "Mining AI logs", isComplete: false }]);
+        setOperationLogs(["Mining local AI histories", "Reading Claude, Cursor, and VS Code logs"]);
         processingStartRef.current = Date.now();
         handleHarvestCommand(args, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Mining local AI histories (Claude, Cursor, VS Code)...")]);
         break;
       }
       case "guide": {
+        setOperationLogs(["Generating guide"]);
         handleGuideCommand().then((output) => {
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setOperationLogs([]);
         });
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Generating guide…")]);
         break;
       }
       case "enrich": {
         setIsProcessing(true);
         setActiveTools([{ id: "enrich", name: "AI Analysis", isComplete: false }]);
+        setOperationLogs([`Enriching wiki with ${activeModel}`, "Analyzing pages"]);
         processingStartRef.current = Date.now();
-        setMessages((prev) => [...prev, createUIMessage("assistant", `Enriching wiki with ${activeModel}...\nThis runs AI analysis on each page — may take a few minutes.`)]);
         handleEnrichCommand(args, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
+          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
@@ -679,13 +734,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       }
       case "tasks": {
         const runs = listAgentRuns();
-        const content = runs.length === 0
-          ? "No agent tasks yet."
-          : [
-            `Agent tasks (${runs.length}):`,
-            ...runs.map((r) => `• ${r.id} | ${r.agentType} | ${r.status}${r.error ? ` | error: ${r.error}` : ""}`),
-          ].join("\n");
-        setMessages((prev) => [...prev, createUIMessage("assistant", content)]);
+        setMessages((prev) => [...prev, createUIMessage("assistant", formatAgentTasks(runs))]);
         break;
       }
       case "mode": {
@@ -777,6 +826,70 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       case "exit":
         exit();
         break;
+      case "setup":
+      case "mcp-setup": {
+        const setupOutput = [
+          "## Wire Codex or Claude Code to CCS",
+          "",
+          "CCS exposes a local MCP server that lets your coding agent read migration artifacts (ready work, verification, business logic, system graph, dependency impact) directly. Start it with:",
+          "",
+          "```",
+          "ccs-code mcp",
+          "```",
+          "",
+          "### Codex CLI / Codex Desktop",
+          "",
+          "Register CCS once. Codex remembers it across sessions:",
+          "",
+          "```",
+          "codex mcp add ccs -- ccs-code mcp",
+          "```",
+          "",
+          "Then in Codex you can ask things like:",
+          "",
+          "> Use the `ccs` MCP. Call `ccs_list_ready_components`, then for the first ready component call `ccs_get_component_context` and `ccs_get_verification_report`. Stop and report if `implementationStatus` is `needs_review`.",
+          "",
+          "### Claude Code",
+          "",
+          "Add CCS to your project's `.mcp.json`:",
+          "",
+          "```json",
+          "{",
+          "  \"mcpServers\": {",
+          "    \"ccs\": {",
+          "      \"command\": \"ccs-code\",",
+          "      \"args\": [\"mcp\"]",
+          "    }",
+          "  }",
+          "}",
+          "```",
+          "",
+          "Then call any of these tools from Claude Code:",
+          "",
+          "- `ccs_list_ready_components` — components that passed verification and are safe for an agent to implement",
+          "- `ccs_get_component_context` — full source-backed context for one component",
+          "- `ccs_get_verification_report` — per-claim audit and trust verdict",
+          "- `ccs_get_human_questions` — unresolved architecture decisions",
+          "- `ccs_get_validation_contract` — gates, acceptance criteria, validation scenarios",
+          "- `ccs_get_architecture_baseline` — target landing-zone profile",
+          "- `ccs_get_business_logic` — reverse-engineered rules and contracts",
+          "- `ccs_get_system_graph` — components, files, packages, target roles, edges",
+          "- `ccs_get_dependency_impact` — what a change touches and what to retest",
+          "- `ccs_get_preflight_readiness` — readiness gates before implementation",
+          "",
+          "### Recommended workflow",
+          "",
+          "1. Run `/migrate rewrite --repo <url> --to <language> --context docs/your-baseline.md --yes`",
+          "2. Open `<repo-slug>/dashboard.html` for the human view, or `<repo-slug>/README.md` for the markdown entry point",
+          "3. Review `verification-summary.md` and resolve `human-questions.md` before coding",
+          "4. Hand the work to Codex or Claude Code via MCP — they only pick up `ready` components",
+          "5. After implementation, validate against `validationScenarios` from the contract",
+          "",
+          "_Run `/guide` for the full interactive walkthrough._",
+        ].join("\n");
+        setMessages((prev) => [...prev, createUIMessage("assistant", setupOutput)]);
+        break;
+      }
       default:
         setMessages((prev) => [...prev, createUIMessage("assistant", `Unknown command: /${id}`)]);
         break;
@@ -848,7 +961,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   // ---------------------------------------------------------------------------
 
   const handleSubmit = useCallback(
-    (value: string) => {
+    async (value: string) => {
       // If a suggestion is highlighted, Tab/Enter should apply it, not submit
       if (suggestionMode && suggestions.length > 0) {
         applySuggestion(suggestions[selectedIdx]);
@@ -869,6 +982,79 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       // Plain slash commands typed and submitted
       if (trimmed.startsWith("/")) {
         executeSlashCommand(trimmed.slice(1));
+        setInput("");
+        return;
+      }
+
+      // ----- Pending migration: user is answering a "what target language?" prompt -----
+      if (pendingMigration) {
+        const reply = trimmed.toLowerCase();
+        if (reply === "cancel" || reply === "no" || reply === "stop") {
+          setPendingMigration(null);
+          setMessages((prev) => [
+            ...prev,
+            createUIMessage("user", trimmed),
+            createUIMessage("assistant", "Cancelled. No migration started."),
+          ]);
+          setInput("");
+          return;
+        }
+        // Treat short replies as a target-language answer.
+        const candidate = trimmed.split(/\s+/)[0] ?? "";
+        if (candidate && isSupportedTargetLanguage(candidate)) {
+          const lang = normaliseLang(candidate);
+          const completed: RouterDecision = {
+            ...pendingMigration,
+            targetLanguage: lang,
+            targetLanguageWasInferred: false,
+          };
+          const command = decisionToSlashCommand(completed);
+          setPendingMigration(null);
+          setMessages((prev) => [
+            ...prev,
+            createUIMessage("user", trimmed),
+            createUIMessage("assistant", formatRouterAck(completed)),
+          ]);
+          setInput("");
+          if (command) executeSlashCommand(command);
+          return;
+        }
+        setMessages((prev) => [
+          ...prev,
+          createUIMessage("user", trimmed),
+          createUIMessage(
+            "assistant",
+            "I didn't recognise that as a target language. Reply with one of: `csharp`, `typescript`, `python`, `java`, `go`, `ruby`, `rust`, `php`, `swift`, `kotlin`. Or type `cancel` to drop it.",
+          ),
+        ]);
+        setInput("");
+        return;
+      }
+
+      // ----- Fresh natural-language input: try to detect migration intent -----
+      const migrationDecision = await routeIntent(trimmed);
+      if (migrationDecision) {
+        const command = decisionToSlashCommand(migrationDecision);
+        if (command) {
+          // High enough confidence — auto-execute. Show a one-line ack so the
+          // user can see what we ran on their behalf.
+          setMessages((prev) => [
+            ...prev,
+            createUIMessage("user", trimmed),
+            createUIMessage("assistant", formatRouterAck(migrationDecision)),
+          ]);
+          setInput("");
+          executeSlashCommand(command);
+          return;
+        }
+        // Repo is clear but target language is missing — ask one short question
+        // and stash the partial decision so the next reply completes it.
+        setPendingMigration(migrationDecision);
+        setMessages((prev) => [
+          ...prev,
+          createUIMessage("user", trimmed),
+          createUIMessage("assistant", formatRouterClarification(migrationDecision)),
+        ]);
         setInput("");
         return;
       }
@@ -938,6 +1124,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     setIsStalled(false);
     setCompletionLabel(null);
     setActiveTools([{ id: "1", name: `Sending to ${provider.name}...`, isComplete: false }]);
+    setOperationLogs([`Sending to ${provider.name}`, "Waiting for response"]);
     processingStartRef.current = Date.now();
 
     const stallTimer = setTimeout(() => setIsStalled(true), 10_000);
@@ -967,14 +1154,17 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             isComplete: true,
           })),
         );
+        setOperationLogs(output.usedTools.map((toolName) => `✓ Executed ${toolName}`));
       } else {
         setActiveTools((t) => t.map((tool) => ({ ...tool, isComplete: true })));
+        setOperationLogs(["✓ Response ready"]);
       }
 
       const elapsed = formatElapsed(Date.now() - processingStartRef.current);
       setTimeout(() => {
         setMessages((prev) => [...prev, createUIMessage("assistant", output.response)]);
         setActiveTools([]);
+        setOperationLogs([]);
         setIsProcessing(false);
         setIsStalled(false);
         setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
@@ -984,6 +1174,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       const elapsed = formatElapsed(Date.now() - processingStartRef.current);
       const errorMsg = e instanceof Error ? e.message : String(e);
       setActiveTools([]);
+      setOperationLogs([]);
       setIsProcessing(false);
       setIsStalled(false);
       setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
@@ -1004,11 +1195,22 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     setIsProcessing(false);
     setIsStalled(false);
     setActiveTools([]);
+    setOperationLogs([]);
     setMigrateLogs(prev => [...prev, "✗ Operation cancelled by user."]);
   }, [isProcessing]);
 
   // Listen for global keys
   useInput((input, key) => {
+    if ((input === "u" && key.ctrl) || (input === "l" && key.ctrl)) {
+      if (isSetupMode) {
+        setSetupInput("");
+        return;
+      }
+      setInput("");
+      setInputKey((k) => k + 1);
+      return;
+    }
+
     if (key.escape) {
       cancelOperation();
     }
@@ -1108,7 +1310,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
         <Box flexDirection="column" marginBottom={1}>
           <Text>Where should we store your knowledge base (vault)?</Text>
-          <Text dimColor>(e.g. ./vault or /Users/me/Documents/knowledge)</Text>
+          <Text dimColor>(e.g. ./vault, ~/Documents/knowledge, or C:\Users\me\Documents\knowledge)</Text>
         </Box>
 
         <Box flexDirection="row" gap={1}>
@@ -1175,10 +1377,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         )}
 
         {/* Active Operations (Scan, Ingest, etc.) */}
-        {(isProcessing || migrateLogs.length > 0) && (
+        {(isProcessing || migrateLogs.length > 0 || operationLogs.length > 0) && (
           <Box flexDirection="column" marginTop={1} paddingLeft={1}>
-            <ScanProgressLog logs={migrateLogs} isExpanded={areLogsExpanded} />
-            {isProcessing && <CCSSpinner isStalled={isStalled} />}
+            <ScanProgressLog
+              logs={migrateLogs.length > 0 ? migrateLogs : operationLogs}
+              isExpanded={areLogsExpanded}
+              showSpinnerForLast={isProcessing}
+            />
+            {isProcessing && migrateLogs.length > 0 && <CCSSpinner isStalled={isStalled} />}
           </Box>
         )}
       </Box>
@@ -1224,6 +1430,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
               </Box>
             )}
           </Box>
+          {input !== "" && !isProcessing && (
+            <Text dimColor>ctrl+u clear</Text>
+          )}
         </Box>
 
         {/* Divider below input */}

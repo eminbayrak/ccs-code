@@ -6,9 +6,16 @@ import { analyze } from "../migration/rewriteTracer.js";
 import { loadPlugins, listPlugins } from "../migration/pluginLoader.js";
 import * as statusTracker from "../migration/statusTracker.js";
 import { loadConfig } from "../llm/index.js";
-import { routeIntent, formatRouterConfirmation } from "../migration/intentRouter.js";
+import {
+  routeIntent,
+  decisionToSlashCommand,
+  formatRouterAck,
+  formatRouterClarification,
+} from "../migration/intentRouter.js";
 import { analyzeDbStatic, runLiveInterrogation, renderStaticDbSection } from "../migration/dbInterrogator.js";
 import { promises as fs } from "fs";
+import { checkCodexCliSetup } from "../llm/providers/codexCli.js";
+import { openInDefaultBrowser } from "../utils/platform.js";
 
 // ---------------------------------------------------------------------------
 // Resolve the migration output directory.
@@ -27,14 +34,16 @@ async function getMigrationDir(): Promise<string> {
 // Pre-flight validation — surface missing credentials before starting a scan
 // ---------------------------------------------------------------------------
 
-type SetupIssue = { severity: "error" | "warn"; message: string };
+export type SetupIssue = { severity: "error" | "warn"; message: string };
 
-async function validateSetup(requireGithub: boolean): Promise<SetupIssue[]> {
+export async function validateSetup(requireGithub: boolean): Promise<SetupIssue[]> {
   const issues: SetupIssue[] = [];
   const config = await loadConfig();
 
   // Check Provider-specific keys
-  if (config.provider === "anthropic" && !process.env.CCS_ANTHROPIC_API_KEY) {
+  if (config.provider === "codex_cli") {
+    issues.push(...await checkCodexCliSetup(config.codexCommand));
+  } else if (config.provider === "anthropic" && !process.env.CCS_ANTHROPIC_API_KEY) {
     issues.push({
       severity: "error",
       message: "CCS_ANTHROPIC_API_KEY is not set. Get a key at https://console.anthropic.com/",
@@ -373,6 +382,8 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
   let repoUrl = "";
   let targetLanguage = "python";
   let sourceFrameworkHint = "";
+  const contextPaths: string[] = [];
+  let noContext = false;
   let autoConfirm = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -380,6 +391,10 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
     if ((a === "--repo"   || a === "-r") && args[i + 1]) repoUrl             = args[++i] ?? "";
     if ((a === "--to"     || a === "-t") && args[i + 1]) targetLanguage       = args[++i] ?? targetLanguage;
     if ((a === "--from"   || a === "-f") && args[i + 1]) sourceFrameworkHint  = args[++i] ?? "";
+    if ((a === "--context" || a === "--context-doc" || a === "--profile" || a === "--architecture-profile") && args[i + 1]) {
+      contextPaths.push(args[++i] ?? "");
+    }
+    if (a === "--no-context") noContext = true;
     if (a === "--yes" || a === "-y") autoConfirm = true;
   }
 
@@ -393,22 +408,22 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       "Options:",
       "  --to <language>     Target language: python, go, typescript, java (default: python)",
       "  --from <framework>  Override auto-detected source framework: aspnet-core, spring-boot, express",
+      "  --context <path>    Load a business/use-case or architecture context doc (repeatable)",
+      "  --no-context        Disable all context docs, including auto-discovered workspace docs",
       "  --yes               Skip cost confirmation and proceed immediately",
       "",
       "Examples:",
       "  /migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --yes",
-      "  /migrate rewrite --repo https://github.com/myorg/SpringApp --to typescript --from spring-boot --yes",
+      "  /migrate rewrite --repo https://github.com/myorg/SpringApp --to typescript --from spring-boot --context docs/modern-use-case.md --yes",
       "",
-      "Output (in migration/rewrite/):",
-      "  context/<Component>.md   — per-component migration context docs",
+      "Output (under migration/<repo-name>/):",
+      "  README.md                 — start here",
+      "  dashboard.html            — static web UI for the run",
       "  migration-contract.json   — machine-readable migration contract for agents",
-      "  component-disposition-matrix.md — target architecture landing-zone decisions",
-      "  human-questions.md        — decisions to resolve before agent implementation",
-      "  .claude/commands/        — Claude Code slash commands (copy to your new project)",
-      "  AGENTS.md                — Codex agent context file",
-      "  AGENT-INTEGRATION.md     — Codex/Claude/MCP integration guide",
-      "  HOW-TO-MIGRATE.md        — step-by-step execution guide",
-      "  _index.md                — full migration knowledge base",
+      "  components/<Component>.md — per-component context docs",
+      "  architecture-context/     — copied --context documents, when provided",
+      "  claude-commands/          — optional Claude Code commands",
+      "  AGENTS.md                 — Codex/Claude agent context",
     ].join("\n");
   }
 
@@ -420,6 +435,8 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       repoUrl,
       targetLanguage,
       sourceFrameworkHint: sourceFrameworkHint || undefined,
+      contextPaths: noContext ? [] : contextPaths,
+      noContext,
       outputDir: migrationDir,
       githubConfig: {
         org: repoUrl.replace(/https?:\/\/[^/]+\//, "").split("/")[0] ?? "",
@@ -438,13 +455,14 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
 
     // Cost-preview abort
     if (!result.indexPath && !result.reportPath && result.components.length === 0 && result.errors.length === 0) {
+      const contextReplay = noContext ? " --no-context" : contextPaths.map((path) => ` --context ${path}`).join("");
       return [
         "### Cost Estimate",
         "",
         ...logs,
         "",
         `Add \`--yes\` to proceed:`,
-        `  /migrate rewrite --repo ${repoUrl} --to ${targetLanguage} --yes`,
+        `  /migrate rewrite --repo ${repoUrl} --to ${targetLanguage}${contextReplay} --yes`,
       ].join("\n");
     }
 
@@ -460,30 +478,181 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       summary.push(``, `⚠ **Failed:** ${result.unanalyzed.join(", ")}`);
     }
 
-    const migDir = await getMigrationDir();
+    const { repoSlug } = await import("../migration/runLayout.js");
+    const slug = repoSlug(repoUrl);
     summary.push(
       ``,
-      `### Generated Files`,
-      `- **Context docs:**      \`${migDir}/rewrite/context/\``,
-      `- **Migration contract:** \`${migDir}/rewrite/migration-contract.json\``,
-      `- **Disposition matrix:** \`${migDir}/rewrite/component-disposition-matrix.md\``,
-      `- **Human questions:**   \`${migDir}/rewrite/human-questions.md\``,
-      `- **Claude Code cmds:**  \`${migDir}/rewrite/.claude/commands/\``,
-      `- **Codex context:**     \`${migDir}/rewrite/AGENTS.md\``,
-      `- **Agent integration:** \`${migDir}/rewrite/AGENT-INTEGRATION.md\``,
-      `- **Execution guide:**   \`${migDir}/rewrite/HOW-TO-MIGRATE.md\``,
-      `- **Knowledge base:**    \`${migDir}/rewrite/_index.md\``,
+      `**Output folder:** \`${slug}/\` (under your migration root)`,
       ``,
-      `### Next Steps`,
-      `1. Review \`rewrite/migration-contract.json\` and \`rewrite/human-questions.md\``,
-      `2. Scaffold your new **${result.frameworkInfo.targetFramework}** project`,
-      `3. Copy \`rewrite/.claude/\` into your new project root`,
-      `4. Run: \`/project:rewrite-${result.migrationOrder[0] ?? "FirstComponent"}\``,
+      `### Open these first`,
+      `- \`README.md\` — guided walkthrough, trust posture, table of contents`,
+      `- \`dashboard.html\` — static web UI with graph, markdown, and JSON views`,
+      `- \`verification-summary.md\` — trust gate (which components are ready)`,
+      `- \`human-questions.md\` — open architecture decisions`,
+      `- \`migration-contract.json\` — machine-readable contract for Codex / Claude / MCP`,
+      ``,
+      `### Folder map`,
+      `\`\`\``,
+      `${slug}/`,
+      `  README.md                       ← start here`,
+      `  dashboard.html                  ← static web UI`,
+      `  AGENTS.md                       ← agent entry point`,
+      `  migration-contract.json`,
+      `  architecture-baseline.md`,
+      `  preflight-readiness.md`,
+      `  component-disposition-matrix.md`,
+      `  human-questions.md`,
+      `  verification-summary.md`,
+      `  system-graph.json / .mmd`,
+      `  components/<Name>.md            ← per-component context + verification`,
+      `  reverse-engineering/`,
+      `  architecture-context/           ← copies of your --context docs`,
+      `  claude-commands/`,
+      `  logs/report.md`,
+      `\`\`\``,
+      ``,
+      `### Next steps`,
+      `1. Open \`README.md\` and skim the trust posture.`,
+      `2. Resolve anything in \`human-questions.md\`.`,
+      `3. Hand the run folder to Codex or Claude Code via MCP — run \`/setup\` for wiring.`,
+      `4. Implement only \`ready\` components; first up: \`${result.migrationOrder[0] ?? "<first>"}\`.`,
     );
 
     return summary.join("\n");
   } catch (e) {
     return `### Rewrite Analysis Failed\n\n${e instanceof Error ? e.message : String(e)}\n\nLogs:\n${logs.join("\n")}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /migrate reverse-eng --repo <url> [--to <language>] [--context <file>] [--yes]
+// Generates persisted reverse-engineering artifacts for agents and humans.
+// ---------------------------------------------------------------------------
+
+async function handleReverseEng(args: string[], onProgress?: (msg: string) => void): Promise<string> {
+  const setupIssues = await validateSetup(true);
+  if (setupIssues.length > 0) {
+    return [
+      "### Setup Required",
+      "",
+      ...setupIssues.map((i) => `${i.severity === "error" ? "✗" : "⚠"} ${i.message}`),
+    ].join("\n");
+  }
+
+  let repoUrl = "";
+  let targetLanguage = "csharp";
+  let sourceFrameworkHint = "";
+  const contextPaths: string[] = [];
+  let noContext = false;
+  let autoConfirm = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === "--repo" || a === "-r") && args[i + 1]) repoUrl = args[++i] ?? "";
+    if ((a === "--to" || a === "-t") && args[i + 1]) targetLanguage = args[++i] ?? targetLanguage;
+    if ((a === "--from" || a === "-f") && args[i + 1]) sourceFrameworkHint = args[++i] ?? "";
+    if ((a === "--context" || a === "--context-doc" || a === "--profile" || a === "--architecture-profile") && args[i + 1]) {
+      contextPaths.push(args[++i] ?? "");
+    }
+    if (a === "--no-context") noContext = true;
+    if (a === "--yes" || a === "-y") autoConfirm = true;
+  }
+
+  if (!repoUrl) {
+    return [
+      "Usage: /migrate reverse-eng --repo <github-url> [options]",
+      "",
+      "Reverse-engineers a legacy codebase into reusable business logic and system graph artifacts.",
+      "This does not write target application code.",
+      "",
+      "Options:",
+      "  --to <language>     Target language/platform hint for architecture decisions (default: csharp)",
+      "  --from <framework>  Override auto-detected source framework",
+      "  --context <path>    Load a business/use-case or architecture context doc (repeatable)",
+      "  --no-context        Disable all context docs, including auto-discovered workspace docs",
+      "  --yes               Skip cost confirmation and proceed immediately",
+      "",
+      "Examples:",
+      "  /migrate reverse-eng --repo https://github.com/myorg/LegacyApp --to csharp --context docs/modern-use-case.md --yes",
+      "  /migrate reverse-eng --repo https://github.com/gothinkster/node-express-realworld-example-app --to csharp --no-context --yes",
+      "",
+      "Output (under migration/<repo-name>/):",
+      "  reverse-engineering/reverse-engineering-details.md — human-readable reverse-engineering report",
+      "  reverse-engineering/business-logic.json            — machine-readable business rules and contracts",
+      "  system-graph.json                                  — machine-readable component dependency graph",
+      "  system-graph.mmd                                   — Mermaid dependency diagram",
+    ].join("\n");
+  }
+
+  const migrationDir = await getMigrationDir();
+  const logs: string[] = [];
+
+  try {
+    const result = await analyze({
+      repoUrl,
+      targetLanguage,
+      sourceFrameworkHint: sourceFrameworkHint || undefined,
+      contextPaths: noContext ? [] : contextPaths,
+      noContext,
+      outputDir: migrationDir,
+      githubConfig: {
+        org: repoUrl.replace(/https?:\/\/[^/]+\//, "").split("/")[0] ?? "",
+        token: process.env.CCS_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GITHUB_PRIVATE_TOKEN,
+      },
+      onProgress: (msg) => {
+        logs.push(msg);
+        onProgress?.(msg);
+      },
+      onCostPreview: async (preview) => {
+        logs.push(preview);
+        if (autoConfirm) { logs.push("Auto-confirmed (--yes)."); return true; }
+        return false;
+      },
+    });
+
+    if (!result.indexPath && !result.reportPath && result.components.length === 0 && result.errors.length === 0) {
+      const contextReplay = noContext ? " --no-context" : contextPaths.map((path) => ` --context ${path}`).join("");
+      return [
+        "### Cost Estimate",
+        "",
+        ...logs,
+        "",
+        `Add \`--yes\` to proceed:`,
+        `  /migrate reverse-eng --repo ${repoUrl} --to ${targetLanguage}${contextReplay} --yes`,
+      ].join("\n");
+    }
+
+    const { repoSlug } = await import("../migration/runLayout.js");
+    const slug = repoSlug(repoUrl);
+    const summary = [
+      "## ✓ Reverse Engineering Complete",
+      "",
+      `**Framework:** ${result.frameworkInfo.sourceFramework} (${result.frameworkInfo.sourceLanguage})`,
+      `**Components analyzed:** ${result.components.length}`,
+      `**Graph order:** ${result.migrationOrder.join(" → ") || "none"}`,
+      "",
+      `**Output folder:** \`${slug}/\` (under your migration root)`,
+      "",
+      "### What's inside",
+      "- `README.md` — start here",
+      "- `reverse-engineering/reverse-engineering-details.md` — extracted behavior",
+      "- `reverse-engineering/business-logic.json` — machine-readable rules and contracts",
+      "- `system-graph.mmd` — dependency diagram",
+      "- `system-graph.json` — graph data",
+      "",
+      "### Next Steps",
+      "1. Open `README.md` for a guided walkthrough",
+      "2. Review `system-graph.mmd` for dependency shape",
+      "3. Ask Codex or Claude Code via MCP for graph impact and business logic lookup",
+    ];
+
+    if (result.unanalyzed.length > 0) {
+      summary.splice(5, 0, "", `⚠ **Failed:** ${result.unanalyzed.join(", ")}`);
+    }
+
+    return summary.join("\n");
+  } catch (e) {
+    return `### Reverse Engineering Failed\n\n${e instanceof Error ? e.message : String(e)}\n\nLogs:\n${logs.join("\n")}`;
   }
 }
 
@@ -680,6 +849,162 @@ async function handleDb(args: string[], onProgress?: (msg: string) => void): Pro
 }
 
 // ---------------------------------------------------------------------------
+// /migrate clean [<slug> | --all] [--yes]
+// Removes generated run folders so the user can start fresh after we changed
+// the output layout, or just to keep the migration root tidy.
+// ---------------------------------------------------------------------------
+
+async function handleClean(args: string[]): Promise<string> {
+  const { promises: fs } = await import("fs");
+  const { join } = await import("path");
+  const { repoSlug } = await import("../migration/runLayout.js");
+
+  const all = args.includes("--all");
+  const yes = args.includes("--yes") || args.includes("-y");
+  const target = args.find((a) => !a.startsWith("--") && a !== "-y");
+
+  const migrationDir = await getMigrationDir();
+  let entries: string[] = [];
+  try { entries = await fs.readdir(migrationDir); } catch { /* dir missing */ }
+
+  // A "run folder" is anything inside migration/ that contains
+  // migration-contract.json or the legacy "rewrite" subdir.
+  const runs: Array<{ name: string; path: string; legacy: boolean }> = [];
+  for (const name of entries) {
+    if (name.startsWith(".")) continue;
+    const path = join(migrationDir, name);
+    let isDir = false;
+    try { isDir = (await fs.stat(path)).isDirectory(); } catch { /* skip */ }
+    if (!isDir) continue;
+    let exists = false;
+    try { await fs.stat(join(path, "migration-contract.json")); exists = true; } catch { /* none */ }
+    if (exists) { runs.push({ name, path, legacy: name === "rewrite" }); continue; }
+    // Legacy <migDir>/rewrite/migration-contract.json
+    let legacyExists = false;
+    try { await fs.stat(join(path, "rewrite", "migration-contract.json")); legacyExists = true; } catch { /* none */ }
+    if (legacyExists) runs.push({ name, path, legacy: true });
+  }
+
+  if (runs.length === 0) {
+    return `Migration root \`${migrationDir}\` has no rewrite output folders. Nothing to clean.`;
+  }
+
+  // List mode: no target, no --all, no --yes
+  if (!target && !all) {
+    const lines = [
+      `### Run folders under \`${migrationDir}\``,
+      "",
+      ...runs.map((r) => `- \`${r.name}\`${r.legacy ? " _(legacy layout)_" : ""}`),
+      "",
+      "Remove one with `/migrate clean <name> --yes`, or all of them with `/migrate clean --all --yes`.",
+    ];
+    return lines.join("\n");
+  }
+
+  // Resolve which folder(s) to remove.
+  let toRemove: typeof runs = [];
+  if (all) {
+    toRemove = runs;
+  } else if (target) {
+    const slug = repoSlug(target);
+    const match = runs.find((r) => r.name === target || r.name === slug);
+    if (!match) {
+      return `No run folder named \`${target}\`. Run \`/migrate clean\` to list available folders.`;
+    }
+    toRemove = [match];
+  }
+
+  if (!yes) {
+    return [
+      "### Confirm deletion",
+      "",
+      `This will permanently remove ${toRemove.length} folder(s):`,
+      ...toRemove.map((r) => `- \`${r.path}\``),
+      "",
+      "Re-run with `--yes` to actually delete.",
+    ].join("\n");
+  }
+
+  const removed: string[] = [];
+  const failures: string[] = [];
+  for (const r of toRemove) {
+    try {
+      await fs.rm(r.path, { recursive: true, force: true });
+      removed.push(r.name);
+    } catch (e) {
+      failures.push(`${r.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return [
+    "### Clean complete",
+    "",
+    removed.length > 0 ? `**Removed:** ${removed.map((n) => `\`${n}\``).join(", ")}` : "**Removed:** none",
+    failures.length > 0 ? `**Failed:**\n${failures.map((f) => `- ${f}`).join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /migrate dashboard [<run-folder-or-repo-url>] [--open]
+// Regenerates dashboard.html for an existing repo-scoped run folder.
+// ---------------------------------------------------------------------------
+
+async function handleDashboard(args: string[]): Promise<string> {
+  const { promises: fs } = await import("fs");
+  const { join, resolve } = await import("path");
+  const { repoSlug } = await import("../migration/runLayout.js");
+  const { writeDashboardFromRunDir } = await import("../migration/webDashboard.js");
+  const { resolveRewriteDir } = await import("../mcp/artifactReader.js");
+
+  const shouldOpen = args.includes("--open") || args.includes("-o");
+  const target = args.find((a) => !a.startsWith("-"));
+  const migrationDir = await getMigrationDir();
+
+  let runDir = "";
+  if (target) {
+    const explicit = resolve(process.cwd(), target);
+    const slug = repoSlug(target);
+    const candidates = [
+      explicit,
+      join(migrationDir, target),
+      join(migrationDir, slug),
+    ];
+    for (const candidate of candidates) {
+      try {
+        await fs.stat(join(candidate, "migration-contract.json"));
+        runDir = candidate;
+        break;
+      } catch { /* try next */ }
+    }
+    if (!runDir) {
+      return `No migration run found for \`${target}\`. Run \`/migrate clean\` to list existing run folders.`;
+    }
+  } else {
+    runDir = await resolveRewriteDir(migrationDir);
+  }
+
+  const { dashboardPath } = await writeDashboardFromRunDir(runDir);
+  if (shouldOpen) {
+    try {
+      await openInDefaultBrowser(dashboardPath);
+    } catch {
+      // Opening is a convenience only; still return the path.
+    }
+  }
+
+  return [
+    "## ✓ Dashboard Ready",
+    "",
+    `**Run folder:** \`${runDir}\``,
+    `**Dashboard:** \`${dashboardPath}\``,
+    "",
+    shouldOpen
+      ? "Opened in your default browser."
+      : "Open `dashboard.html` in your browser, or run `/migrate dashboard --open`.",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Main command handler — exported for App.tsx
 // ---------------------------------------------------------------------------
 
@@ -693,6 +1018,9 @@ export async function handleMigrateCommand(
   switch (subcommand) {
     case "scan":    return handleScan(rest, onProgress);
     case "rewrite": return handleRewrite(rest, onProgress);
+    case "reverse-eng":
+    case "reverse":
+      return handleReverseEng(rest, onProgress);
     case "status":  return handleStatus();
     case "context": return handleContext(rest);
     case "verify":  return handleVerify(rest);
@@ -700,14 +1028,31 @@ export async function handleMigrateCommand(
     case "rescan":  return handleRescan(rest);
     case "plugin":  return handlePlugin(rest);
     case "db":      return handleDb(rest, onProgress);
+    case "clean":   return handleClean(rest);
+    case "dashboard":
+    case "ui":
+      return handleDashboard(rest);
     default: {
-      // Feature 1: Semantic intent routing — detect natural language migration requests
+      // Feature 1: Semantic intent routing — detect natural language migration
+      // requests. When the router has enough info we run the underlying
+      // handler directly so the user never has to re-type the command. When
+      // it's partial we surface a single clarifying question.
       const fullInput = [subcommand, ...rest].filter(Boolean).join(" ");
       if (fullInput.trim()) {
         try {
           const decision = await routeIntent(fullInput);
           if (decision) {
-            return formatRouterConfirmation(decision);
+            const command = decisionToSlashCommand(decision);
+            if (command) {
+              const ack = formatRouterAck(decision);
+              if (onProgress) onProgress(ack);
+              const inferredArgs = command.split(/\s+/).slice(1); // drop the leading "migrate"
+              const inferredSub = inferredArgs.shift() ?? "rewrite";
+              const handler = inferredSub === "scan" ? handleScan : handleRewrite;
+              const result = await handler(inferredArgs, onProgress);
+              return `${ack}\n\n${result}`;
+            }
+            return formatRouterClarification(decision);
           }
         } catch { /* routing is best-effort — fall through to help text */ }
       }
@@ -723,7 +1068,9 @@ export async function handleMigrateCommand(
         "",
         "**Subcommands:**",
         "  `/migrate scan --repo <url> --lang <language> [--yes]`       — scan external SOAP services called by a Node.js repo",
-        "  `/migrate rewrite --repo <url> --to <language> [--yes]`      — analyze a full codebase for framework-to-framework migration",
+        "  `/migrate reverse-eng --repo <url> [--to <language>] [--context <file>|--no-context] [--yes]` — persist reverse-engineering and graph artifacts",
+        "  `/migrate rewrite --repo <url> --to <language> [--context <file>|--no-context] [--yes]` — analyze a full codebase for framework-to-framework migration",
+        "  `/migrate dashboard [run-folder|repo-url] [--open]`              — generate/open the static web UI for a migration run",
         "  `/migrate db --service <name> [--yes]`                       — live database schema extraction (read-only, user-approved)",
         "  `/migrate status`                                              — show migration progress table",
         "  `/migrate context <ServiceName>`                               — print a service context doc",
@@ -734,7 +1081,10 @@ export async function handleMigrateCommand(
         "",
         "**Examples:**",
         "  `/migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp --yes`",
-        "  `/migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --yes`",
+        "  `/migrate reverse-eng --repo https://github.com/myorg/LegacyApp --to csharp --context docs/modern-use-case.md --yes`",
+        "  `/migrate rewrite --repo https://github.com/gothinkster/node-express-realworld-example-app --to csharp --no-context --yes`",
+        "  `/migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --context docs/modern-use-case.md --yes`",
+        "  `/migrate dashboard --open`",
         "  `/migrate db --service OrderManager --yes`",
       ].join("\n");
     }

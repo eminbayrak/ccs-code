@@ -2,11 +2,12 @@ import { promises as fs } from "fs";
 import { join } from "path";
 import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
 import type { ServiceAnalysis } from "./analyzer.js";
+import type { ModernizationContext } from "./modernizationContext.js";
+import type { ComponentVerification } from "./rewriteVerifier.js";
+import type { RunLayout } from "./runLayout.js";
 import { compressSourceFile, formatCompressionStats } from "./sourceCompressor.js";
 import {
-  buildAgentIntegrationGuide,
   buildDispositionMatrix,
-  buildHowToMigrate,
   buildHumanQuestionsDoc,
   buildMigrationContract,
 } from "./migrationContract.js";
@@ -384,18 +385,21 @@ export function inferTargetFilePath(
 // ---------------------------------------------------------------------------
 
 export async function generateRewriteIntegration(
-  outputDir: string,
+  layout: RunLayout,
   analyses: ComponentAnalysis[],
   frameworkInfo: FrameworkInfo,
   migrationOrder: string[],
-  repoUrl: string
+  repoUrl: string,
+  supportArtifacts: {
+    modernizationContext?: ModernizationContext;
+    verifications?: Map<string, ComponentVerification>;
+  } = {},
 ): Promise<void> {
-  const commandsDir = join(outputDir, "rewrite", ".claude", "commands");
-  await fs.mkdir(commandsDir, { recursive: true });
+  await fs.mkdir(layout.claudeCommandsDir, { recursive: true });
 
   for (const analysis of analyses) {
     const { component } = analysis;
-    const contextDocPath = join(outputDir, "rewrite", "context", `${component.name}.md`);
+    const contextDocPath = join(layout.componentsDir, `${component.name}.md`);
     let contextContent = "";
     try {
       contextContent = await fs.readFile(contextDocPath, "utf-8");
@@ -409,11 +413,21 @@ export async function generateRewriteIntegration(
       frameworkInfo.targetLanguage
     );
 
-    const gate = analysis.targetRole === "human_review" ||
-      analysis.targetRole === "unknown" ||
-      analysis.humanQuestions.length > 0
+    const verification = supportArtifacts.verifications?.get(component.name);
+    const baseBlocked = analysis.targetRole === "human_review" ||
+      analysis.targetRole === "unknown";
+    const baseNeedsReview = analysis.humanQuestions.length > 0 ||
+      analysis.confidence === "low" ||
+      analysis.sourceCoverage.filesTruncated.length > 0;
+    const gate = baseBlocked
       ? `\n> Implementation gate: BLOCKED. Resolve these first: ${analysis.humanQuestions.join("; ") || `target role is ${analysis.targetRole}`}.\n`
-      : "\n> Implementation gate: READY after reviewing source evidence.\n";
+      : verification?.trustVerdict === "blocked"
+        ? `\n> Implementation gate: BLOCKED by verification. ${verification.trustReasons.join("; ")}.\n`
+        : verification?.trustVerdict === "needs_review"
+          ? `\n> Implementation gate: NEEDS REVIEW. A reviewer must accept or rewrite the unverified claims listed in the Verification section of \`components/${component.name}.md\` before implementation.\n`
+          : baseNeedsReview
+            ? `\n> Implementation gate: NEEDS REVIEW. Review the human questions or confidence notes in \`components/${component.name}.md\` before implementation.\n`
+          : "\n> Implementation gate: READY after reviewing source evidence and the verification report.\n";
 
     const slashCommand = `${contextContent}
 
@@ -437,7 +451,7 @@ After writing the code:
 `;
 
     await fs.writeFile(
-      join(commandsDir, `rewrite-${component.name}.md`),
+      join(layout.claudeCommandsDir, `rewrite-${component.name}.md`),
       slashCommand,
       "utf-8"
     );
@@ -454,23 +468,22 @@ After writing the code:
 
   const allDeps = [...new Set(analyses.flatMap((a) => a.targetDependencies))];
   const generatedAt = new Date().toISOString();
+  const contextDocs = supportArtifacts.modernizationContext?.docs ?? [];
+  const contextDocList = contextDocs.length > 0
+    ? contextDocs.map((doc) => `- \`architecture-context/${doc.path.split(/[\\/]/).pop()}\` — ${doc.title}`).join("\n")
+    : "- No business or company architecture context docs were loaded; use `architecture-baseline.md` default profile plus `human-questions.md` before deciding target roles.";
   const contractInput = {
     repoUrl,
     frameworkInfo,
     analyses,
     migrationOrder,
     generatedAt,
+    verifications: supportArtifacts.verifications,
   };
-
-  const contractPath = join(outputDir, "rewrite", "migration-contract.json");
-  const dispositionPath = join(outputDir, "rewrite", "component-disposition-matrix.md");
-  const questionsPath = join(outputDir, "rewrite", "human-questions.md");
-  const howToPath = join(outputDir, "rewrite", "HOW-TO-MIGRATE.md");
-  const integrationPath = join(outputDir, "rewrite", "AGENT-INTEGRATION.md");
 
   const agentsMd = `# Migration Agent Context
 
-> Auto-read by Codex. For Claude Code, use the slash commands in \`.claude/commands/\`.
+> Codex auto-reads this file when run from this directory. Claude Code users: copy \`claude-commands/\` into your target project's \`.claude/commands/\` and invoke them with \`/project:rewrite-<Component>\`.
 
 ## What You Are Doing
 
@@ -478,43 +491,50 @@ Migrating **${repoUrl.split("/").slice(-2).join("/")}** from **${frameworkInfo.s
 
 ## Rules
 
-1. Read \`migration-contract.json\` first; it is the source of truth for target roles, risks, human questions, and validation scenarios
-2. Read the context doc for each component before writing any code
-3. Rewrite components in the order listed below — dependencies must be done first
-4. Preserve every observed business rule exactly — they are non-negotiable
-5. Do not implement components marked \`human_review\` or \`unknown\` until their human questions are answered
-6. Do not invent functionality not present in the original code or migration contract
-7. After each component, verify the input/output contract and validation scenarios match the context doc
+1. Read \`README.md\` first — it lists the trust gate and the recommended workflow.
+2. Read \`migration-contract.json\`; it is the source of truth for target roles, risks, human questions, validation scenarios, and the per-component verification verdict.
+3. Read \`components/<Name>.md\` before writing any code for that component. The verification block at the top tells you what is proven and what is not.
+4. Rewrite components in the order in \`migrationOrder\` — dependencies first.
+5. Preserve every observed business rule exactly. They are non-negotiable.
+6. Do not implement components whose \`implementationStatus\` is \`needs_review\` or \`blocked\`. Stop and surface the verification reasons or human questions instead.
+7. Do not invent functionality not present in the original code or contract.
+8. After each component, validate against \`validationScenarios\`.
 
 ## Migration Order
 
 ${componentSummary}
 
-## Contract Artifacts
+## Architecture Context Loaded
 
-- \`migration-contract.json\` — machine-readable contract for Codex, Claude Code, QA agents, and downstream validation pipelines
-- \`component-disposition-matrix.md\` — target architecture landing-zone decisions
-- \`human-questions.md\` — decisions that require architect/product review before implementation
-- \`HOW-TO-MIGRATE.md\` — step-by-step execution guide
-- \`AGENT-INTEGRATION.md\` — how to use this contract with Codex, Claude Code, and future MCP/tool integrations
+${contextDocList}
+
+## Folder Map
+
+- \`README.md\` — human entry point and table of contents
+- \`migration-contract.json\` — machine-readable contract (your source of truth)
+- \`verification-summary.md\` — trust gate across all components
+- \`architecture-baseline.md\` — target landing-zone decision profile
+- \`preflight-readiness.md\` — readiness gates and missing inputs
+- \`component-disposition-matrix.md\` — target landing zone per component
+- \`human-questions.md\` — open architect/product decisions
+- \`components/<Name>.md\` — per-component context with verification inline
+- \`reverse-engineering/business-logic.json\` — persisted business rules and contracts
+- \`reverse-engineering/reverse-engineering-details.md\` — human-readable behavior report
+- \`system-graph.json\`, \`system-graph.mmd\` — dependency graph
+- \`architecture-context/\` — copies of user-provided context docs (the inputs that shaped this run)
+- \`claude-commands/\` — Claude Code slash commands per component
 
 ## Install These Packages First
 
 \`\`\`
-${allDeps.join("\n") || "none identified — check individual context docs"}
+${allDeps.join("\n") || "none identified — check individual component docs"}
 \`\`\`
-
-## Context Docs
-
-${analyses.map((a) => `- [\`${a.component.name}\`](context/${a.component.name}.md) — ${a.purpose}`).join("\n")}
 `;
 
-  await fs.writeFile(join(outputDir, "rewrite", "AGENTS.md"), agentsMd, "utf-8");
-  await fs.writeFile(contractPath, buildMigrationContract(contractInput), "utf-8");
-  await fs.writeFile(dispositionPath, buildDispositionMatrix(contractInput), "utf-8");
-  await fs.writeFile(questionsPath, buildHumanQuestionsDoc(contractInput), "utf-8");
-  await fs.writeFile(howToPath, buildHowToMigrate(contractInput), "utf-8");
-  await fs.writeFile(integrationPath, buildAgentIntegrationGuide(contractInput), "utf-8");
+  await fs.writeFile(layout.agentsPath, agentsMd, "utf-8");
+  await fs.writeFile(layout.contractPath, buildMigrationContract(contractInput), "utf-8");
+  await fs.writeFile(layout.dispositionMatrixPath, buildDispositionMatrix(contractInput), "utf-8");
+  await fs.writeFile(layout.humanQuestionsPath, buildHumanQuestionsDoc(contractInput), "utf-8");
 }
 
 // ---------------------------------------------------------------------------

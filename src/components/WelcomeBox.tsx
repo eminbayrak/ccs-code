@@ -3,8 +3,7 @@ import { Box, Text } from "ink";
 import { userInfo, homedir } from "os";
 import { useTerminalSize } from "../hooks/useTerminalSize";
 
-// ─── Logo variants ────────────────────────────────────────────────────────────
-
+// The full ASCII mark — kept exported for the vault setup success screen.
 export const LOGO_LARGE = [
   " ██████╗ ██████╗███████╗",
   "██╔════╝██╔════╝██╔════╝",
@@ -14,35 +13,34 @@ export const LOGO_LARGE = [
   " ╚═════╝ ╚═════╝╚══════╝",
 ];
 
+// Small mark used here in the welcome card.
 export const LOGO_SMALL = [
   "▄▀▀ ▄▀▀ ▄▀▀",
   "█   █   ▀▀▄",
   "▀▀▘ ▀▀▘ ▀▀▀",
 ];
 
-// ─── Content ──────────────────────────────────────────────────────────────────
+const ACCENT = "#93c5fd";
+const RULE = "#7c86a8";
 
-const PIPELINE: Array<{ step: string; cmd: string; desc: string }> = [
-  { step: "1", cmd: "/vault init",  desc: "create your knowledge base" },
-  { step: "2", cmd: "/harvest",    desc: "mine local AI/IDE histories" },
-  { step: "3", cmd: "/sync",        desc: "pull from GitHub repos" },
-  { step: "4", cmd: "/ingest",      desc: "process files into wiki pages" },
-  { step: "5", cmd: "/enrich",      desc: "add AI summaries + links" },
-  { step: "6", cmd: "/graph",       desc: "open visual knowledge graph" },
-  { step: "7", cmd: "/ask <q>",     desc: "ask questions about your wiki" },
+const HINTS: Array<{ command: string; desc: string }> = [
+  { command: "/migrate rewrite", desc: "scan, reverse-engineer, verify" },
+  { command: "/migrate dashboard", desc: "open the static report UI" },
+  { command: "/setup",           desc: "wire Codex / Claude Code via MCP" },
+  { command: "/guide",           desc: "interactive manual" },
 ];
 
-const QUICK_TIPS = [
-  "Run /vault audit to check for missing memories",
-  "Drop any file into raw/uploads/ then run /ingest",
-  "Just type a question to chat without /ask",
-];
+const START_HINT = "migrate <repo url> to csharp";
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+function truncateMiddle(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const keep = Math.max(4, Math.floor((max - 1) / 2));
+  return `${value.slice(0, keep)}…${value.slice(-keep)}`;
+}
 
-function truncatePath(p: string, max: number): string {
-  if (p.length <= max) return p;
-  return "…" + p.slice(-(max - 1));
+function truncateEnd(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(1, max - 1))}…`;
 }
 
 type Props = {
@@ -50,197 +48,74 @@ type Props = {
   workspacePath: string;
 };
 
-// ─── Wide layout (≥ 95 cols) ─────────────────────────────────────────────────
-
-function WideLayout({
-  columns,
-  username,
-  model,
-  dir,
-}: {
-  columns: number;
-  username: string;
-  model: string;
-  dir: string;
-}) {
-  const LEFT = 34;
-  const boxWidth = columns - 2;
-
-  return (
-    <Box
-      borderStyle="round"
-      borderColor="gray"
-      width={boxWidth}
-      marginX={1}
-      marginTop={1}
-      flexDirection="column"
-    >
-      <Box paddingLeft={1} paddingTop={0}>
-        <Text dimColor>── </Text>
-        <Text bold color="white">CCS Code</Text>
-        <Text dimColor>  Your AI-powered knowledge base ────────────────────────────────────</Text>
-      </Box>
-
-      <Box flexDirection="row">
-        <Box
-          width={LEFT}
-          flexShrink={0}
-          flexDirection="column"
-          alignItems="center"
-          paddingX={1}
-          paddingTop={1}
-          paddingBottom={1}
-        >
-          <Text bold>
-            Welcome back, <Text color="cyan">{username}</Text>!
-          </Text>
-
-          <Box marginTop={1} marginBottom={1} flexDirection="column" alignItems="center">
-            {LOGO_LARGE.map((line, i) => (
-              <Text key={i} color="cyan">{line}</Text>
-            ))}
-          </Box>
-
-          <Box flexDirection="column" alignItems="center">
-            <Text dimColor>{model}</Text>
-            <Text dimColor>{dir}</Text>
-          </Box>
-        </Box>
-
-        <Box
-          flexGrow={1}
-          flexDirection="column"
-          borderStyle="single"
-          borderTop={false}
-          borderBottom={false}
-          borderRight={false}
-          borderColor="gray"
-          paddingLeft={2}
-          paddingRight={2}
-          paddingTop={1}
-          paddingBottom={1}
-        >
-          <Text bold color="white">Pipeline</Text>
-          <Box flexDirection="column" marginTop={1} marginBottom={1}>
-            {PIPELINE.map(({ step, cmd, desc }) => (
-              <Box key={step}>
-                <Text dimColor>{step}. </Text>
-                <Text color="cyan" bold>{cmd.padEnd(14)}</Text>
-                <Text dimColor>{desc}</Text>
-              </Box>
-            ))}
-          </Box>
-
-          <Box marginBottom={1}>
-            <Text dimColor>{"─".repeat(Math.max(10, boxWidth - LEFT - 7))}</Text>
-          </Box>
-
-          <Text bold color="white">Tips</Text>
-          <Box marginTop={1} flexDirection="column">
-            {QUICK_TIPS.map((tip, i) => (
-              <Box key={i}>
-                <Text color="yellow">  · </Text>
-                <Text dimColor>{tip}</Text>
-              </Box>
-            ))}
-          </Box>
-
-          <Box marginTop={2} justifyContent="center">
-            <Text dimColor>
-              Type <Text color="cyan" bold>?</Text> for help  ·  <Text color="cyan" bold>/guide</Text> for manual  ·  Just type to chat
-            </Text>
-          </Box>
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-
-function CompactLayout({
-  columns,
-  username,
-  model,
-  dir,
-}: {
-  columns: number;
-  username: string;
-  model: string;
-  dir: string;
-}) {
-  const boxWidth = Math.max(42, columns - 2);
-  const showLargeLogo = boxWidth >= 32;
-
-  return (
-    <Box
-      borderStyle="round"
-      borderColor="gray"
-      flexDirection="column"
-      width={boxWidth}
-      marginX={1}
-      marginTop={1}
-      paddingX={2}
-      paddingY={1}
-    >
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        <Text bold>
-          Welcome back, <Text color="cyan">{username}</Text>!
-        </Text>
-        <Text dimColor>Your AI-powered knowledge base</Text>
-      </Box>
-
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        {(showLargeLogo ? LOGO_LARGE : LOGO_SMALL).map((line, i) => (
-          <Text key={i} color="cyan">{line}</Text>
-        ))}
-      </Box>
-
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        <Text dimColor>{model}</Text>
-        <Text dimColor>{dir}</Text>
-      </Box>
-
-      <Box marginBottom={1}>
-        <Text dimColor>{"─".repeat(Math.max(10, boxWidth - 6))}</Text>
-      </Box>
-
-      <Box marginBottom={1}>
-        <Text bold color="white">Getting started</Text>
-      </Box>
-
-      <Box flexDirection="column" marginBottom={1}>
-        {PIPELINE.map(({ step, cmd, desc }) => (
-          <Box key={step}>
-            <Text dimColor>{step}. </Text>
-            <Text color="cyan" bold>{cmd.padEnd(13)}</Text>
-            <Text dimColor>{desc}</Text>
-          </Box>
-        ))}
-      </Box>
-
-      <Box marginBottom={1}>
-        <Text dimColor>{"─".repeat(Math.max(10, boxWidth - 6))}</Text>
-      </Box>
-
-      <Box flexDirection="column" alignItems="center">
-        <Text dimColor>
-          Type <Text color="cyan" bold>?</Text> for help  ·  <Text color="cyan" bold>/guide</Text> for manual  ·  Just type to chat
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
-// ─── Export ───────────────────────────────────────────────────────────────────
-
 export function WelcomeBox({ activeModel, workspacePath }: Props) {
   const { columns } = useTerminalSize();
   const username = userInfo().username;
   const model = activeModel === "Loading..." ? "…" : activeModel;
-  const dir = truncatePath(workspacePath.replace(homedir(), "~"), 28);
+  const cwd = workspacePath.replace(homedir(), "~");
 
-  if (columns >= 95) {
-    return <WideLayout columns={columns} username={username} model={model} dir={dir} />;
-  }
+  // Compact card — caps at 80 cols, narrows gracefully on small terminals.
+  const cardWidth = Math.max(50, Math.min(columns - 4, 80));
+  const innerWidth = cardWidth - 6;
 
-  return <CompactLayout columns={columns} username={username} model={model} dir={dir} />;
+  // Logo column reserved on the left of the header band.
+  const logoCol = LOGO_SMALL[0]?.length ?? 11;
+  const headerTextWidth = Math.max(20, innerWidth - logoCol - 3);
+
+  // Command list dims.
+  const cmdCol = 18;
+  const descCol = Math.max(12, innerWidth - cmdCol - 2);
+
+  const metaWidth = Math.max(20, innerWidth - 2);
+  const cwdRoom = Math.max(8, metaWidth - model.length - 3);
+
+  return (
+    <Box paddingX={1} marginTop={1} marginBottom={1}>
+      <Box
+        borderStyle="round"
+        borderColor={RULE}
+        flexDirection="column"
+        width={cardWidth}
+        paddingX={2}
+        paddingY={1}
+      >
+        {/* Header: small logo on the left, identity on the right ----------- */}
+        <Box flexDirection="row">
+          <Box flexDirection="column" marginRight={2}>
+            {LOGO_SMALL.map((line, i) => (
+              <Text key={i} color={ACCENT} bold>{line}</Text>
+            ))}
+          </Box>
+          <Box flexDirection="column" width={headerTextWidth}>
+            <Text>
+              Welcome back, <Text color={ACCENT} bold>{username}</Text>
+            </Text>
+            <Text dimColor>
+              {truncateEnd("CCS Code · migration intelligence for legacy modernization", headerTextWidth)}
+            </Text>
+            <Text dimColor>
+              {truncateEnd(`${model} · ${truncateMiddle(cwd, cwdRoom)}`, headerTextWidth)}
+            </Text>
+          </Box>
+        </Box>
+
+        {/* Command hints --------------------------------------------------- */}
+        <Box flexDirection="column" marginTop={1}>
+          {HINTS.map((hint) => (
+            <Box key={hint.command} flexDirection="row">
+              <Text color={ACCENT} bold>{hint.command.padEnd(cmdCol)}</Text>
+              <Text dimColor>{truncateEnd(hint.desc, descCol)}</Text>
+            </Box>
+          ))}
+        </Box>
+
+        {/* Natural-language hint ------------------------------------------- */}
+        <Box marginTop={1}>
+          <Text dimColor>
+            Type <Text color={ACCENT}>"{START_HINT}"</Text> to start — or describe your goal in plain words.
+          </Text>
+        </Box>
+      </Box>
+    </Box>
+  );
 }

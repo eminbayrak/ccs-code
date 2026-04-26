@@ -1,9 +1,28 @@
 import type { ExecutionPlan, PlanStep } from "./types.js";
 import type { CapabilitySnapshot } from "../capabilities/types.js";
 
+function buildGitHubSearchQuery(goal: string): string {
+    const repoMatch = goal.match(/https?:\/\/(?:www\.)?github(?:\.com|\.enterprise\S*?)\/([\w.-]+)\/([\w.-]+)/i);
+    const repoQualifier = repoMatch
+        ? ` repo:${repoMatch[1]}/${repoMatch[2]!.replace(/\.git$/i, "").replace(/[.,;)]+$/, "")}`
+        : "";
+
+    const cleaned = goal
+        .replace(/https?:\/\/\S+/gi, " ")
+        .replace(/[^\w\s./#-]/g, " ")
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .filter((part) => !/^(github|repo|repository|this|that|please|can|you|migrate|rewrite|convert|port|to|into|from|using|with|the|a|an)$/i.test(part))
+        .slice(0, 6)
+        .join(" ");
+
+    return `${cleaned || "README"}${repoQualifier}`.trim();
+}
+
 function extractToolInput(goal: string, toolName: string): Record<string, unknown> {
     if (toolName === "github_search_code") {
-        return { query: goal };
+        return { query: buildGitHubSearchQuery(goal) };
     }
 
     if (toolName === "github_list_pull_requests") {
@@ -49,6 +68,9 @@ function extractToolInput(goal: string, toolName: string): Record<string, unknow
 export function planGoal(goal: string, capabilities: CapabilitySnapshot): ExecutionPlan {
     const lowered = goal.toLowerCase();
     const steps: PlanStep[] = [];
+    const isModernizationGoal =
+        /(migrate|migration|modernize|modernization|legacy|rewrite|convert|port)/i.test(goal) &&
+        /(architecture|service|repo|repository|application|app|system|codebase|language|framework|azure|serverless|function|container|aks|vb6|cobol|mainframe|java|node|\.net|c#)/i.test(goal);
 
     if (lowered.includes("github")) {
         const listPrTool = capabilities.tools.find((t) => t.name === "github_list_pull_requests");
@@ -101,7 +123,38 @@ export function planGoal(goal: string, capabilities: CapabilitySnapshot): Execut
         }
     }
 
-    if (/(implement|refactor|fix|build)/i.test(goal)) {
+    if (isModernizationGoal) {
+        steps.push(
+            {
+                type: "agent_call",
+                reason: "Modernization request needs repository system understanding before implementation.",
+                agentType: "repo-system-design",
+                prompt: goal,
+                runInBackground: /background|async/i.test(goal),
+            },
+            {
+                type: "agent_call",
+                reason: "Modernization request needs approved target architecture context.",
+                agentType: "architecture-baseline",
+                prompt: goal,
+                runInBackground: /background|async/i.test(goal),
+            },
+            {
+                type: "agent_call",
+                reason: "Modernization request needs target architecture decisioning.",
+                agentType: "target-architecture",
+                prompt: goal,
+                runInBackground: /background|async/i.test(goal),
+            },
+            {
+                type: "agent_call",
+                reason: "Modernization request needs an implementation-ready migration contract.",
+                agentType: "migration-contract",
+                prompt: goal,
+                runInBackground: /background|async/i.test(goal),
+            },
+        );
+    } else if (/(implement|refactor|fix|build)/i.test(goal)) {
         steps.push({
             type: "agent_call",
             reason: "Prompt suggests implementation work.",

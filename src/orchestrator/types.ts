@@ -3,6 +3,23 @@ import type { CapabilitySnapshot } from "../capabilities/types.js";
 import type { PermissionContext } from "../governance/permissions.js";
 import type { RunLogEvent } from "../telemetry/runLog.js";
 
+export const AGENT_TYPES = [
+    "research",
+    "implementation",
+    "review",
+    "modernization-intake",
+    "repo-system-design",
+    "legacy-behavior",
+    "business-context",
+    "architecture-baseline",
+    "target-architecture",
+    "risk-validation",
+    "migration-contract",
+    "implementation-handoff",
+] as const;
+
+export type AgentType = typeof AGENT_TYPES[number];
+
 export type PlanStepType = "direct_answer" | "tool_call" | "agent_call";
 
 export type PlanStep =
@@ -19,7 +36,7 @@ export type PlanStep =
     | {
         type: "agent_call";
         reason: string;
-        agentType: "research" | "implementation" | "review";
+        agentType: AgentType;
         prompt: string;
         runInBackground?: boolean;
     };

@@ -12,6 +12,10 @@ type LineStyle = {
 function classify(msg: string): LineStyle {
   const m = msg.toLowerCase();
 
+  if (m.startsWith("waiting") || m.startsWith("sending") || m.startsWith("running") || m.startsWith("executing")) {
+    return { icon: "●", iconColor: "cyan", textColor: "white", dim: false };
+  }
+
   // Research / Analysis headers
   if (m.startsWith("ai research")) {
     return { icon: "●", iconColor: "cyan", textColor: "cyan", dim: false };
@@ -21,12 +25,12 @@ function classify(msg: string): LineStyle {
   }
 
   // Tool / Command starts
-  if (m.startsWith("bash") || m.startsWith("searching") || m.startsWith("reading") || m.startsWith("resolving")) {
+  if (m.startsWith("bash") || m.startsWith("searching") || m.startsWith("reading") || m.startsWith("resolving") || m.startsWith("syncing") || m.startsWith("mining") || m.startsWith("processing") || m.startsWith("rebuilding") || m.startsWith("generating")) {
     return { icon: "●", iconColor: "green", textColor: "white", dim: false };
   }
 
   // Success / completed
-  if (msg.includes("✓") || m.includes("analyzed") || m.includes("written") || m.includes("complete")) {
+  if (msg.includes("✓") || m.startsWith("executed") || m.includes("analyzed") || m.includes("written") || m.includes("complete")) {
     return { icon: "✓", iconColor: "green", textColor: "gray", dim: true };
   }
 
@@ -41,7 +45,7 @@ function classify(msg: string): LineStyle {
   }
 
   // Default / Active
-  return { icon: "·", iconColor: "cyan", textColor: "white", dim: false };
+  return { icon: "●", iconColor: "cyan", textColor: "white", dim: false };
 }
 
 function cleanMessage(msg: string): string {
@@ -79,7 +83,7 @@ function CollapsibleLog({ log, style, indent, isExpanded }: { log: string; style
 
 const MAX_VISIBLE = 12;
 
-export function ScanProgressLog({ logs, isExpanded = false }: { logs: string[]; isExpanded?: boolean }) {
+export function ScanProgressLog({ logs, isExpanded = false, showSpinnerForLast = true }: { logs: string[]; isExpanded?: boolean; showSpinnerForLast?: boolean }) {
   if (logs.length === 0) return null;
 
   // Aggressive deduplication and cleaning
@@ -132,7 +136,7 @@ export function ScanProgressLog({ logs, isExpanded = false }: { logs: string[]; 
         const style = classify(log.trim());
         const isComplete = style.icon === "✓" || style.icon === "★";
 
-        if (isLast && !isComplete && !log.includes("✗")) {
+        if (showSpinnerForLast && isLast && !isComplete && !log.includes("✗")) {
           return <CCSSpinner key={i} label={cleanMessage(log.trim())} />;
         }
 

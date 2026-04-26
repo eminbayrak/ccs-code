@@ -8,6 +8,7 @@ import { generateGraphHtml } from "../vault/graphBuilder.js";
 import { ingestAll } from "../vault/ingestor.js";
 import { enrichWiki } from "../vault/enricher.js";
 import { askWiki } from "../vault/wikiAsk.js";
+import { openInDefaultBrowser } from "../utils/platform.js";
 import { createProvider } from "../llm/index.js";
 import yaml from "js-yaml";
 import { formatErrorDump } from "../utils/errorFormatter.js";
@@ -340,9 +341,12 @@ export async function handleGraphCommand(args: string[], cwd: string): Promise<s
       ].join("\n");
     }
 
-    // Open the graph in the default browser
-    const { spawn } = await import("child_process");
-    spawn("open", [outputPath], { detached: true, stdio: "ignore" }).unref();
+    let browserOpened = true;
+    try {
+      await openInDefaultBrowser(outputPath);
+    } catch {
+      browserOpened = false;
+    }
 
     return [
       `## 🕸️ Knowledge Graph Built`,
@@ -351,7 +355,7 @@ export async function handleGraphCommand(args: string[], cwd: string): Promise<s
       "",
       `✓ Saved to: \`output/graph.html\``,
       "",
-      "Opening in browser…",
+      browserOpened ? "Opening in browser…" : `Open this file in your browser: \`${outputPath}\``,
     ].join("\n");
   } catch (e) {
     return `Error building graph: ${e instanceof Error ? e.message : String(e)}`;
@@ -458,7 +462,7 @@ async function countMarkdownFiles(dir: string): Promise<number> {
 
 export async function handleEnrichCommand(args: string[], cwd: string): Promise<string> {
   const vaultPath = await resolveVaultPath(cwd);
-  const wikiDir = `${vaultPath}/wiki`;
+  const wikiDir = join(vaultPath, "wiki");
 
   try {
     await fs.access(wikiDir);

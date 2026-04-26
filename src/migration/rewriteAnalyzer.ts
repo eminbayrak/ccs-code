@@ -1,4 +1,5 @@
 import type { LLMProvider } from "../llm/providers/base.js";
+import { basename } from "node:path";
 import type {
   ComponentType,
   SourceComponent,
@@ -11,7 +12,82 @@ import {
   buildNumberedSourceExcerpt,
   buildSourceCoverage,
   normalizeEvidenceItems,
+  summarizeCoverage,
 } from "./evidence.js";
+
+function extractJsonObject(raw: string): string {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const text = (fenced?.[1] ?? raw).trim();
+  const first = text.indexOf("{");
+  if (first === -1) throw new Error("No JSON object found in model response.");
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = first; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) return text.slice(first, i + 1);
+    }
+  }
+
+  throw new Error("Model response contained an unterminated JSON object.");
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  return JSON.parse(extractJsonObject(raw)) as Record<string, unknown>;
+}
+
+function normalizeComponentAlias(value: string): string {
+  return value
+    .replace(/\.[^.\\/]+$/, "")
+    .replace(/[^a-zA-Z0-9]+/g, "")
+    .toLowerCase();
+}
+
+function dependencyAliasesFor(component: SourceComponent): string[] {
+  const aliases = [component.name];
+  for (const path of component.filePaths) {
+    aliases.push(basename(path));
+    aliases.push(basename(path).replace(/\.[^.]+$/, ""));
+  }
+  return aliases.map(normalizeComponentAlias).filter(Boolean);
+}
+
+function normalizeComponentDependencies(components: SourceComponent[]): SourceComponent[] {
+  const aliasToName = new Map<string, string>();
+  for (const component of components) {
+    for (const alias of dependencyAliasesFor(component)) {
+      if (!aliasToName.has(alias)) aliasToName.set(alias, component.name);
+    }
+  }
+
+  return components.map((component) => ({
+    ...component,
+    dependencies: [...new Set(component.dependencies.map((dependency) => {
+      const normalized = normalizeComponentAlias(dependency);
+      return aliasToName.get(normalized) ?? dependency;
+    }).filter((dependency) => dependency && dependency !== component.name))],
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // Step 1 — Detect source framework from file tree + key file contents
@@ -58,8 +134,7 @@ Respond with ONLY this JSON:
   );
 
   try {
-    const json = raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}";
-    const parsed = JSON.parse(json) as Partial<FrameworkInfo>;
+    const parsed = parseJsonObject(raw) as Partial<FrameworkInfo>;
     return {
       sourceFramework:    parsed.sourceFramework    ?? "unknown",
       sourceLanguage:     parsed.sourceLanguage     ?? "unknown",
@@ -123,11 +198,10 @@ Respond with ONLY this JSON:
   );
 
   try {
-    const json = raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}";
-    const parsed = JSON.parse(json) as { components?: unknown[] };
+    const parsed = parseJsonObject(raw) as { components?: unknown[] };
     if (!Array.isArray(parsed.components)) return [];
 
-    return parsed.components
+    const components = parsed.components
       .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
       .map((c) => ({
         name:         typeof c["name"]        === "string" ? c["name"]        : "unknown",
@@ -136,6 +210,7 @@ Respond with ONLY this JSON:
         dependencies: Array.isArray(c["dependencies"]) ? (c["dependencies"] as string[]).filter((d) => typeof d === "string") : [],
         description:  typeof c["description"] === "string" ? c["description"] : "",
       }));
+    return normalizeComponentDependencies(components);
   } catch {
     return [];
   }
@@ -152,6 +227,15 @@ Respond only with valid JSON.`;
 const TARGET_ROLES = [
   "workflow",
   "azure_function",
+  "azure_container_app",
+  "aks_service",
+  "azure_logic_app",
+  "azure_service_bus_flow",
+  "azure_api_management",
+  "azure_blob_storage",
+  "azure_sql",
+  "cosmos_db",
+  "camunda_workflow",
   "databricks_job",
   "rest_api",
   "microservice",
@@ -173,7 +257,8 @@ export async function analyzeComponent(
   component: SourceComponent,
   sourceFiles: Array<{ path: string; content: string }>,
   frameworkInfo: FrameworkInfo,
-  provider: LLMProvider
+  provider: LLMProvider,
+  modernizationGuidance = "",
 ): Promise<ComponentAnalysis> {
   const mapping = getFrameworkMapping(
     frameworkInfo.sourceFramework,
@@ -183,15 +268,23 @@ export async function analyzeComponent(
     ? `\nFramework migration reference:\n${formatMappingForPrompt(mapping)}\n`
     : "";
 
+  const maxCharsPerFile = sourceFiles.length <= 1
+    ? 24_000
+    : sourceFiles.length <= 3
+      ? 16_000
+      : 10_000;
   const excerpts = sourceFiles.map((f) =>
-    buildNumberedSourceExcerpt(f.path, f.content, 6000)
+    buildNumberedSourceExcerpt(f.path, f.content, maxCharsPerFile)
   );
   const sourceCoverage = buildSourceCoverage(excerpts);
   const fileBundle = excerpts
     .map((f) => `=== FILE: ${f.path} ===\n${f.content}`)
     .join("\n\n");
+  const modernizationSection = modernizationGuidance.trim()
+    ? `\nModernization context and target architecture baseline:\n${modernizationGuidance.trim()}\n`
+    : "";
   const coverageNote = sourceCoverage.filesTruncated.length > 0
-    ? `\nIMPORTANT SOURCE COVERAGE LIMITATION:\n${sourceCoverage.filesTruncated.map((f) => `- ${f.path}: only lines 1-${f.providedLines} of ${f.originalLines} were visible to you.`).join("\n")}\nIf a business rule, dependency, or contract could live outside the visible lines, mark the related field as inferred or unknown and do not use high confidence for it.\n`
+    ? `\nIMPORTANT SOURCE COVERAGE LIMITATION:\n${summarizeCoverage(sourceCoverage).map((line) => `- ${line}`).join("\n")}\nIf a business rule, dependency, or contract could live outside the visible lines, mark the related field as inferred or unknown and do not use high confidence for it.\n`
     : "";
 
   const raw = await provider.chat(
@@ -204,6 +297,7 @@ Component: ${component.name} (${component.type})
 Description: ${component.description}
 Dependencies: ${component.dependencies.join(", ") || "none"}
 ${mappingSection}
+${modernizationSection}
 ${coverageNote}
 Source files with line numbers:
 ${fileBundle}
@@ -227,7 +321,7 @@ Respond with ONLY this JSON (use "unknown" for anything you cannot determine):
   "outputContract": { "fieldName": "type" },
   "externalDependencies": ["NuGet/npm package names used"],
   "targetPattern": "exact pattern to use in ${frameworkInfo.targetLanguage} (e.g. FastAPI APIRouter with Pydantic schemas)",
-  "targetRole": "workflow | azure_function | databricks_job | rest_api | microservice | common_library | rules_engine | data_model | integration_adapter | human_review | unknown",
+  "targetRole": "workflow | azure_function | azure_container_app | aks_service | azure_logic_app | azure_service_bus_flow | azure_api_management | azure_blob_storage | azure_sql | cosmos_db | camunda_workflow | databricks_job | rest_api | microservice | common_library | rules_engine | data_model | integration_adapter | human_review | unknown",
   "targetRoleRationale": "why this component should land in that target architecture role; cite evidence when possible",
   "targetIntegrationBoundary": "event/topic/API/database/file boundary this component should expose or consume in the target architecture, or unknown",
   "targetDependencies": ["pip/npm package names needed in the rewrite"],
@@ -242,7 +336,9 @@ Respond with ONLY this JSON (use "unknown" for anything you cannot determine):
 Rules:
 - businessRules: only rules visible in code (validation, access control, conditional logic, calculations)
 - evidence: include one evidence item for every business rule and every important contract/dependency/migration note; use observed only when line-numbered source directly supports it
-- targetRole: classify the component by target architecture responsibility, not just target language; if the right landing zone depends on business/architecture decisions, use "human_review"
+- targetRole: classify the component by target architecture responsibility or landing zone, not just target language; if the right landing zone depends on business/architecture decisions, use "human_review"
+- targetRole: use the modernization context and architecture baseline when available; prefer company-specific context over generic framework mapping
+- targetRole: do not choose a role only because of the legacy file type; base it on trigger, state, data ownership, integration boundary, and operational responsibility
 - humanQuestions: include questions for unknown trigger semantics, completion signals, data ownership, retry policy, and target integration boundaries
 - validationScenarios: include high-value behaviour tests, not just unit-level cases
 - migrationNotes: specific replacements (e.g. "Replace AutoMapper with Pydantic .model_validate()")
@@ -256,8 +352,7 @@ Rules:
   const unknownFields: string[] = [];
 
   try {
-    const json = raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}";
-    const p = JSON.parse(json) as Record<string, unknown>;
+    const p = parseJsonObject(raw);
 
     const str = (v: unknown, field: string): string => {
       if (typeof v === "string" && v !== "unknown") return v;
@@ -356,29 +451,12 @@ Rules:
       confidence,
       unknownFields,
     };
-  } catch {
-    return {
-      component,
-      purpose: "unknown",
-      businessRules: [],
-      evidence: [],
-      sourceCoverage,
-      inputContract: {},
-      outputContract: {},
-      externalDependencies: [],
-      targetPattern: "unknown",
-      targetRole: "unknown",
-      targetRoleRationale: "unknown",
-      targetIntegrationBoundary: "unknown",
-      targetDependencies: [],
-      migrationNotes: [],
-      migrationRisks: [],
-      humanQuestions: ["Review this component manually; automated analysis failed."],
-      validationScenarios: [],
-      complexity: "high",
-      confidence: "low",
-      unknownFields: ["purpose", "targetPattern", "targetRole"],
-    };
+  } catch (e) {
+    throw new Error(
+      `Could not parse component analysis JSON for ${component.name}: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
   }
 }
 

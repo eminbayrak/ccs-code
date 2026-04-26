@@ -2,6 +2,30 @@ import type { LLMProvider, Message, ToolDefinition, ToolCall } from "./base.js";
 
 const MAX_TOOL_ITERATIONS = 8;
 
+function normalizeMessageContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object") {
+          const record = part as Record<string, unknown>;
+          if (typeof record["text"] === "string") return record["text"];
+          if (typeof record["content"] === "string") return record["content"];
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (content && typeof content === "object") {
+    const record = content as Record<string, unknown>;
+    if (typeof record["text"] === "string") return record["text"];
+    if (typeof record["content"] === "string") return record["content"];
+  }
+  return "";
+}
+
 /**
  * Enterprise Corporate Provider
  * Uses a two-step OAuth2 client_credentials flow against an API gateway,
@@ -97,10 +121,10 @@ export class EnterpriseProvider implements LLMProvider {
     }
 
     const json = (await response.json()) as {
-      choices: Array<{ message: { content: string } }>;
+      choices: Array<{ message: { content: unknown } }>;
     };
 
-    return json.choices[0]?.message?.content ?? "";
+    return normalizeMessageContent(json.choices[0]?.message?.content);
   }
 
   async chatWithTools(
@@ -164,7 +188,7 @@ export class EnterpriseProvider implements LLMProvider {
       const message = choice.message;
 
       if (choice.finish_reason !== "tool_calls" || !message.tool_calls?.length) {
-        return message.content ?? "";
+        return normalizeMessageContent(message.content);
       }
 
       allMessages.push(message);

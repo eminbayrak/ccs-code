@@ -19,9 +19,16 @@ export type RouterDecision = {
   handler: "scan" | "rewrite";
   repoUrl: string;
   targetLanguage: string;
+  /** True when targetLanguage came from a hard default (e.g. "python") rather
+   *  than an explicit hint in the user's input. The UI should ask the user
+   *  to confirm or override before running anything when this is true. */
+  targetLanguageWasInferred: boolean;
   org: string;
   sourceLanguage: string;
   autoConfirm: boolean;
+  /** True when the user explicitly wants a neutral benchmark run that ignores
+   *  local/company context docs. */
+  noContext?: boolean;
   confidence: "heuristic" | "llm";
 };
 
@@ -46,9 +53,20 @@ const LANG_ALIASES: Record<string, string> = {
   "kt": "kotlin", "kotlin": "kotlin",
 };
 
-function normaliseLang(raw: string): string {
+export function normaliseLang(raw: string): string {
   const lower = raw.toLowerCase().trim();
   return LANG_ALIASES[lower] ?? lower;
+}
+
+/** Languages we accept as a one-word reply when asking the user to fill in
+ *  a missing target. Used by the App's pending-migration clarification flow. */
+export const SUPPORTED_TARGET_LANGUAGES = new Set([
+  "csharp", "typescript", "javascript", "python", "java",
+  "go", "ruby", "rust", "php", "swift", "kotlin", "vb.net",
+]);
+
+export function isSupportedTargetLanguage(value: string): boolean {
+  return SUPPORTED_TARGET_LANGUAGES.has(normaliseLang(value));
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +116,11 @@ function isScanLike(text: string): boolean {
   return /\b(scan|soap|wsdl|service[s]?|external|call[s]?|endpoint)\b/.test(lower);
 }
 
+function wantsNoContext(text: string): boolean {
+  const lower = text.toLowerCase();
+  return /\b(no context|without context|ignore context|skip context|neutral benchmark|benchmark run|public benchmark)\b/.test(lower);
+}
+
 // ---------------------------------------------------------------------------
 // LLM-based extraction (only when heuristics can't get language)
 // ---------------------------------------------------------------------------
@@ -117,7 +140,8 @@ Extract these fields and return as JSON:
   "repoUrl": "full GitHub URL or empty string",
   "targetLanguage": "csharp|typescript|python|java|go|ruby|php (or empty string)",
   "sourceLanguage": "csharp|typescript|python|java|go|vb6|delphi|cobol or empty string",
-  "org": "GitHub org extracted from URL or empty string"
+  "org": "GitHub org extracted from URL or empty string",
+  "noContext": true if the user asks for no context, without context, benchmark, or neutral/public test run; otherwise false
 }`;
 
 async function llmExtract(text: string): Promise<Partial<RouterDecision> | null> {
@@ -164,15 +188,18 @@ export async function routeIntent(
   let targetLang = extractLanguageHint(input, TO_LANG_RE);
   let sourceLang = extractLanguageHint(input, FROM_LANG_RE);
   let handler: "scan" | "rewrite" = isScanLike(input) ? "scan" : "rewrite";
+  const noContext = wantsNoContext(input);
 
   if (targetLang) {
     return {
       handler,
       repoUrl,
       targetLanguage: targetLang,
+      targetLanguageWasInferred: false,
       org,
       sourceLanguage: sourceLang,
       autoConfirm: false,
+      noContext,
       confidence: "heuristic",
     };
   }
@@ -182,10 +209,12 @@ export async function routeIntent(
     return {
       handler,
       repoUrl,
-      targetLanguage: "python",
+      targetLanguage: "",
+      targetLanguageWasInferred: true,
       org,
       sourceLanguage: sourceLang,
       autoConfirm: false,
+      noContext,
       confidence: "heuristic",
     };
   }
@@ -193,45 +222,79 @@ export async function routeIntent(
   const llmResult = await llmExtract(input);
   if (!llmResult) return null;
 
+  const llmTarget = (llmResult.targetLanguage ?? "").trim();
   return {
     handler: llmResult.handler ?? handler,
     repoUrl: llmResult.repoUrl || repoUrl,
-    targetLanguage: llmResult.targetLanguage || "python",
+    targetLanguage: llmTarget || "",
+    targetLanguageWasInferred: !llmTarget,
     org: llmResult.org || org,
     sourceLanguage: llmResult.sourceLanguage || sourceLang,
     autoConfirm: false,
+    noContext: Boolean(llmResult.noContext) || noContext,
     confidence: "llm",
   };
 }
 
+function shortRepoLabel(decision: RouterDecision): string {
+  const tail = decision.repoUrl.replace(/\/+$/, "").split("/").slice(-2).join("/");
+  return tail || decision.repoUrl;
+}
+
 /**
- * Format a human-readable explanation of what the router detected.
- * Used to confirm intent with the user before executing.
+ * Build the slash-command that the auto-router will execute on the user's
+ * behalf. Returns null if the decision is missing the bits needed to run.
+ */
+export function decisionToSlashCommand(decision: RouterDecision): string | null {
+  if (!decision.repoUrl || !decision.targetLanguage || decision.targetLanguageWasInferred) {
+    return null;
+  }
+  if (decision.handler === "scan") {
+    return `migrate scan --repo ${decision.repoUrl} --lang ${decision.targetLanguage} --yes`;
+  }
+  const contextFlag = decision.noContext ? " --no-context" : "";
+  return `migrate rewrite --repo ${decision.repoUrl} --to ${decision.targetLanguage}${contextFlag} --yes`;
+}
+
+/**
+ * Short acknowledgement printed when CCS auto-executes the migration.
+ * Stays friendly and tells the user exactly what's running.
+ */
+export function formatRouterAck(decision: RouterDecision): string {
+  const handlerLabel = decision.handler === "scan"
+    ? "Scanning external service calls"
+    : "Running full codebase rewrite analysis";
+  const repoLabel = shortRepoLabel(decision);
+  const sourceNote = decision.sourceLanguage ? ` (from ${decision.sourceLanguage})` : "";
+  const contextNote = decision.noContext ? " · context disabled for neutral benchmark" : "";
+  return [
+    `${handlerLabel}: **${repoLabel}**${sourceNote} → \`${decision.targetLanguage}\`${contextNote}`,
+    `_Detected from your message — type \`cancel\` after to stop, or type explicitly with \`/migrate\` next time._`,
+  ].join("\n");
+}
+
+/**
+ * Short clarifying question shown when the router has a repo but no target
+ * language. The App stores the partial decision and treats the next user
+ * message as the language reply.
+ */
+export function formatRouterClarification(decision: RouterDecision): string {
+  const repoLabel = shortRepoLabel(decision);
+  return [
+    `Looks like you want to migrate **${repoLabel}**, but I couldn't tell the **target language** from your message.`,
+    ``,
+    `Reply with one word — for example \`csharp\`, \`typescript\`, \`python\`, \`java\`, or \`go\`. Type \`cancel\` to drop it.`,
+  ].join("\n");
+}
+
+/**
+ * Legacy formatter — kept so existing call sites that previously rendered the
+ * verbose "re-run with this command" text still compile. New code paths
+ * should use formatRouterAck / formatRouterClarification.
  */
 export function formatRouterConfirmation(decision: RouterDecision): string {
-  const handlerLabel = decision.handler === "scan"
-    ? "scan external service calls"
-    : "full codebase rewrite analysis";
-
-  const lines = [
-    `Detected migration intent (${decision.confidence} confidence).`,
-    ``,
-    `**Action:** /migrate ${decision.handler}`,
-    `**Repo:** ${decision.repoUrl}`,
-    `**Target language:** ${decision.targetLanguage}`,
-  ];
-
-  if (decision.sourceLanguage) {
-    lines.push(`**Source language:** ${decision.sourceLanguage}`);
+  if (decision.targetLanguageWasInferred || !decision.targetLanguage) {
+    return formatRouterClarification(decision);
   }
-
-  lines.push(
-    ``,
-    `This will ${handlerLabel} for the repo above.`,
-    ``,
-    `To confirm, re-run with the explicit command:`,
-    `  /migrate ${decision.handler} --repo ${decision.repoUrl} --${decision.handler === "scan" ? "lang" : "to"} ${decision.targetLanguage} --yes`,
-  );
-
-  return lines.join("\n");
+  return formatRouterAck(decision);
 }

@@ -18,12 +18,28 @@ export class MinerService {
     if (process.platform === "win32") {
       return join(process.env.APPDATA || "", "Code", "User", "workspaceStorage");
     }
+    if (process.platform === "linux") {
+      return join(homedir(), ".config", "Code", "User", "workspaceStorage");
+    }
     return join(homedir(), "Library", "Application Support", "Code", "User", "workspaceStorage");
+  }
+
+  private getVSCodeGlobalPath(): string {
+    if (process.platform === "win32") {
+      return join(process.env.APPDATA || "", "Code", "User", "globalStorage");
+    }
+    if (process.platform === "linux") {
+      return join(homedir(), ".config", "Code", "User", "globalStorage");
+    }
+    return join(homedir(), "Library", "Application Support", "Code", "User", "globalStorage");
   }
 
   private getCursorPath(): string {
     if (process.platform === "win32") {
       return join(process.env.APPDATA || "", "Cursor", "User", "workspaceStorage");
+    }
+    if (process.platform === "linux") {
+      return join(homedir(), ".config", "Cursor", "User", "workspaceStorage");
     }
     return join(homedir(), "Library", "Application Support", "Cursor", "User", "workspaceStorage");
   }
@@ -217,7 +233,7 @@ export class MinerService {
   async harvestVSCode(): Promise<MemoryEntry[]> {
     const memories: MemoryEntry[] = [];
     const vscodePath = this.getVSCodePath();
-    const globalPath = join(homedir(), "Library", "Application Support", "Code", "User", "globalStorage");
+    const globalPath = this.getVSCodeGlobalPath();
 
     console.log(`Scanning VSCode path: ${vscodePath}`);
     console.log(`Scanning Global path: ${globalPath}`);

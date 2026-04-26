@@ -180,4 +180,16 @@ program
     }
   });
 
+// ---------------------------------------------------------------------------
+// ccs-code mcp
+// ---------------------------------------------------------------------------
+
+program
+  .command("mcp")
+  .description("Start the CCS MCP server for Codex and Claude Code")
+  .action(async () => {
+    const { startMcpServer } = await import("./mcp/server.js");
+    await startMcpServer();
+  });
+
 program.parse();

@@ -1,5 +1,5 @@
 import { promises as fs } from "fs";
-import { join, basename, extname } from "path";
+import { dirname, join, basename, extname } from "path";
 
 type WikiPage = { filename: string; content: string };
 
@@ -262,7 +262,7 @@ export async function ingestAll(vaultPath: string): Promise<{
         const pages = await ingestHtml(filePath, vaultPath);
         for (const page of pages) {
           const fullPath = join(vaultPath, page.filename);
-          await fs.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+          await fs.mkdir(dirname(fullPath), { recursive: true });
           let existed = false;
           try { await fs.access(fullPath); existed = true; } catch {}
           await fs.writeFile(fullPath, page.content, "utf-8");
@@ -273,7 +273,7 @@ export async function ingestAll(vaultPath: string): Promise<{
         const { pages, updated: mergedPaths } = await ingestConversationsJson(filePath, vaultPath);
         for (const page of pages) {
           const fullPath = join(vaultPath, page.filename);
-          await fs.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+          await fs.mkdir(dirname(fullPath), { recursive: true });
           await fs.writeFile(fullPath, page.content, "utf-8");
           written.push(page.filename);
         }
@@ -283,7 +283,7 @@ export async function ingestAll(vaultPath: string): Promise<{
         console.log(`[Ingestor]   -> Generated ${pages.length} wiki pages from MD`);
         for (const page of pages) {
           const fullPath = join(vaultPath, page.filename);
-          await fs.mkdir(fullPath.replace(/\/[^/]+$/, ""), { recursive: true });
+          await fs.mkdir(dirname(fullPath), { recursive: true });
           let existed = false;
           try { await fs.access(fullPath); existed = true; } catch {}
           await fs.writeFile(fullPath, page.content, "utf-8");

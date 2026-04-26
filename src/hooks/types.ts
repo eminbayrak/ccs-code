@@ -4,6 +4,8 @@
  * Mirrors Claude Code hooks architecture for compatibility
  */
 
+import type { AgentType } from "../orchestrator/types.js";
+
 // Event types that can trigger hooks
 export type HookEventType =
     | "session_start"
@@ -83,7 +85,7 @@ export type HttpHook = {
 
 export type AgentHook = {
     type: "agent";
-    agentType: "research" | "implementation" | "review";
+    agentType: AgentType;
     prompt: string;
 };
 

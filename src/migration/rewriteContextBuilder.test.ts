@@ -76,6 +76,8 @@ describe("buildRewriteContextDoc", () => {
     );
 
     expect(doc).toContain("Target Architecture Disposition");
+    expect(doc).toContain("Modernization Baseline");
+    expect(doc).toContain("../architecture-baseline.md");
     expect(doc).toContain("**Recommended role:** `microservice`");
     expect(doc).toContain("Implementation gate:");
     expect(doc).toContain("Cancelled orders remain impossible to fulfill.");

@@ -189,6 +189,8 @@ For every discovered service or component, Sonnet extracts:
 
 ## Output Structure
 
+Report quality is defined in [Migration Report Quality Standard](./migration-report-quality-standard.md). The important rule is that generated docs are only implementation-ready when they give Codex or Claude Code source-backed behavior, a target landing zone, an implementation gate, and validation scenarios.
+
 ### Service Scan (`/migrate scan`)
 
 ```

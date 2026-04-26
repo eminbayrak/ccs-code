@@ -18,6 +18,7 @@ export type FileCoverage = {
   originalLines: number;
   providedLines: number;
   truncated: boolean;
+  segments?: Array<{ startLine: number; endLine: number }>;
 };
 
 export type SourceCoverage = {
@@ -36,36 +37,69 @@ export function buildNumberedSourceExcerpt(
 ): NumberedSourceExcerpt {
   const lines = content.split("\n");
   const width = String(lines.length).length;
-  const rendered: string[] = [];
-  let chars = 0;
-  let providedLines = 0;
-  let truncated = false;
+  const renderLine = (index: number) => `${String(index + 1).padStart(width, "0")} | ${lines[index] ?? ""}`;
+
+  const fullRendered = lines.map((_, index) => renderLine(index)).join("\n");
+  if (fullRendered.length <= maxChars) {
+    return {
+      path,
+      content: fullRendered,
+      originalChars: content.length,
+      providedChars: content.length,
+      originalLines: lines.length,
+      providedLines: lines.length,
+      truncated: false,
+      segments: [{ startLine: 1, endLine: lines.length }],
+    };
+  }
+
+  const headBudget = Math.max(1, Math.floor(maxChars * 0.55));
+  const tailBudget = Math.max(1, maxChars - headBudget);
+  const head: string[] = [];
+  const tail: string[] = [];
+  let headChars = 0;
+  let tailChars = 0;
+  let headEnd = -1;
+  let tailStart = lines.length;
 
   for (let i = 0; i < lines.length; i++) {
-    const numbered = `${String(i + 1).padStart(width, "0")} | ${lines[i] ?? ""}`;
-    if (chars + numbered.length + 1 > maxChars) {
-      truncated = true;
+    const numbered = renderLine(i);
+    if (headChars + numbered.length + 1 > headBudget) {
       break;
     }
-    rendered.push(numbered);
-    chars += numbered.length + 1;
-    providedLines++;
+    head.push(numbered);
+    headChars += numbered.length + 1;
+    headEnd = i;
   }
 
-  if (truncated) {
-    rendered.push(
-      `[TRUNCATED: only the first ${providedLines} of ${lines.length} lines were provided to the analysis model]`,
-    );
+  for (let i = lines.length - 1; i > headEnd; i--) {
+    const numbered = renderLine(i);
+    if (tailChars + numbered.length + 1 > tailBudget) {
+      break;
+    }
+    tail.unshift(numbered);
+    tailChars += numbered.length + 1;
+    tailStart = i;
   }
+
+  const omittedStart = headEnd + 2;
+  const omittedEnd = tailStart;
+  const marker = `[TRUNCATED MIDDLE: lines ${omittedStart}-${omittedEnd} omitted. Head and tail were provided so the model can see imports, declarations, endings, returns, and cleanup logic.]`;
+  const rendered = [...head, marker, ...tail];
+  const segments = [
+    head.length > 0 ? { startLine: 1, endLine: headEnd + 1 } : null,
+    tail.length > 0 ? { startLine: tailStart + 1, endLine: lines.length } : null,
+  ].filter((segment): segment is { startLine: number; endLine: number } => segment !== null);
 
   return {
     path,
     content: rendered.join("\n"),
     originalChars: content.length,
-    providedChars: Math.min(chars, content.length),
+    providedChars: Math.min(headChars + tailChars, content.length),
     originalLines: lines.length,
-    providedLines,
-    truncated,
+    providedLines: head.length + tail.length,
+    truncated: true,
+    segments,
   };
 }
 
@@ -145,10 +179,24 @@ export function summarizeCoverage(coverage: SourceCoverage): string[] {
 
   return [
     `${coverage.filesProvided} source file(s) were provided to the analysis model.`,
-    ...coverage.filesTruncated.map((f) =>
-      `${f.path}: analyzed first ${f.providedLines}/${f.originalLines} lines (${f.providedChars}/${f.originalChars} chars).`,
-    ),
+    ...coverage.filesTruncated.map((f) => {
+      if (!f.segments || f.segments.length === 0) {
+        return `${f.path}: analyzed first ${f.providedLines}/${f.originalLines} lines (${f.providedChars}/${f.originalChars} chars).`;
+      }
+      return `${f.path}: analyzed ${formatSegments(f)} (${f.providedLines}/${f.originalLines} lines, ${f.providedChars}/${f.originalChars} chars).`;
+    }),
   ];
+}
+
+function formatSegments(file: FileCoverage): string {
+  if (!file.segments || file.segments.length === 0) {
+    return `a truncated excerpt`;
+  }
+  return file.segments
+    .map((segment) => segment.startLine === segment.endLine
+      ? `line ${segment.startLine}`
+      : `lines ${segment.startLine}-${segment.endLine}`)
+    .join(" and ");
 }
 
 function normalizeText(value: string): string {

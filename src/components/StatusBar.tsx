@@ -23,19 +23,32 @@ export function StatusBar({
   const width = terminalWidth ?? process.stdout.columns ?? 120;
   const model = activeModel === "Loading..." ? "…" : activeModel;
 
-  // Compact single-line footer — mirrors Claude Code's bottom status bar
+  // Compact single-line footer — mirrors Claude Code's bottom status bar.
+  // Layout uses flex space-between + truncate-end so the line can never wrap,
+  // regardless of small off-by-one terminal-width quirks.
   const left = `${model} · ${sandboxStatus} · ${dir}`;
-  const right = `${instructionsCount} md · ${skillsCount} skills · ? for shortcuts`;
+  const rightLong = `${instructionsCount} md · ${skillsCount} skills · ? for shortcuts`;
+  const rightShort = `${instructionsCount} md · ${skillsCount} skills · ?`;
 
-  const gap = Math.max(1, width - left.length - right.length - 4);
-  const showRight = width >= 80;
+  // The right column shows progressively less as the terminal narrows.
+  const showRightLong = width >= 80;
+  const showRightShort = width >= 60 && !showRightLong;
 
   return (
-    <Box paddingX={2} marginTop={1}>
-      <Text dimColor>
-        {left}
-        {showRight && " ".repeat(gap) + right}
-      </Text>
+    <Box paddingX={2} marginTop={1} width={width} flexDirection="row" justifyContent="space-between">
+      <Box flexGrow={0} flexShrink={1}>
+        <Text dimColor wrap="truncate-end">{left}</Text>
+      </Box>
+      {showRightLong && (
+        <Box flexGrow={0} flexShrink={0} marginLeft={2}>
+          <Text dimColor wrap="truncate-end">{rightLong}</Text>
+        </Box>
+      )}
+      {showRightShort && (
+        <Box flexGrow={0} flexShrink={0} marginLeft={2}>
+          <Text dimColor wrap="truncate-end">{rightShort}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

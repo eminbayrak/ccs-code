@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { promises as fs } from "fs";
 import { join } from "path";
 import { z } from "zod";
@@ -80,7 +80,7 @@ export type RateLimitInfo = {
 
 export function checkRateLimit(): RateLimitInfo | null {
   try {
-    const raw = execSync("gh api /rate_limit --jq '.resources.core'", {
+    const raw = execFileSync("gh", ["api", "/rate_limit", "--jq", ".resources.core"], {
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 10_000,
     }).toString();
@@ -105,7 +105,7 @@ function hasGhCli(): boolean {
     try {
         // Use `gh auth token` — exits 0 if any token is available (env var or keyring)
         // `gh auth status` exits 1 when keyring is broken even if a token exists
-        execSync("gh auth token", { stdio: "ignore" });
+        execFileSync("gh", ["auth", "token"], { stdio: "ignore" });
         _hasGhCli = true;
     } catch {
         _hasGhCli = false;
@@ -127,7 +127,7 @@ function fetchWithGhCli<T>(url: string): T {
     } catch {
         apiPath = url.startsWith("/") ? url : `/${url}`;
     }
-    const output = execSync(`gh api '${apiPath}'`, {
+    const output = execFileSync("gh", ["api", apiPath], {
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 30_000,
     }).toString();

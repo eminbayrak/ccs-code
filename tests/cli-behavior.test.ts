@@ -7,6 +7,7 @@ import {
     resetGlobalHookEngine,
 } from "../src/hooks/engine.js";
 import { runOrchestration } from "../src/orchestrator/runtime.js";
+import { planGoal } from "../src/orchestrator/planner.js";
 import { listAgentRuns } from "../src/tasks/agentRuns.js";
 import type { ToolDescriptor } from "../src/capabilities/types.js";
 import type { LLMProvider, Message } from "../src/llm/providers/base.js";
@@ -146,5 +147,29 @@ describe("CLI behavior: hooks, tools, agents", () => {
         expect(run).toBeDefined();
         expect(run?.status).toBe("completed");
         expect(run?.result).toBe("agent-run-result");
+    });
+
+    it("sanitizes natural-language GitHub code search queries", () => {
+        const plan = planGoal(
+            "migrate this repo https://github.com/acme/legacy-api to csharp",
+            {
+                tools: [
+                    {
+                        id: "github.search_code",
+                        name: "github_search_code",
+                        kind: "tool",
+                        description: "Search code",
+                        riskClass: "read",
+                        handler: async () => ({ status: "success", output: {} }),
+                    },
+                ],
+                connectors: [],
+            },
+        );
+
+        const searchStep = plan.steps.find((step) => step.type === "tool_call" && step.toolName === "github_search_code");
+        expect(searchStep?.type).toBe("tool_call");
+        if (searchStep?.type !== "tool_call") throw new Error("Expected github_search_code tool step");
+        expect(searchStep.input).toEqual({ query: "csharp repo:acme/legacy-api" });
     });
 });

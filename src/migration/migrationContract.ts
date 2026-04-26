@@ -1,4 +1,5 @@
 import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
+import type { ComponentVerification } from "./rewriteVerifier.js";
 
 export type MigrationContractInput = {
   repoUrl: string;
@@ -6,7 +7,11 @@ export type MigrationContractInput = {
   analyses: ComponentAnalysis[];
   migrationOrder: string[];
   generatedAt: string;
+  /** Optional per-component verification reports keyed by component name. */
+  verifications?: Map<string, ComponentVerification>;
 };
+
+export type ComponentGateStatus = "ready" | "needs_review" | "blocked";
 
 function escapeTable(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -26,21 +31,38 @@ function targetFileFor(name: string, language: string): string {
   return `${snake}.${ext}`;
 }
 
-function implementationStatus(analysis: ComponentAnalysis): "ready" | "blocked" {
-  return analysis.targetRole === "human_review" ||
-    analysis.targetRole === "unknown" ||
-    analysis.humanQuestions.length > 0
-    ? "blocked"
-    : "ready";
+function baseImplementationStatus(analysis: ComponentAnalysis): ComponentGateStatus {
+  if (analysis.targetRole === "human_review" || analysis.targetRole === "unknown") {
+    return "blocked";
+  }
+  if (analysis.humanQuestions.length > 0 || analysis.confidence === "low" || analysis.sourceCoverage.filesTruncated.length > 0) {
+    return "needs_review";
+  }
+  return "ready";
 }
 
-function reviewReason(analysis: ComponentAnalysis): string[] {
+function implementationStatus(
+  analysis: ComponentAnalysis,
+  verification?: ComponentVerification,
+): ComponentGateStatus {
+  const base = baseImplementationStatus(analysis);
+  if (base === "blocked") return "blocked";
+  if (!verification) return base;
+  if (verification.trustVerdict === "blocked") return "blocked";
+  if (verification.trustVerdict === "needs_review") return "needs_review";
+  return base;
+}
+
+function reviewReason(
+  analysis: ComponentAnalysis,
+  verification?: ComponentVerification,
+): string[] {
   const reasons: string[] = [];
   if (analysis.targetRole === "human_review" || analysis.targetRole === "unknown") {
     reasons.push(`target role is ${analysis.targetRole}`);
   }
   if (analysis.humanQuestions.length > 0) {
-    reasons.push("human questions are unresolved");
+    reasons.push("human questions require review");
   }
   if (analysis.confidence === "low") {
     reasons.push("analysis confidence is low");
@@ -48,12 +70,18 @@ function reviewReason(analysis: ComponentAnalysis): string[] {
   if (analysis.sourceCoverage.filesTruncated.length > 0) {
     reasons.push("source coverage was truncated");
   }
+  if (verification && verification.trustVerdict !== "ready") {
+    for (const reason of verification.trustReasons) {
+      reasons.push(`verification: ${reason}`);
+    }
+  }
   return reasons;
 }
 
 export function buildMigrationContract(input: MigrationContractInput): string {
-  const { repoUrl, frameworkInfo, analyses, migrationOrder, generatedAt } = input;
+  const { repoUrl, frameworkInfo, analyses, migrationOrder, generatedAt, verifications } = input;
   const byName = new Map(analyses.map((a) => [a.component.name, a]));
+  const verifyOf = (name: string) => verifications?.get(name);
 
   const contract = {
     schemaVersion: "1.0",
@@ -68,6 +96,7 @@ export function buildMigrationContract(input: MigrationContractInput): string {
       packageManager: frameworkInfo.packageManager,
     },
     globalGuardrails: [
+      "Read preflight-readiness.md and architecture-baseline.md before implementation.",
       "Do not perform a one-for-one rewrite without target architecture classification.",
       "Preserve business behaviour, not legacy control flow.",
       "Classify every important fact as observed, inferred, or unknown.",
@@ -78,11 +107,12 @@ export function buildMigrationContract(input: MigrationContractInput): string {
     components: migrationOrder.flatMap((name) => {
       const analysis = byName.get(name);
       if (!analysis) return [];
+      const verification = verifyOf(name);
       return [{
         name: analysis.component.name,
         type: analysis.component.type,
-        implementationStatus: implementationStatus(analysis),
-        requiredReviewBeforeImplementation: reviewReason(analysis),
+        implementationStatus: implementationStatus(analysis, verification),
+        requiredReviewBeforeImplementation: reviewReason(analysis, verification),
         sourceFiles: analysis.component.filePaths,
         dependencies: analysis.component.dependencies,
         purpose: analysis.purpose,
@@ -119,6 +149,23 @@ export function buildMigrationContract(input: MigrationContractInput): string {
           ...analysis.validationScenarios,
         ],
         evidence: analysis.evidence,
+        verification: verification ? {
+          trustVerdict: verification.trustVerdict,
+          trustReasons: verification.trustReasons,
+          verifierModel: verification.verifierModel,
+          generatedAt: verification.generatedAt,
+          totals: verification.totals,
+          claims: verification.claims.map((claim) => ({
+            id: claim.id,
+            kind: claim.kind,
+            statement: claim.statement,
+            loadBearing: claim.loadBearing,
+            outcome: claim.outcome,
+            reason: claim.reason,
+            evidence: claim.evidence,
+          })),
+          ...(verification.error ? { error: verification.error } : {}),
+        } : null,
       }];
     }),
   };
@@ -127,13 +174,14 @@ export function buildMigrationContract(input: MigrationContractInput): string {
 }
 
 export function buildDispositionMatrix(input: MigrationContractInput): string {
-  const { repoUrl, frameworkInfo, analyses, migrationOrder, generatedAt } = input;
+  const { repoUrl, frameworkInfo, analyses, migrationOrder, generatedAt, verifications } = input;
   const byName = new Map(analyses.map((a) => [a.component.name, a]));
 
   const rows = migrationOrder.flatMap((name) => {
     const a = byName.get(name);
     if (!a) return [];
-    return `| ${escapeTable(a.component.name)} | ${a.component.type} | ${a.targetRole} | ${implementationStatus(a)} | ${escapeTable(a.targetIntegrationBoundary)} | ${a.confidence} | ${a.complexity} | ${escapeTable(a.targetRoleRationale)} |`;
+    const v = verifications?.get(name);
+    return `| ${escapeTable(a.component.name)} | ${a.component.type} | ${a.targetRole} | ${implementationStatus(a, v)} | ${escapeTable(a.targetIntegrationBoundary)} | ${a.confidence} | ${a.complexity} | ${escapeTable(a.targetRoleRationale)} |`;
   });
 
   return `# Component Disposition Matrix
@@ -187,19 +235,21 @@ ${rows.join("\n") || "| _none_ |  |  | _No open human questions identified._ |"}
 }
 
 export function buildHowToMigrate(input: MigrationContractInput): string {
-  const { analyses, migrationOrder } = input;
+  const { analyses, migrationOrder, verifications } = input;
   const byName = new Map(analyses.map((a) => [a.component.name, a]));
 
   const steps = migrationOrder.flatMap((name, index) => {
     const a = byName.get(name);
     if (!a) return [];
+    const v = verifications?.get(name);
     const targetFile = targetFileFor(a.component.name, input.frameworkInfo.targetLanguage);
-    const status = implementationStatus(a);
+    const status = implementationStatus(a, v);
     return `${index + 1}. **${a.component.name}** -> \`${a.targetRole}\`
-   Context: \`context/${a.component.name}.md\`
+   Context: \`components/${a.component.name}.md\`
+   Verification: \`components/${a.component.name}.md\`
    Target file hint: \`${targetFile}\`
-   Gate: \`${status}\`${status === "blocked" ? ` (${reviewReason(a).join("; ")})` : ""}
-   Codex prompt: \`Read AGENTS.md, migration-contract.json, and context/${a.component.name}.md, then implement only ${a.component.name} if its gate is ready.\`
+   Gate: \`${status}\`${status !== "ready" ? ` (${reviewReason(a, v).join("; ")})` : ""}
+   Codex prompt: \`Read AGENTS.md, preflight-readiness.md, architecture-baseline.md, migration-contract.json, and components/${a.component.name}.md, then implement only ${a.component.name} if its gate is ready.\`
    Claude Code command: \`/project:rewrite-${a.component.name}\`
    Contract role: ${a.targetRoleRationale}
    Human questions: ${a.humanQuestions.length > 0 ? a.humanQuestions.join("; ") : "none"}
@@ -208,11 +258,13 @@ export function buildHowToMigrate(input: MigrationContractInput): string {
 
   return `# How To Migrate
 
-Use this guide with \`migration-contract.json\`, \`component-disposition-matrix.md\`, and the per-component context docs.
+Use this guide with \`preflight-readiness.md\`, \`architecture-baseline.md\`, \`migration-contract.json\`, \`component-disposition-matrix.md\`, and the per-component context docs.
 
 ## Execution Rules
 
-- Start with components that have no unresolved human questions.
+- Start by reading \`preflight-readiness.md\` to understand missing context and readiness gaps.
+- Use \`architecture-baseline.md\` for target landing-zone decisions.
+- Start with components whose contract status is \`ready\`.
 - Do not implement components marked \`human_review\` or \`unknown\` until the questions are answered.
 - Preserve observed business rules exactly.
 - Treat inferred or uncited facts as review items.
@@ -225,8 +277,13 @@ ${steps.join("\n\n") || "_No migration steps generated._"}
 }
 
 export function buildAgentIntegrationGuide(input: MigrationContractInput): string {
-  const ready = input.analyses.filter((a) => implementationStatus(a) === "ready").length;
-  const blocked = input.analyses.length - ready;
+  const ready = input.analyses.filter(
+    (a) => implementationStatus(a, input.verifications?.get(a.component.name)) === "ready",
+  ).length;
+  const needsReview = input.analyses.filter(
+    (a) => implementationStatus(a, input.verifications?.get(a.component.name)) === "needs_review",
+  ).length;
+  const blocked = input.analyses.length - ready - needsReview;
 
   return `# Agent Integration Guide
 
@@ -242,38 +299,50 @@ Use CCS Code as a migration contract generator and agent pre-flight tool, not as
 This mode works today with no custom protocol:
 
 1. Run CCS Code against the legacy repo.
-2. Put the generated \`rewrite/\` artifacts beside the target modernization project.
-3. Ask Codex or Claude Code to read \`AGENTS.md\`, \`migration-contract.json\`, and the relevant \`context/<Component>.md\`.
-4. Only implement components whose contract status is \`ready\`.
-5. Resolve \`human-questions.md\` before implementing blocked components.
+2. Review \`preflight-readiness.md\` and \`architecture-baseline.md\` before trusting target-role decisions.
+3. Put the generated run folder beside the target modernization project.
+4. Ask Codex or Claude Code to read \`AGENTS.md\`, \`migration-contract.json\`, and the relevant \`components/<Component>.md\`.
+5. Only implement components whose contract status is \`ready\`.
+6. Review \`human-questions.md\` before implementing needs-review or blocked components.
 
 ## Codex Usage
 
 \`\`\`
-codex "Read AGENTS.md, migration-contract.json, and HOW-TO-MIGRATE.md. Start with the first ready component and preserve every observed business rule."
+codex "Read AGENTS.md, preflight-readiness.md, architecture-baseline.md, migration-contract.json, and HOW-TO-MIGRATE.md. Start with the first ready component and preserve every observed business rule."
 \`\`\`
 
 Codex should treat \`migration-contract.json\` as the machine-readable source of truth and the context docs as the source-backed explanation.
 
 ## Claude Code Usage
 
-Copy \`rewrite/.claude/\` into the target project and run:
+Copy \`claude-commands/\` into the target project and run:
 
 \`\`\`
 /project:rewrite-<ComponentName>
 \`\`\`
 
-If the component is blocked by human questions, Claude Code should stop and report the required decisions instead of guessing.
+If the component is blocked or needs review, Claude Code should stop and report the required decisions instead of guessing.
 
-## Future Integration Mode: MCP Tool
+## Local MCP Integration Mode
 
-If this becomes a first-class tool for Codex, expose CCS Code as a queryable contract service rather than a coding agent:
+CCS Code can also run as a local stdio MCP server, so Codex or Claude Code can query migration artifacts directly:
 
-- \`ccs_generate_contract(repo, target)\` creates or refreshes the migration contract.
-- \`ccs_get_component_context(name)\` returns the evidence-backed context for one component.
-- \`ccs_get_ready_work()\` lists components safe for agent implementation.
-- \`ccs_record_human_answer(component, question, answer)\` captures architecture/product decisions.
-- \`ccs_validate_component(name, targetPath)\` checks implementation against validation scenarios.
+- \`ccs_get_ready_work(migrationDir)\` lists components safe for agent implementation.
+- \`ccs_get_component_context(migrationDir, componentName)\` returns the evidence-backed context for one component.
+- \`ccs_get_human_questions(migrationDir)\` returns unresolved architecture or product decisions.
+- \`ccs_get_validation_contract(migrationDir, componentName)\` returns gates, risks, scenarios, and acceptance criteria.
+- \`ccs_get_architecture_baseline(migrationDir)\` returns the target architecture baseline or disposition matrix.
+- \`ccs_get_business_logic(migrationDir)\` returns reverse-engineered rules, contracts, risks, and validation scenarios.
+- \`ccs_get_system_graph(migrationDir)\` returns the component/file/package/target-role graph.
+- \`ccs_get_dependency_impact(migrationDir, nodeName)\` returns dependencies, dependents, source files, and retest scope for one component.
+
+Codex registration:
+
+\`\`\`
+codex mcp add ccs -- ccs-code mcp
+\`\`\`
+
+Claude Code can register the same command in its MCP config.
 
 ## Pipeline Integration
 
@@ -287,9 +356,16 @@ For a multi-agent remediation pipeline, CCS Code should feed the pre-flight and 
 ## Current Contract Summary
 
 - Ready components: ${ready}
+- Needs-review components: ${needsReview}
 - Blocked components: ${blocked}
+- Preflight file: \`preflight-readiness.md\`
+- Architecture baseline file: \`architecture-baseline.md\`
 - Contract file: \`migration-contract.json\`
 - Human decision file: \`human-questions.md\`
 - Disposition file: \`component-disposition-matrix.md\`
+- Verification summary: \`verification-summary.md\`
+- Per-component verification: \`components/<Component>.md\`
+
+Components in \`needs_review\` were analyzed but had at least one load-bearing claim that could not be confirmed against the cited source. A reviewer must accept or rewrite those claims before a coding agent picks them up.
 `;
 }

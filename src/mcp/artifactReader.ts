@@ -1,0 +1,502 @@
+import { promises as fs } from "node:fs";
+import { homedir } from "node:os";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
+
+export type MigrationContractComponent = {
+  name: string;
+  type?: string;
+  implementationStatus?: "ready" | "needs_review" | "blocked" | string;
+  requiredReviewBeforeImplementation?: string[];
+  sourceFiles?: string[];
+  dependencies?: string[];
+  purpose?: string;
+  target?: {
+    role?: string;
+    rationale?: string;
+    integrationBoundary?: string;
+    implementationPattern?: string;
+    targetFileHint?: string;
+    dependencies?: string[];
+  };
+  risk?: {
+    complexity?: string;
+    confidence?: string;
+    migrationRisks?: string[];
+    unknownFields?: string[];
+  };
+  businessRules?: Array<{ statement?: string; evidence?: unknown[] }>;
+  contracts?: { input?: Record<string, unknown>; output?: Record<string, unknown> };
+  humanQuestions?: string[];
+  validationScenarios?: string[];
+  acceptanceCriteria?: string[];
+  verification?: {
+    trustVerdict?: "ready" | "needs_review" | "blocked" | string;
+    trustReasons?: string[];
+    verifierModel?: string;
+    generatedAt?: string;
+    totals?: {
+      claimsChecked?: number;
+      verified?: number;
+      unsupported?: number;
+      inconclusive?: number;
+      noEvidence?: number;
+    };
+    claims?: Array<{
+      id?: string;
+      kind?: string;
+      statement?: string;
+      loadBearing?: boolean;
+      outcome?: string;
+      reason?: string;
+      evidence?: unknown;
+    }>;
+    error?: string;
+  } | null;
+};
+
+export type MigrationContract = {
+  schemaVersion?: string;
+  generatedAt?: string;
+  repoUrl?: string;
+  migration?: Record<string, unknown>;
+  globalGuardrails?: string[];
+  migrationOrder?: string[];
+  components?: MigrationContractComponent[];
+};
+
+type LocalVaultConfig = { activeVault?: string };
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await fs.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readLocalVaultConfig(): Promise<LocalVaultConfig> {
+  try {
+    const raw = await fs.readFile(join(process.cwd(), "ccsconfig.json"), "utf-8");
+    return JSON.parse(raw) as LocalVaultConfig;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Search the given directory for any first-level subdirectory that looks like
+ * a CCS run (contains migration-contract.json). Used to discover repo-scoped
+ * run folders under the migration root, e.g.:
+ *   migration/eminbayrak-node-orders-api/migration-contract.json
+ */
+async function findRunDirIn(directory: string): Promise<string | null> {
+  let entries: string[] = [];
+  try {
+    entries = await fs.readdir(directory);
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    if (name.startsWith(".")) continue;
+    const subdir = join(directory, name);
+    let isDir = false;
+    try { isDir = (await fs.stat(subdir)).isDirectory(); } catch { /* skip */ }
+    if (!isDir) continue;
+    if (await exists(join(subdir, "migration-contract.json"))) return subdir;
+  }
+  return null;
+}
+
+export async function resolveRewriteDir(migrationDir?: string): Promise<string> {
+  const candidates: string[] = [];
+
+  if (migrationDir?.trim()) {
+    const explicit = resolve(process.cwd(), migrationDir);
+    // Try the dir as-is (user may have pointed at the repo run folder),
+    // then any first-level subdir that looks like a run, then the legacy
+    // <migrationDir>/rewrite/ layout.
+    candidates.push(explicit);
+    const found = await findRunDirIn(explicit);
+    if (found) candidates.push(found);
+    candidates.push(join(explicit, "rewrite"));
+  }
+
+  // Current working directory could itself be a run folder.
+  candidates.push(process.cwd());
+  const cwdRun = await findRunDirIn(process.cwd());
+  if (cwdRun) candidates.push(cwdRun);
+  candidates.push(join(process.cwd(), "rewrite"));
+
+  const localConfig = await readLocalVaultConfig();
+  if (localConfig.activeVault) {
+    const vaultMigrationDir = join(localConfig.activeVault, "migration");
+    candidates.push(vaultMigrationDir);
+    const vaultRun = await findRunDirIn(vaultMigrationDir);
+    if (vaultRun) candidates.push(vaultRun);
+    candidates.push(join(vaultMigrationDir, "rewrite"));
+  }
+
+  const homeMigrationDir = join(homedir(), ".ccs", "migration");
+  candidates.push(homeMigrationDir);
+  const homeRun = await findRunDirIn(homeMigrationDir);
+  if (homeRun) candidates.push(homeRun);
+  candidates.push(join(homeMigrationDir, "rewrite"));
+
+  for (const candidate of candidates) {
+    if (await exists(join(candidate, "migration-contract.json"))) {
+      return candidate;
+    }
+  }
+
+  return candidates[0] ?? join(homedir(), ".ccs", "migration");
+}
+
+function safePath(root: string, ...parts: string[]): string {
+  const target = resolve(root, ...parts);
+  const rel = relative(root, target);
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Path escapes migration directory: ${parts.join("/")}`);
+  }
+  return target;
+}
+
+function findComponent(contract: MigrationContract, componentName: string): MigrationContractComponent {
+  const component = contract.components?.find((c) =>
+    c.name === componentName || c.name.toLowerCase() === componentName.toLowerCase()
+  );
+  if (!component) {
+    const names = contract.components?.map((c) => c.name).join(", ") || "none";
+    throw new Error(`Component "${componentName}" was not found. Available components: ${names}`);
+  }
+  return component;
+}
+
+export async function readMigrationContract(migrationDir?: string): Promise<{
+  rewriteDir: string;
+  contract: MigrationContract;
+}> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const contractPath = safePath(rewriteDir, "migration-contract.json");
+  const raw = await fs.readFile(contractPath, "utf-8");
+  return { rewriteDir, contract: JSON.parse(raw) as MigrationContract };
+}
+
+export async function listReadyComponents(migrationDir?: string): Promise<string> {
+  const { rewriteDir, contract } = await readMigrationContract(migrationDir);
+  const components = contract.components ?? [];
+  const ready = components
+    .filter((component) => component.implementationStatus === "ready")
+    .map((component) => ({
+      name: component.name,
+      type: component.type ?? "unknown",
+      targetRole: component.target?.role ?? "unknown",
+      targetFileHint: component.target?.targetFileHint ?? "unknown",
+      dependencies: component.dependencies ?? [],
+      validationScenarios: component.validationScenarios ?? [],
+      verificationVerdict: component.verification?.trustVerdict ?? "not_run",
+    }));
+
+  const needsReview = components
+    .filter((component) => component.implementationStatus === "needs_review")
+    .map((component) => ({
+      name: component.name,
+      reasons: component.verification?.trustReasons ?? component.requiredReviewBeforeImplementation ?? [],
+    }));
+
+  return JSON.stringify({
+    rewriteDir,
+    repoUrl: contract.repoUrl,
+    migration: contract.migration,
+    ready,
+    needsReview,
+    needsReviewCount: needsReview.length,
+    blockedCount: components.filter((c) => c.implementationStatus === "blocked").length,
+  }, null, 2);
+}
+
+export async function getVerificationReport(
+  migrationDir: string | undefined,
+  componentName?: string,
+): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+
+  if (componentName?.trim()) {
+    const safeName = basename(componentName);
+    const perComponentPath = safePath(rewriteDir, "verification", `${safeName}.md`);
+    if (await exists(perComponentPath)) {
+      return fs.readFile(perComponentPath, "utf-8");
+    }
+    // Fallback: pull verification info from migration-contract.json.
+    const { contract } = await readMigrationContract(rewriteDir);
+    const component = findComponent(contract, componentName);
+    return JSON.stringify({
+      rewriteDir,
+      component: component.name,
+      implementationStatus: component.implementationStatus,
+      verification: component.verification ?? null,
+      note: component.verification
+        ? "Per-component verification markdown was not found; returning the contract's verification entry."
+        : "No verification was run for this component.",
+    }, null, 2);
+  }
+
+  // No component specified — return the summary doc, or a derived summary.
+  const summaryPath = safePath(rewriteDir, "verification-summary.md");
+  if (await exists(summaryPath)) {
+    return fs.readFile(summaryPath, "utf-8");
+  }
+
+  const { contract } = await readMigrationContract(rewriteDir);
+  const components = contract.components ?? [];
+  return JSON.stringify({
+    rewriteDir,
+    repoUrl: contract.repoUrl,
+    note: "No verification-summary.md artifact was found. This migration may have been generated by an older CCS version.",
+    componentVerdicts: components.map((component) => ({
+      name: component.name,
+      implementationStatus: component.implementationStatus,
+      verification: component.verification ?? null,
+    })),
+  }, null, 2);
+}
+
+export async function getComponentContext(
+  migrationDir: string | undefined,
+  componentName: string,
+): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const safeName = basename(componentName);
+  const contextPath = safePath(rewriteDir, "context", `${safeName}.md`);
+  return fs.readFile(contextPath, "utf-8");
+}
+
+export async function getHumanQuestions(migrationDir?: string): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const questionsPath = safePath(rewriteDir, "human-questions.md");
+  if (await exists(questionsPath)) {
+    return fs.readFile(questionsPath, "utf-8");
+  }
+
+  const { contract } = await readMigrationContract(rewriteDir);
+  const questions = (contract.components ?? []).flatMap((component) =>
+    (component.humanQuestions ?? []).map((question) => ({
+      component: component.name,
+      targetRole: component.target?.role ?? "unknown",
+      confidence: component.risk?.confidence ?? "unknown",
+      question,
+    }))
+  );
+
+  return JSON.stringify({ rewriteDir, questions }, null, 2);
+}
+
+export async function getValidationContract(
+  migrationDir: string | undefined,
+  componentName: string,
+): Promise<string> {
+  const { rewriteDir, contract } = await readMigrationContract(migrationDir);
+  const component = findComponent(contract, componentName);
+  return JSON.stringify({
+    rewriteDir,
+    component: component.name,
+    implementationStatus: component.implementationStatus,
+    requiredReviewBeforeImplementation: component.requiredReviewBeforeImplementation ?? [],
+    target: component.target ?? {},
+    risk: component.risk ?? {},
+    sourceFiles: component.sourceFiles ?? [],
+    businessRules: component.businessRules ?? [],
+    contracts: component.contracts ?? {},
+    humanQuestions: component.humanQuestions ?? [],
+    validationScenarios: component.validationScenarios ?? [],
+    acceptanceCriteria: component.acceptanceCriteria ?? [],
+  }, null, 2);
+}
+
+export async function getArchitectureBaseline(migrationDir?: string): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const baselinePath = safePath(rewriteDir, "architecture-baseline.md");
+  if (await exists(baselinePath)) {
+    return fs.readFile(baselinePath, "utf-8");
+  }
+
+  const matrixPath = safePath(rewriteDir, "component-disposition-matrix.md");
+  if (await exists(matrixPath)) {
+    return fs.readFile(matrixPath, "utf-8");
+  }
+
+  const { contract } = await readMigrationContract(rewriteDir);
+  return JSON.stringify({
+    rewriteDir,
+    repoUrl: contract.repoUrl,
+    migration: contract.migration,
+    globalGuardrails: contract.globalGuardrails ?? [],
+    targetDisposition: (contract.components ?? []).map((component) => ({
+      name: component.name,
+      type: component.type,
+      targetRole: component.target?.role,
+      rationale: component.target?.rationale,
+      integrationBoundary: component.target?.integrationBoundary,
+      implementationStatus: component.implementationStatus,
+    })),
+  }, null, 2);
+}
+
+export async function getPreflightReadiness(migrationDir?: string): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const preflightPath = safePath(rewriteDir, "preflight-readiness.md");
+  if (await exists(preflightPath)) {
+    return fs.readFile(preflightPath, "utf-8");
+  }
+
+  const { contract } = await readMigrationContract(rewriteDir);
+  return JSON.stringify({
+    rewriteDir,
+    repoUrl: contract.repoUrl,
+    generatedAt: contract.generatedAt,
+    note: "No preflight-readiness.md artifact was found. This migration may have been generated by an older CCS version.",
+    componentCount: contract.components?.length ?? 0,
+    blockedCount: (contract.components ?? []).filter((component) => component.implementationStatus !== "ready").length,
+  }, null, 2);
+}
+
+export async function getSystemGraph(migrationDir?: string): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const graphPath = safePath(rewriteDir, "system-graph.json");
+  if (await exists(graphPath)) {
+    return fs.readFile(graphPath, "utf-8");
+  }
+
+  const { contract } = await readMigrationContract(rewriteDir);
+  const nodes = (contract.components ?? []).map((component) => ({
+    id: `component:${component.name}`,
+    label: component.name,
+    type: "component",
+    metadata: {
+      componentType: component.type,
+      targetRole: component.target?.role,
+      confidence: component.risk?.confidence,
+    },
+  }));
+  const edges = (contract.components ?? []).flatMap((component) =>
+    (component.dependencies ?? []).map((dependency) => ({
+      source: `component:${component.name}`,
+      target: `component:${dependency}`,
+      type: "depends_on",
+      label: "depends on",
+    }))
+  );
+
+  return JSON.stringify({
+    rewriteDir,
+    schemaVersion: "fallback",
+    repoUrl: contract.repoUrl,
+    migration: contract.migration,
+    migrationOrder: contract.migrationOrder ?? [],
+    nodes,
+    edges,
+  }, null, 2);
+}
+
+export async function getBusinessLogic(migrationDir?: string): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const businessPath = safePath(rewriteDir, "reverse-engineering", "business-logic.json");
+  if (await exists(businessPath)) {
+    return fs.readFile(businessPath, "utf-8");
+  }
+
+  const { contract } = await readMigrationContract(rewriteDir);
+  return JSON.stringify({
+    rewriteDir,
+    schemaVersion: "fallback",
+    repoUrl: contract.repoUrl,
+    migration: contract.migration,
+    components: (contract.components ?? []).map((component) => ({
+      name: component.name,
+      type: component.type,
+      purpose: component.purpose,
+      sourceFiles: component.sourceFiles ?? [],
+      dependencies: component.dependencies ?? [],
+      businessRules: component.businessRules ?? [],
+      contracts: component.contracts ?? {},
+      targetDisposition: component.target ?? {},
+      risks: component.risk?.migrationRisks ?? [],
+      humanQuestions: component.humanQuestions ?? [],
+      validationScenarios: component.validationScenarios ?? [],
+      confidence: component.risk?.confidence,
+      complexity: component.risk?.complexity,
+    })),
+  }, null, 2);
+}
+
+export async function getDependencyImpact(
+  migrationDir: string | undefined,
+  nodeName: string,
+): Promise<string> {
+  const graph = JSON.parse(await getSystemGraph(migrationDir)) as {
+    rewriteDir?: string;
+    repoUrl?: string;
+    nodes?: Array<{ id?: string; label?: string; type?: string; metadata?: Record<string, unknown> }>;
+    edges?: Array<{ source?: string; target?: string; type?: string; label?: string; evidence?: string }>;
+  };
+
+  const normalized = nodeName.toLowerCase();
+  const nodes = graph.nodes ?? [];
+  const edges = graph.edges ?? [];
+  const node = nodes.find((candidate) =>
+    candidate.id?.toLowerCase() === normalized ||
+    candidate.label?.toLowerCase() === normalized ||
+    candidate.id?.toLowerCase() === `component:${normalized}`
+  );
+
+  if (!node?.id) {
+    const names = nodes
+      .filter((candidate) => candidate.type === "component")
+      .map((candidate) => candidate.label ?? candidate.id)
+      .filter(Boolean)
+      .join(", ") || "none";
+    throw new Error(`Graph node "${nodeName}" was not found. Available components: ${names}`);
+  }
+
+  const directDependencies = edges
+    .filter((edge) => edge.source === node.id && edge.type === "depends_on")
+    .map((edge) => nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target);
+  const dependents = edges
+    .filter((edge) => edge.target === node.id && edge.type === "depends_on")
+    .map((edge) => nodes.find((candidate) => candidate.id === edge.source)?.label ?? edge.source);
+  const sourceFiles = edges
+    .filter((edge) => edge.source === node.id && edge.type === "defined_in")
+    .map((edge) => nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target);
+  const targetRoles = edges
+    .filter((edge) => edge.source === node.id && edge.type === "recommended_role")
+    .map((edge) => ({
+      role: nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
+      rationale: edge.evidence ?? "",
+    }));
+  const packages = edges
+    .filter((edge) => edge.source === node.id && /package$/.test(edge.type ?? ""))
+    .map((edge) => ({
+      package: nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
+      relationship: edge.type,
+    }));
+
+  return JSON.stringify({
+    rewriteDir: graph.rewriteDir,
+    repoUrl: graph.repoUrl,
+    node: {
+      id: node.id,
+      label: node.label,
+      type: node.type,
+      metadata: node.metadata ?? {},
+    },
+    directDependencies,
+    dependents,
+    sourceFiles,
+    targetRoles,
+    packages,
+    implementationImpact: {
+      implementBeforeThis: directDependencies,
+      componentsToRetestAfterChange: dependents,
+    },
+  }, null, 2);
+}
