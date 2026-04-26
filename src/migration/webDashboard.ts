@@ -261,7 +261,7 @@ const STYLE = `
 }
 
 [data-theme="dark"] {
-  /* Dark theme — Linear / GitNexus-ish */
+  /* Dark theme — focused engineering dashboard */
   --bg: #0f1218;
   --bg-elev: #161a23;
   --bg-card: #1a1f2b;
@@ -282,7 +282,7 @@ const STYLE = `
   --row-tint: rgba(255,255,255,.03);
   --shadow: 0 1px 2px rgba(0,0,0,.2), 0 8px 24px rgba(0,0,0,.25);
 
-  /* Graph workspace — dark mode (GitNexus canvas) */
+  /* Graph workspace — dark analytical canvas */
   --graph-bg: #05070d;
   --graph-grid: rgba(99,118,160,.10);
   --graph-glow-1: rgba(34,211,238,.08);
@@ -449,13 +449,12 @@ body[data-route="graph"] .theme-toggle::after {
 }
 .method-hero {
   background:
-    radial-gradient(circle at 12% 20%, var(--accent-bg), transparent 28%),
-    linear-gradient(180deg, var(--bg-card), var(--bg-elev));
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 22px 24px;
-  margin: 16px 0 20px;
-  box-shadow: var(--shadow);
+    linear-gradient(90deg, var(--accent-bg), transparent 62%),
+    var(--bg-elev);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 12px 12px 0;
+  padding: 20px 24px;
+  margin: 16px 0 24px;
 }
 .method-hero .eyebrow {
   color: var(--accent);
@@ -473,52 +472,54 @@ body[data-route="graph"] .theme-toggle::after {
   max-width: 860px;
   color: var(--fg-muted);
 }
-.method-grid {
+.method-split {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 28px;
+  margin: 14px 0 28px;
 }
-.method-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 15px 16px;
-  box-shadow: var(--shadow);
+.method-split > div:first-child {
+  padding-right: 28px;
+  border-right: 1px solid var(--border);
 }
-.method-card h3 {
+.method-split h3,
+.principle-list h3,
+.boundary-table h3 {
   margin: 0 0 8px;
   color: var(--fg);
 }
-.method-card p,
-.method-card li {
+.method-split p,
+.principle-row p,
+.boundary-table p {
   color: var(--fg-muted);
 }
 .method-steps {
+  position: relative;
   display: grid;
-  gap: 10px;
+  gap: 0;
   counter-reset: method-step;
+  margin: 10px 0 28px;
 }
 .method-step {
   display: grid;
-  grid-template-columns: 34px 1fr;
-  gap: 12px;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 14px;
   align-items: start;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 13px 15px;
-  box-shadow: var(--shadow);
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
 }
+.method-step:first-child { border-top: 1px solid var(--border); }
 .method-step::before {
   counter-increment: method-step;
   content: counter(method-step);
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  color: white;
-  background: var(--accent);
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
   font-size: 12px;
   font-weight: 800;
 }
@@ -529,13 +530,42 @@ body[data-route="graph"] .theme-toggle::after {
   margin: 3px 0 0;
   color: var(--fg-muted);
 }
-.boundary-list {
+.principle-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  border-top: 1px solid var(--border);
+  margin: 10px 0 28px;
 }
-.boundary-list .method-card {
-  border-left: 3px solid var(--border-strong);
+.principle-row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 24px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+.principle-row h3 {
+  margin: 0;
+  color: var(--fg);
+}
+.principle-row p {
+  margin: 0;
+}
+.boundary-table {
+  width: 100%;
+  border-top: 1px solid var(--border);
+  margin: 10px 0 24px;
+}
+.boundary-table tr td:first-child {
+  width: 240px;
+  color: var(--fg);
+  font-weight: 700;
+}
+.boundary-table td {
+  vertical-align: top;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.boundary-table p {
+  margin: 0;
 }
 
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
@@ -946,7 +976,12 @@ tr.clickable:hover td { background: var(--accent-bg); }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .main { padding: 16px; }
-  .method-grid, .boundary-list { grid-template-columns: 1fr; }
+  .method-split { grid-template-columns: 1fr; gap: 14px; }
+  .method-split > div:first-child { padding-right: 0; border-right: 0; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+  .principle-row { grid-template-columns: 1fr; gap: 6px; }
+  .boundary-table tr,
+  .boundary-table td { display: block; width: auto; }
+  .boundary-table td:first-child { width: auto; padding-bottom: 0; }
   .graph-workspace { grid-template-columns: 1fr; height: auto; }
   .graph-filter-panel, .graph-panel { border: 0; border-bottom: 1px solid var(--graph-border); }
   #graph-host { height: 560px; }
@@ -1148,12 +1183,12 @@ function renderMethodology() {
       <p>CCS creates the missing planning layer between a legacy codebase and an implementation agent. Instead of asking Codex or Claude to infer business intent from raw files alone, this report gives them a source-cited contract: what the system does, what must be preserved, which components are ready, which decisions need review, and what order is safest to modernize.</p>
     </div>
 
-    <div class="method-grid">
-      <div class="method-card">
+    <div class="method-split">
+      <div>
         <h3>The gap this fills</h3>
         <p>Legacy modernization usually starts with scattered knowledge: source code, architecture diagrams, meeting notes, package files, tribal assumptions, and partial migration goals. General coding agents are strong at implementation, but they need a reliable brief before writing code.</p>
       </div>
-      <div class="method-card">
+      <div>
         <h3>The CCS approach</h3>
         <p>CCS does not try to be the code writer. It acts as the analysis, evidence, and contract layer. The result is a repeatable migration packet that humans can review and agents can consume through markdown, JSON, and MCP.</p>
       </div>
@@ -1188,44 +1223,46 @@ function renderMethodology() {
     </div>
 
     <h2>Design principles</h2>
-    <div class="method-grid">
-      <div class="method-card">
+    <div class="principle-list">
+      <div class="principle-row">
         <h3>Evidence before implementation</h3>
         <p>Important claims are tied back to source evidence or explicit context documents. The goal is not just a summary; it is a migration record that can be challenged and reviewed.</p>
       </div>
-      <div class="method-card">
+      <div class="principle-row">
         <h3>Contract before code</h3>
         <p>CCS produces the contract. Codex, Claude Code, or another engineering agent can then implement against that contract with clearer scope and fewer architecture guesses.</p>
       </div>
-      <div class="method-card">
+      <div class="principle-row">
         <h3>Graph-assisted planning</h3>
         <p>The graph is used for visual review, dependency-aware migration order, and agent impact queries. It keeps implementation sequencing visible instead of burying it in prose.</p>
       </div>
-      <div class="method-card">
+      <div class="principle-row">
         <h3>Honest uncertainty</h3>
         <p>When the code or context does not support a claim, the report says so. A needs-review verdict is a quality control signal, not a failure of the run.</p>
       </div>
     </div>
 
     <h2>Current boundaries</h2>
-    <div class="boundary-list">
-      <div class="method-card">
-        <h3>Not an automatic code migrator</h3>
-        <p>This tool prepares the migration packet. It does not replace implementation agents or engineers who write and validate the target application.</p>
-      </div>
-      <div class="method-card">
-        <h3>Static-first analysis</h3>
-        <p>The report is generated from source files, manifests, and supplied context. Runtime traces, production telemetry, and live database semantics still need explicit inputs or follow-up integrations.</p>
-      </div>
-      <div class="method-card">
-        <h3>Lightweight graph today</h3>
-        <p>The graph supports visualization, migration ordering, and one-hop impact. Deep call-chain traversal, clustering, transitive blast radius, and graph-database queries are the next maturity layer.</p>
-      </div>
-      <div class="method-card">
-        <h3>Human review where it matters</h3>
-        <p>Architecture choices with missing evidence are intentionally surfaced. That keeps the tool useful in enterprise settings where wrong confidence is more dangerous than a clear review queue.</p>
-      </div>
-    </div>
+    <table class="boundary-table">
+      <tbody>
+        <tr>
+          <td>Not an automatic code migrator</td>
+          <td><p>This tool prepares the migration packet. It does not replace implementation agents or engineers who write and validate the target application.</p></td>
+        </tr>
+        <tr>
+          <td>Static-first analysis</td>
+          <td><p>The report is generated from source files, manifests, and supplied context. Runtime traces, production telemetry, and live database semantics still need explicit inputs or follow-up integrations.</p></td>
+        </tr>
+        <tr>
+          <td>Lightweight graph today</td>
+          <td><p>The graph supports visualization, migration ordering, and one-hop impact. Deep call-chain traversal, clustering, transitive blast radius, and graph-database queries are the next maturity layer.</p></td>
+        </tr>
+        <tr>
+          <td>Human review where it matters</td>
+          <td><p>Architecture choices with missing evidence are intentionally surfaced. That keeps the tool useful in enterprise settings where wrong confidence is more dangerous than a clear review queue.</p></td>
+        </tr>
+      </tbody>
+    </table>
   \`;
 }
 
@@ -1586,8 +1623,8 @@ function layoutCanvasGraph(nodes, edges) {
   });
   const byId = new Map(positioned.map((n) => [n.id, n]));
 
-  // Lightweight force pass. It gives the dense organic look GitNexus gets
-  // from Sigma/Graphology, without shipping an external dependency.
+  // Lightweight force pass. It gives the dense organic look of a code graph
+  // without shipping an external dependency.
   for (let iter = 0; iter < 120; iter++) {
     for (let i = 0; i < positioned.length; i++) {
       for (let j = i + 1; j < positioned.length; j++) {
