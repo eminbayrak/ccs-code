@@ -21,6 +21,8 @@ export type RunLayout = {
   dispositionMatrixPath: string;
   humanQuestionsPath: string;
   verificationSummaryPath: string;
+  dependencyRiskReportPath: string;
+  dependencyRiskJsonPath: string;
   howToMigratePath: string;
   agentIntegrationPath: string;
   systemGraphJsonPath: string;
@@ -30,6 +32,7 @@ export type RunLayout = {
   reverseEngineeringDir: string;
   architectureContextDir: string;
   claudeCommandsDir: string;
+  testScaffoldsDir: string;
   logsDir: string;
   reportPath: string;
 };
@@ -85,6 +88,8 @@ export function buildRunLayout(migrationRoot: string, repoUrl: string): RunLayou
     dispositionMatrixPath:      join(runDir, "component-disposition-matrix.md"),
     humanQuestionsPath:         join(runDir, "human-questions.md"),
     verificationSummaryPath:    join(runDir, "verification-summary.md"),
+    dependencyRiskReportPath:   join(runDir, "dependency-risk-report.md"),
+    dependencyRiskJsonPath:     join(runDir, "dependency-risk-report.json"),
     howToMigratePath:           join(runDir, "HOW-TO-MIGRATE.md"),
     agentIntegrationPath:       join(runDir, "AGENT-INTEGRATION.md"),
     systemGraphJsonPath:        join(runDir, "system-graph.json"),
@@ -93,6 +98,7 @@ export function buildRunLayout(migrationRoot: string, repoUrl: string): RunLayou
     reverseEngineeringDir:      join(runDir, "reverse-engineering"),
     architectureContextDir:     join(runDir, "architecture-context"),
     claudeCommandsDir:          join(runDir, "claude-commands"),
+    testScaffoldsDir:           join(runDir, "test-scaffolds"),
     logsDir:                    join(runDir, "logs"),
     reportPath:                 join(runDir, "logs", "report.md"),
   };

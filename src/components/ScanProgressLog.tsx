@@ -1,155 +1,228 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Text, Box } from "ink";
-import { CCSSpinner } from "./animations/CCSSpinner.js";
 
-type LineStyle = {
-  icon: string;
-  iconColor: string;
-  textColor: string;
-  dim: boolean;
+type StepTone = "done" | "active" | "warn" | "error" | "info";
+
+type ProgressStep = {
+  message: string;
+  tone: StepTone;
 };
 
-function classify(msg: string): LineStyle {
-  const m = msg.toLowerCase();
+const MAX_VISIBLE = 8;
 
-  if (m.startsWith("waiting") || m.startsWith("sending") || m.startsWith("running") || m.startsWith("executing")) {
-    return { icon: "●", iconColor: "cyan", textColor: "white", dim: false };
-  }
-
-  // Research / Analysis headers
-  if (m.startsWith("ai research")) {
-    return { icon: "●", iconColor: "cyan", textColor: "cyan", dim: false };
-  }
-  if (m.startsWith("ai analysis")) {
-    return { icon: "●", iconColor: "magenta", textColor: "magenta", dim: false };
-  }
-
-  // Tool / Command starts
-  if (m.startsWith("bash") || m.startsWith("searching") || m.startsWith("reading") || m.startsWith("resolving") || m.startsWith("syncing") || m.startsWith("mining") || m.startsWith("processing") || m.startsWith("rebuilding") || m.startsWith("generating")) {
-    return { icon: "●", iconColor: "green", textColor: "white", dim: false };
-  }
-
-  // Success / completed
-  if (msg.includes("✓") || m.startsWith("executed") || m.includes("analyzed") || m.includes("written") || m.includes("complete")) {
-    return { icon: "✓", iconColor: "green", textColor: "gray", dim: true };
-  }
-
-  // Errors / failures
-  if (msg.includes("✗") || m.includes("failed") || m.includes("error:")) {
-    return { icon: "✗", iconColor: "red", textColor: "red", dim: false };
-  }
-
-  // Warnings / rate limits
-  if (msg.includes("⚠") || m.includes("rate limit") || m.includes("low")) {
-    return { icon: "⚠", iconColor: "yellow", textColor: "yellow", dim: false };
-  }
-
-  // Default / Active
-  return { icon: "●", iconColor: "cyan", textColor: "white", dim: false };
-}
+const SPINNER_FRAMES = ["✶", "✷", "✸", "✹"];
+const ACCENT = "#8ab4f8";
 
 function cleanMessage(msg: string): string {
-  return msg.replace(/^[✓✗⚠·●]\s*/, "").trim();
+  return msg
+    .replace(/^[✓✗⚠·●◆◇◈]\s*/, "")
+    .replace(/\s+/g, " ")
+    .replace(/\.\.\.$/, "")
+    .trim();
 }
 
-function CollapsibleLog({ log, style, indent, isExpanded }: { log: string; style: LineStyle; indent: number; isExpanded: boolean }) {
-  const MAX_LINES = 3;
-  const lines = log.split("\n");
-  const isLong = lines.length > MAX_LINES;
-  const displayLines = (isLong && !isExpanded) ? lines.slice(0, MAX_LINES) : lines;
+function normalizeMessage(msg: string): string {
+  const clean = cleanMessage(msg);
+  return clean
+    .replace(/^Detected:\s*/i, "Detected ")
+    .replace(/^Found\s+(\d+)\s+files\s+in\s+repo\.?$/i, "Indexed $1 repository files")
+    .replace(/^Found\s+(\d+)\s+components\s+\(excluding tests\)\.?$/i, "Discovered $1 migration components")
+    .replace(/^Loaded\s+(\d+)\s+modernization context doc\(s\)\.?$/i, "Loaded $1 architecture context docs")
+    .replace(/^No modernization context docs found; using the default architecture profile\.?$/i, "Using default architecture profile")
+    .replace(/^Fetching file tree from\s+/i, "Reading repository tree from ")
+    .replace(/^Detecting source framework\.?$/i, "Detecting framework and target shape")
+    .replace(/^Discovering components\.?$/i, "Discovering migration components")
+    .replace(/^Generating migration knowledge base index\.?$/i, "Building run README and index")
+    .replace(/^Generating AI tool integration files\.?$/i, "Writing agent handoff files")
+    .replace(/^Verifying claims for\s+/i, "Verifying source-backed claims for ")
+    .replace(/^Re-verifying revised claims for\s+/i, "Re-verifying revised claims for ")
+    .replace(/^Revising\s+/i, "Revising ")
+    .replace(/^Analyzing\s+/i, "Analyzing ");
+}
 
+function compactKey(msg: string): string {
+  const clean = normalizeMessage(msg).toLowerCase();
+  if (clean.startsWith("analyzing ")) return "analyzing-component";
+  if (clean.startsWith("verifying source-backed claims for ")) return "verifying-component";
+  if (clean.startsWith("revising ")) return "revising-component";
+  if (clean.startsWith("re-verifying revised claims for ")) return "reverifying-component";
+  return clean.replace(/\d+/g, "#");
+}
+
+function classify(raw: string, isLast: boolean, showSpinnerForLast: boolean): StepTone {
+  const msg = raw.toLowerCase();
+  if (msg.includes("✗") || msg.includes("failed") || msg.includes("error:") || msg.includes("crashed")) {
+    return "error";
+  }
+  if (msg.includes("⚠") || msg.includes("warning") || msg.includes("rate limit") || msg.includes("low confidence")) {
+    return "warn";
+  }
+  if (isLast && showSpinnerForLast && !raw.includes("✓")) {
+    return "active";
+  }
+  if (
+    raw.includes("✓") ||
+    msg.includes(" complete") ||
+    msg.includes("written") ||
+    msg.includes("discovered") ||
+    msg.includes("detected") ||
+    msg.includes("found ") ||
+    msg.includes("loaded ") ||
+    msg.includes("indexed ") ||
+    msg.includes("using default")
+  ) {
+    return "done";
+  }
+  return isLast && showSpinnerForLast ? "active" : "done";
+}
+
+function prepareSteps(logs: string[], showSpinnerForLast: boolean): ProgressStep[] {
+  const deduped: string[] = [];
+  const keyToIndex = new Map<string, number>();
+
+  for (const raw of logs) {
+    if (!raw.trim()) continue;
+    let msg = raw;
+    if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded")) {
+      const match = msg.match(/retry in ([^\\n.]+)/);
+      msg = `✗ LLM quota exhausted${match ? ` — retry in ${match[1]}` : ""}`;
+    }
+
+    const display = normalizeMessage(msg);
+    const key = compactKey(display);
+    const existing = keyToIndex.get(key);
+    if (existing !== undefined) {
+      deduped[existing] = display;
+    } else {
+      keyToIndex.set(key, deduped.length);
+      deduped.push(display);
+    }
+  }
+
+  return deduped.map((message, index) => ({
+    message,
+    tone: classify(message, index === deduped.length - 1, showSpinnerForLast),
+  }));
+}
+
+function toneColor(tone: StepTone): string {
+  if (tone === "done") return "#7f8797";
+  if (tone === "active") return ACCENT;
+  if (tone === "warn") return "yellow";
+  if (tone === "error") return "red";
+  return "#7f8797";
+}
+
+function toneIcon(tone: StepTone, frame: number): string {
+  if (tone === "done") return "●";
+  if (tone === "warn") return "!";
+  if (tone === "error") return "✕";
+  if (tone === "active") return SPINNER_FRAMES[frame % SPINNER_FRAMES.length] ?? "◆";
+  return "●";
+}
+
+function truncateEnd(value: string, max: number): string {
+  if (max <= 1) return value.slice(0, max);
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(1, max - 1))}…`;
+}
+
+function ProgressHeader({
+  active,
+  elapsed,
+  modelLabel,
+}: {
+  active: boolean;
+  elapsed: number;
+  modelLabel: string;
+}) {
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const label = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  const model = modelLabel === "Loading..." ? "model loading" : modelLabel;
   return (
-    <Box flexDirection="column" marginLeft={indent > 0 ? 0 : 0}>
-      <Box flexDirection="row" gap={1}>
-        <Text color={style.iconColor} dimColor={style.dim}>
-          {indent > 0 ? "  ⎿" : style.icon}
-        </Text>
-        <Box flexDirection="column">
-          {displayLines.map((line, i) => (
-            <Text key={i} color={style.textColor} dimColor={style.dim} bold={i === 0 && indent === 0}>
-              {cleanMessage(line)}
-            </Text>
-          ))}
-          {isLong && !isExpanded && (
-            <Text dimColor italic>
-              {`   … +${lines.length - MAX_LINES} lines (ctrl+o to expand)`}
-            </Text>
-          )}
-        </Box>
-      </Box>
+    <Box flexDirection="row" gap={1} marginBottom={1} paddingLeft={1}>
+      <Text color={active ? "#aeb7d6" : "#7f8797"}>●</Text>
+      <Text color="#c8d1f0" bold={active}>
+        {active ? "Working" : "Finished"}
+      </Text>
+      <Text color="#737b8f">
+        ({label} · {model}{active ? " · esc to interrupt" : ""})
+      </Text>
     </Box>
   );
 }
 
-const MAX_VISIBLE = 12;
+function StepLine({ step, frame, width }: { step: ProgressStep; frame: number; width: number }) {
+  const color = toneColor(step.tone);
+  const dim = step.tone === "done" || step.tone === "info";
+  const message = truncateEnd(step.message, Math.max(20, width - 5));
+  return (
+    <Box flexDirection="row" gap={1} paddingLeft={1}>
+      <Text color={color} bold={!dim}>
+        {toneIcon(step.tone, frame)}
+      </Text>
+      <Text
+        color={step.tone === "active" ? ACCENT : color}
+        dimColor={dim}
+        bold={step.tone === "active"}
+        wrap="truncate-end"
+      >
+        {message}
+      </Text>
+    </Box>
+  );
+}
 
-export function ScanProgressLog({ logs, isExpanded = false, showSpinnerForLast = true }: { logs: string[]; isExpanded?: boolean; showSpinnerForLast?: boolean }) {
-  if (logs.length === 0) return null;
+export function ScanProgressLog({
+  logs,
+  isExpanded = false,
+  showSpinnerForLast = true,
+  modelLabel = "migration",
+  width = 100,
+}: {
+  logs: string[];
+  isExpanded?: boolean;
+  showSpinnerForLast?: boolean;
+  modelLabel?: string;
+  width?: number;
+}) {
+  const [frame, setFrame] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
 
-  // Aggressive deduplication and cleaning
-  const processedLogs: string[] = [];
-  for (const log of logs) {
-    let msg = log;
+  useEffect(() => {
+    if (!showSpinnerForLast) return;
+    const frameTimer = setInterval(() => setFrame((value) => value + 1), 160);
+    const elapsedTimer = setInterval(() => setElapsed((value) => value + 1), 1000);
+    return () => {
+      clearInterval(frameTimer);
+      clearInterval(elapsedTimer);
+    };
+  }, [showSpinnerForLast]);
 
-    // 1. Summarize verbose GitHub/Gemini errors (keep a bit more detail for expansion)
-    if (msg.includes("RESOURCE_EXHAUSTED") || msg.includes("Quota exceeded")) {
-      const match = msg.match(/retry in ([^\\n.]+)/);
-      const time = match ? match[1] : "later";
-      msg = `✗ LLM Daily Quota Exhausted (Retry in ${time})\n${msg}`;
-    }
+  const steps = useMemo(() => prepareSteps(logs, showSpinnerForLast), [logs, showSpinnerForLast]);
+  if (steps.length === 0) return null;
 
-    // 2. Deduplicate "Thinking/Searching" heartbeats
-    const heartbeatPatterns = [
-      "Searching GitHub for",
-      "Analyzing",
-      "Thinking",
-      "Researching",
-      "Resolving"
-    ];
-    
-    let isHeartbeat = false;
-    for (const p of heartbeatPatterns) {
-      if (msg.includes(p)) {
-        const prefix = msg.split("...")[0] + "...";
-        const lastIdx = processedLogs.findIndex(l => l.includes(prefix));
-        if (lastIdx !== -1) {
-          processedLogs[lastIdx] = msg;
-          isHeartbeat = true;
-          break;
-        }
-      }
-    }
-
-    if (!isHeartbeat) {
-      processedLogs.push(msg);
-    }
-  }
-
-  // Only show the most relevant logs to keep it compact
-  const visible = processedLogs.slice(-MAX_VISIBLE);
+  const hidden = Math.max(0, steps.length - MAX_VISIBLE);
+  const visible = isExpanded ? steps : steps.slice(-MAX_VISIBLE);
+  const lineWidth = Math.max(36, width - 4);
 
   return (
-    <Box flexDirection="column" paddingLeft={1} marginBottom={1}>
-      {visible.map((log, i) => {
-        const isLast = i === visible.length - 1;
-        const indentLevel = log.match(/^(\s*)/)?.[0].length || 0;
-        const style = classify(log.trim());
-        const isComplete = style.icon === "✓" || style.icon === "★";
-
-        if (showSpinnerForLast && isLast && !isComplete && !log.includes("✗")) {
-          return <CCSSpinner key={i} label={cleanMessage(log.trim())} />;
-        }
-
-        return (
-          <CollapsibleLog
-            key={i}
-            log={log.trim()}
-            style={style}
-            indent={indentLevel}
-            isExpanded={isExpanded}
-          />
-        );
-      })}
+    <Box flexDirection="column" marginBottom={1} marginTop={1}>
+      <ProgressHeader active={showSpinnerForLast} elapsed={elapsed} modelLabel={modelLabel} />
+      <Box flexDirection="column" gap={0}>
+        {!isExpanded && hidden > 0 && (
+          <Box flexDirection="row" gap={1} paddingLeft={1}>
+            <Text color="#737b8f">·</Text>
+            <Text color="#737b8f">
+              {hidden} earlier steps hidden · ctrl+o to expand
+            </Text>
+          </Box>
+        )}
+        {visible.map((step, index) => (
+          <StepLine key={`${step.message}-${index}`} step={step} frame={frame} width={lineWidth} />
+        ))}
+      </Box>
     </Box>
   );
 }

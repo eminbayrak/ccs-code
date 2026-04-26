@@ -32,6 +32,8 @@ import {
 } from "./rewriteVerifier.js";
 import { buildRunLayout, type RunLayout } from "./runLayout.js";
 import { writeDashboard } from "./webDashboard.js";
+import { isSecurityManifest, buildDependencyRiskReport, writeDependencyRiskArtifacts } from "./dependencyRisk.js";
+import { writeTestScaffolds } from "./testScaffoldGenerator.js";
 
 export type RewriteTracerConfig = {
   repoUrl: string;
@@ -82,6 +84,26 @@ async function fetchKeyFiles(
       const content = await fetchFileContent(owner, repo, path, config.token, config.host);
       files.push({ path, content });
     } catch { /* skip */ }
+  }
+  return files;
+}
+
+async function fetchSecurityManifestFiles(
+  owner: string,
+  repo: string,
+  tree: string[],
+  config: GithubConfig,
+): Promise<Array<{ path: string; content: string }>> {
+  const manifestPaths = tree
+    .filter(isSecurityManifest)
+    .filter((path) => !/node_modules|dist|build|coverage|bin|obj/.test(path))
+    .slice(0, 40);
+  const files: Array<{ path: string; content: string }> = [];
+  for (const path of manifestPaths) {
+    try {
+      const content = await fetchFileContent(owner, repo, path, config.token, config.host);
+      files.push({ path, content });
+    } catch { /* skip inaccessible manifests */ }
   }
   return files;
 }
@@ -156,6 +178,42 @@ function implementationStatusFor(
     return "needs_review";
   }
   return "ready";
+}
+
+function correctionAttemptLimit(): number {
+  const raw = Number(process.env.CCS_ANALYZER_CORRECTION_ATTEMPTS ?? "1");
+  if (!Number.isFinite(raw)) return 1;
+  return Math.max(0, Math.min(2, Math.floor(raw)));
+}
+
+function shouldCorrectAnalysis(verification: ComponentVerification): boolean {
+  return verification.trustVerdict === "needs_review" && verification.claims.some((claim) =>
+    claim.loadBearing && (claim.outcome === "unsupported" || claim.outcome === "no_evidence")
+  );
+}
+
+function buildCorrectionGuidance(verification: ComponentVerification): string {
+  const rejected = verification.claims
+    .filter((claim) => claim.loadBearing && (claim.outcome === "unsupported" || claim.outcome === "no_evidence"))
+    .slice(0, 8)
+    .map((claim, index) => {
+      const source = claim.evidence?.sourceFile
+        ? `${claim.evidence.sourceFile}:L${claim.evidence.lineStart ?? "?"}-${claim.evidence.lineEnd ?? claim.evidence.lineStart ?? "?"}`
+        : "no source citation";
+      return [
+        `${index + 1}. ${claim.kind}: ${claim.statement}`,
+        `   outcome: ${claim.outcome}`,
+        `   source: ${source}`,
+        `   verifier reason: ${claim.reason}`,
+      ].join("\n");
+    });
+
+  return [
+    "A verifier rejected or could not ground these load-bearing claims:",
+    ...rejected,
+    "",
+    "Revise the component analysis. Prefer removing weak claims over keeping them. Add stronger line-numbered evidence only when the quoted source directly proves the claim.",
+  ].join("\n");
 }
 
 /**
@@ -240,6 +298,8 @@ function buildReadmeDoc(input: {
     "3. `migration-contract.json` — machine-readable contract for Codex, Claude Code, MCP tools, and validation.",
     "4. `reverse-engineering/reverse-engineering-details.md` — business rules, data contracts, and use-case understanding.",
     "5. `system-graph.mmd` — quick architecture graph for human review.",
+    "6. `test-scaffolds/README.md` — parity test starting points generated from validation scenarios.",
+    "7. `dependency-risk-report.md` — deterministic package inventory and migration/security planning notes.",
     "",
     "Treat this file as the table of contents. You do not need to read everything.",
     "",
@@ -274,6 +334,8 @@ function buildReadmeDoc(input: {
     "| Agent entry point | `AGENTS.md` |",
     "| Machine-readable contract | `migration-contract.json` |",
     "| Trust gate | `verification-summary.md` |",
+    "| Dependency/security planning | `dependency-risk-report.md`, `dependency-risk-report.json` |",
+    "| Parity test starting points | `test-scaffolds/` |",
     "| Per-component analysis | `components/<Name>.md` |",
     "| Reverse-engineered behavior | `reverse-engineering/` |",
     "| Dependency graph | `system-graph.json`, `system-graph.mmd` |",
@@ -313,6 +375,7 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
   await fs.mkdir(layout.runDir, { recursive: true });
   await fs.mkdir(layout.componentsDir, { recursive: true });
   await fs.mkdir(layout.architectureContextDir, { recursive: true });
+  await fs.mkdir(layout.testScaffoldsDir, { recursive: true });
   await fs.mkdir(layout.logsDir, { recursive: true });
 
   const modernizationContext = config.noContext
@@ -361,6 +424,7 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
   // --- Detect framework (Haiku, or use hint if provided) ---
   log(config, "Detecting source framework...");
   const keyFiles = await fetchKeyFiles(owner, repo, tree, githubConfig);
+  const securityManifestFiles = await fetchSecurityManifestFiles(owner, repo, tree, githubConfig);
   let frameworkInfo = await detectFramework(tree, keyFiles, targetLanguage, haiku);
   if (config.sourceFrameworkHint) {
     frameworkInfo = { ...frameworkInfo, sourceFramework: config.sourceFrameworkHint };
@@ -421,14 +485,13 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
     log(config, `Analyzing ${component.name} (${component.type})...`);
     try {
       const sourceFiles = await fetchFiles(owner, repo, component.filePaths, githubConfig);
-      const analysis = await analyzeComponent(
+      let analysis = await analyzeComponent(
         component,
         sourceFiles,
         frameworkInfo,
         sonnet,
         modernizationPromptContext
       );
-      analyzed.push(analysis);
 
       // Verification pass: re-read every cited source range and confirm each
       // load-bearing claim before we tell Codex/Claude this component is ready.
@@ -449,6 +512,43 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
           error: msg,
         };
       }
+
+      for (let attempt = 1; attempt <= correctionAttemptLimit() && shouldCorrectAnalysis(verification); attempt++) {
+        log(config, `Revising ${component.name} analysis from verifier feedback (attempt ${attempt})...`);
+        try {
+          const revised = await analyzeComponent(
+            component,
+            sourceFiles,
+            frameworkInfo,
+            sonnet,
+            modernizationPromptContext,
+            buildCorrectionGuidance(verification),
+          );
+          log(config, `Re-verifying revised claims for ${component.name}...`);
+          const revisedVerification = await verifyComponent(revised, sourceFiles, haiku, { generatedAt });
+          analysis = revised;
+          verification = {
+            ...revisedVerification,
+            trustReasons: [
+              ...revisedVerification.trustReasons,
+              `Analyzer self-correction pass ran after verifier feedback (attempt ${attempt}).`,
+            ],
+          };
+        } catch (correctionError) {
+          const msg = correctionError instanceof Error ? correctionError.message : String(correctionError);
+          verification = {
+            ...verification,
+            trustVerdict: verification.trustVerdict === "ready" ? "needs_review" : verification.trustVerdict,
+            trustReasons: [
+              ...verification.trustReasons,
+              `Analyzer self-correction failed: ${msg}`,
+            ],
+          };
+          break;
+        }
+      }
+
+      analyzed.push(analysis);
       verifications.push(verification);
 
       // Per-component doc with verification rendered inline. We no longer
@@ -488,6 +588,27 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
       buildVerificationSummary(verifications, { repoUrl, generatedAt }),
       "utf-8"
     );
+  }
+  const verificationByName = new Map(verifications.map((v) => [v.component, v]));
+
+  try {
+    const scaffolds = await writeTestScaffolds(layout, analyzed, frameworkInfo, verificationByName);
+    log(config, `✓ parity test scaffolds written (${scaffolds.files.length} components)`);
+  } catch (e) {
+    errors.push(`test-scaffolds: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  try {
+    const dependencyRiskReport = buildDependencyRiskReport({
+      manifestFiles: securityManifestFiles,
+      analyses: analyzed,
+      frameworkInfo,
+      generatedAt,
+    });
+    await writeDependencyRiskArtifacts(layout, dependencyRiskReport);
+    log(config, `✓ dependency risk report written (${dependencyRiskReport.dependencies.length} dependencies, ${dependencyRiskReport.findings.length} findings)`);
+  } catch (e) {
+    errors.push(`dependency-risk: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   // --- Topological sort ---
@@ -555,7 +676,6 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
   // Generate Claude Code slash commands + AGENTS.md
   log(config, "Generating AI tool integration files...");
   try {
-    const verificationByName = new Map(verifications.map((v) => [v.component, v]));
     await generateRewriteIntegration(layout, analyzed, frameworkInfo, migrationOrder, repoUrl, {
       modernizationContext,
       verifications: verificationByName,

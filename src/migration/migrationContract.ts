@@ -102,6 +102,8 @@ export function buildMigrationContract(input: MigrationContractInput): string {
       "Classify every important fact as observed, inferred, or unknown.",
       "Resolve human questions before implementing components marked human_review or unknown.",
       "Use source evidence and context docs before changing code.",
+      "Use test-scaffolds/ as parity-test starting points and preserve validationScenarios.",
+      "Review dependency-risk-report.md before selecting target packages, auth libraries, or runtime versions.",
     ],
     migrationOrder,
     components: migrationOrder.flatMap((name) => {

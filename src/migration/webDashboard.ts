@@ -64,6 +64,8 @@ type DashboardData = {
     componentDispositionMatrix: string;
     humanQuestions: string;
     verificationSummary: string;
+    dependencyRiskReport: string;
+    testScaffoldsIndex: string;
     reverseEngineeringDetails: string;
     systemGraphMermaid: string;
   };
@@ -117,6 +119,8 @@ async function gatherData(input: DashboardInput): Promise<DashboardData> {
     componentDispositionMatrix: await readOptionalText(layout.dispositionMatrixPath),
     humanQuestions:             await readOptionalText(layout.humanQuestionsPath),
     verificationSummary:        await readOptionalText(layout.verificationSummaryPath),
+    dependencyRiskReport:       await readOptionalText(layout.dependencyRiskReportPath),
+    testScaffoldsIndex:         await readOptionalText(join(layout.testScaffoldsDir, "README.md")),
     reverseEngineeringDetails:  await readOptionalText(
       join(layout.reverseEngineeringDir, "reverse-engineering-details.md")
     ),
@@ -821,6 +825,17 @@ function renderAgents() {
   \`;
 }
 
+function renderValidationRisk() {
+  return \`
+    <h1>Validation &amp; Dependency Risk</h1>
+    <p>Enterprise handoff material for coding agents and reviewers: parity-test starting points plus deterministic dependency inventory and security-sensitive package notes.</p>
+    <h2>Parity test scaffolds</h2>
+    <div class="card markdown">\${renderMarkdown(data.docs.testScaffoldsIndex || '_(no test scaffolds generated)_')}</div>
+    <h2>Dependency risk report</h2>
+    <div class="card markdown">\${renderMarkdown(data.docs.dependencyRiskReport || '_(no dependency risk report generated)_')}</div>
+  \`;
+}
+
 function renderRaw() {
   const contractDump = data.contractJson ? JSON.stringify(data.contractJson, null, 2) : '(no contract)';
   return \`
@@ -1456,6 +1471,7 @@ function renderRoute() {
   else if (route === 'architecture') main.innerHTML = renderArchitecture();
   else if (route === 'human')       main.innerHTML = renderHumanQuestions();
   else if (route === 'agents')      main.innerHTML = renderAgents();
+  else if (route === 'validation')  main.innerHTML = renderValidationRisk();
   else if (route === 'contract')    main.innerHTML = renderRaw();
   else                              main.innerHTML = renderOverview();
 
@@ -1480,6 +1496,7 @@ function buildHtml(data: DashboardData): string {
     { id: "reverse",      label: "Reverse engineering" },
     { id: "architecture", label: "Architecture" },
     { id: "human",        label: "Human questions", badge: `${data.components.reduce((n, c) => n + c.humanQuestions, 0)}` },
+    { id: "validation",   label: "Validation & risk" },
     { id: "agents",       label: "Agent handoff" },
     { id: "contract",     label: "Migration contract" },
   ];
@@ -1603,6 +1620,8 @@ export async function writeDashboardFromRunDir(runDir: string): Promise<Dashboar
       componentDispositionMatrix: await readOptionalText(join(runDir, "component-disposition-matrix.md")),
       humanQuestions:             await readOptionalText(join(runDir, "human-questions.md")),
       verificationSummary:        await readOptionalText(join(runDir, "verification-summary.md")),
+      dependencyRiskReport:       await readOptionalText(join(runDir, "dependency-risk-report.md")),
+      testScaffoldsIndex:         await readOptionalText(join(runDir, "test-scaffolds", "README.md")),
       reverseEngineeringDetails:  await readOptionalText(join(runDir, "reverse-engineering", "reverse-engineering-details.md")),
       systemGraphMermaid:         await readOptionalText(join(runDir, "system-graph.mmd")),
     },

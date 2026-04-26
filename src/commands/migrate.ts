@@ -17,6 +17,12 @@ import { promises as fs } from "fs";
 import { checkCodexCliSetup } from "../llm/providers/codexCli.js";
 import { openInDefaultBrowser } from "../utils/platform.js";
 
+type MigrationRunFolder = {
+  name: string;
+  path: string;
+  modifiedAt: number;
+};
+
 // ---------------------------------------------------------------------------
 // Resolve the migration output directory.
 // Uses the active vault if configured; falls back to ~/.ccs/migration.
@@ -28,6 +34,74 @@ async function getMigrationDir(): Promise<string> {
     if (cfg.activeVault) return join(cfg.activeVault, "migration");
   } catch { /* no vault configured */ }
   return join(os.homedir(), ".ccs", "migration");
+}
+
+async function listRunFolders(migrationDir: string): Promise<MigrationRunFolder[]> {
+  const { repoSlug } = await import("../migration/runLayout.js");
+  let entries: string[] = [];
+  try { entries = await fs.readdir(migrationDir); } catch { return []; }
+
+  const runs: MigrationRunFolder[] = [];
+  for (const name of entries) {
+    if (name.startsWith(".")) continue;
+    const path = join(migrationDir, name);
+    let stat;
+    try { stat = await fs.stat(path); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+
+    let isRun = false;
+    try {
+      await fs.stat(join(path, "migration-contract.json"));
+      isRun = true;
+    } catch { /* try legacy */ }
+
+    if (!isRun) {
+      try {
+        await fs.stat(join(path, "rewrite", "migration-contract.json"));
+        isRun = true;
+      } catch { /* not a run */ }
+    }
+
+    if (isRun) {
+      runs.push({
+        name: repoSlug(name),
+        path,
+        modifiedAt: stat.mtimeMs,
+      });
+    }
+  }
+
+  return runs.sort((a, b) => b.modifiedAt - a.modifiedAt);
+}
+
+async function resolveRunFolder(target?: string): Promise<MigrationRunFolder | null> {
+  const { basename, resolve } = await import("path");
+  const { repoSlug } = await import("../migration/runLayout.js");
+  const migrationDir = await getMigrationDir();
+  const runs = await listRunFolders(migrationDir);
+
+  if (!target?.trim()) {
+    return runs[0] ?? null;
+  }
+
+  const explicit = resolve(process.cwd(), target);
+  try {
+    const stat = await fs.stat(explicit);
+    if (stat.isDirectory()) {
+      try {
+        await fs.stat(join(explicit, "migration-contract.json"));
+        return { name: repoSlug(target), path: explicit, modifiedAt: stat.mtimeMs };
+      } catch { /* not direct run */ }
+    }
+  } catch { /* try migration root */ }
+
+  const slug = repoSlug(target);
+  return runs.find((run) =>
+    run.name === target ||
+    run.name === slug ||
+    basename(run.path) === target ||
+    basename(run.path) === slug
+  ) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -484,10 +558,16 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       ``,
       `**Output folder:** \`${slug}/\` (under your migration root)`,
       ``,
+      `### Open quickly`,
+      `- Open dashboard: \`/migrate open ${slug} --dashboard\``,
+      `- Open result folder: \`/migrate open ${slug}\``,
+      ``,
       `### Open these first`,
       `- \`README.md\` — guided walkthrough, trust posture, table of contents`,
       `- \`dashboard.html\` — static web UI with graph, markdown, and JSON views`,
       `- \`verification-summary.md\` — trust gate (which components are ready)`,
+      `- \`test-scaffolds/README.md\` — parity test starting points for coding agents`,
+      `- \`dependency-risk-report.md\` — package inventory and migration/security planning notes`,
       `- \`human-questions.md\` — open architecture decisions`,
       `- \`migration-contract.json\` — machine-readable contract for Codex / Claude / MCP`,
       ``,
@@ -503,8 +583,10 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       `  component-disposition-matrix.md`,
       `  human-questions.md`,
       `  verification-summary.md`,
+      `  dependency-risk-report.md / .json`,
       `  system-graph.json / .mmd`,
       `  components/<Name>.md            ← per-component context + verification`,
+      `  test-scaffolds/                 ← parity test starting points`,
       `  reverse-engineering/`,
       `  architecture-context/           ← copies of your --context docs`,
       `  claude-commands/`,
@@ -632,6 +714,10 @@ async function handleReverseEng(args: string[], onProgress?: (msg: string) => vo
       `**Graph order:** ${result.migrationOrder.join(" → ") || "none"}`,
       "",
       `**Output folder:** \`${slug}/\` (under your migration root)`,
+      "",
+      "### Open quickly",
+      `- Open dashboard: \`/migrate open ${slug} --dashboard\``,
+      `- Open result folder: \`/migrate open ${slug}\``,
       "",
       "### What's inside",
       "- `README.md` — start here",
@@ -950,40 +1036,18 @@ async function handleClean(args: string[]): Promise<string> {
 // ---------------------------------------------------------------------------
 
 async function handleDashboard(args: string[]): Promise<string> {
-  const { promises: fs } = await import("fs");
-  const { join, resolve } = await import("path");
-  const { repoSlug } = await import("../migration/runLayout.js");
   const { writeDashboardFromRunDir } = await import("../migration/webDashboard.js");
-  const { resolveRewriteDir } = await import("../mcp/artifactReader.js");
 
   const shouldOpen = args.includes("--open") || args.includes("-o");
   const target = args.find((a) => !a.startsWith("-"));
-  const migrationDir = await getMigrationDir();
-
-  let runDir = "";
-  if (target) {
-    const explicit = resolve(process.cwd(), target);
-    const slug = repoSlug(target);
-    const candidates = [
-      explicit,
-      join(migrationDir, target),
-      join(migrationDir, slug),
-    ];
-    for (const candidate of candidates) {
-      try {
-        await fs.stat(join(candidate, "migration-contract.json"));
-        runDir = candidate;
-        break;
-      } catch { /* try next */ }
-    }
-    if (!runDir) {
-      return `No migration run found for \`${target}\`. Run \`/migrate clean\` to list existing run folders.`;
-    }
-  } else {
-    runDir = await resolveRewriteDir(migrationDir);
+  const run = await resolveRunFolder(target);
+  if (!run) {
+    return target
+      ? `No migration run found for \`${target}\`. Run \`/migrate clean\` to list existing run folders.`
+      : "No migration run found. Run `/migrate rewrite ... --yes` first.";
   }
 
-  const { dashboardPath } = await writeDashboardFromRunDir(runDir);
+  const { dashboardPath } = await writeDashboardFromRunDir(run.path);
   if (shouldOpen) {
     try {
       await openInDefaultBrowser(dashboardPath);
@@ -995,12 +1059,94 @@ async function handleDashboard(args: string[]): Promise<string> {
   return [
     "## ✓ Dashboard Ready",
     "",
-    `**Run folder:** \`${runDir}\``,
+    `**Run folder:** \`${run.path}\``,
     `**Dashboard:** \`${dashboardPath}\``,
     "",
     shouldOpen
       ? "Opened in your default browser."
-      : "Open `dashboard.html` in your browser, or run `/migrate dashboard --open`.",
+      : "Open `dashboard.html` in your browser, or run `/migrate open --dashboard`.",
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// /migrate open [<run-folder-or-repo-url>] [--dashboard|--folder]
+// Opens the latest or selected migration run in Finder/Explorer, or opens its
+// generated dashboard.html in the default browser.
+// ---------------------------------------------------------------------------
+
+async function handleOpen(args: string[]): Promise<string> {
+  const { writeDashboardFromRunDir } = await import("../migration/webDashboard.js");
+  const target = args.find((a) => !a.startsWith("-"));
+  const dashboard = args.includes("--dashboard") || args.includes("--html") || args.includes("-d");
+  const folder = args.includes("--folder") || args.includes("-f") || !dashboard;
+  const migrationDir = await getMigrationDir();
+  const run = await resolveRunFolder(target);
+
+  if (!run) {
+    const runs = await listRunFolders(migrationDir);
+    return [
+      "### No migration run found",
+      "",
+      target
+        ? `I could not find a run for \`${target}\`.`
+        : `I could not find any run folder under \`${migrationDir}\`.`,
+      "",
+      runs.length > 0
+        ? `Available runs: ${runs.map((r) => `\`${r.name}\``).join(", ")}`
+        : "Run `/migrate rewrite ... --yes` first.",
+      "",
+      "Examples:",
+      "  `/migrate open`",
+      "  `/migrate open --dashboard`",
+      "  `/migrate open <repo-slug>`",
+      "  `/migrate open <repo-slug> --dashboard`",
+    ].join("\n");
+  }
+
+  if (dashboard) {
+    const { dashboardPath } = await writeDashboardFromRunDir(run.path);
+    try {
+      await openInDefaultBrowser(dashboardPath);
+    } catch {
+      return [
+        "## Dashboard ready",
+        "",
+        `I generated it, but could not open the browser automatically.`,
+        `Dashboard: \`${dashboardPath}\``,
+        `Run folder: \`${run.path}\``,
+      ].join("\n");
+    }
+    return [
+      "## Opened dashboard",
+      "",
+      `**Run:** \`${run.name}\``,
+      `**Dashboard:** \`${dashboardPath}\``,
+      "",
+      `To open the folder instead: \`/migrate open ${run.name}\``,
+    ].join("\n");
+  }
+
+  if (folder) {
+    try {
+      await openInDefaultBrowser(run.path);
+    } catch {
+      return [
+        "## Result folder ready",
+        "",
+        `I found it, but could not open the folder automatically.`,
+        `Folder: \`${run.path}\``,
+        `Dashboard: \`${join(run.path, "dashboard.html")}\``,
+      ].join("\n");
+    }
+  }
+
+  return [
+    "## Opened result folder",
+    "",
+    `**Run:** \`${run.name}\``,
+    `**Folder:** \`${run.path}\``,
+    "",
+    `To open the dashboard: \`/migrate open ${run.name} --dashboard\``,
   ].join("\n");
 }
 
@@ -1032,6 +1178,10 @@ export async function handleMigrateCommand(
     case "dashboard":
     case "ui":
       return handleDashboard(rest);
+    case "open":
+    case "folder":
+    case "results":
+      return handleOpen(rest);
     default: {
       // Feature 1: Semantic intent routing — detect natural language migration
       // requests. When the router has enough info we run the underlying
@@ -1058,34 +1208,29 @@ export async function handleMigrateCommand(
       }
 
       return [
-        "### /migrate — Migration Intelligence Platform",
+        "## Migration",
         "",
-        "Analyzes legacy codebases and generates AI rewrite context documents.",
-        "Actual rewriting is done by Claude Code / Codex using those docs.",
+        "Create a verified migration run, then open the dashboard or result folder.",
         "",
-        "**Tip:** Describe your migration in plain English and the tool will auto-detect your intent.",
-        "  e.g. `/migrate I need to convert this .NET repo to Python: https://github.com/org/repo`",
+        "### Common actions",
         "",
-        "**Subcommands:**",
-        "  `/migrate scan --repo <url> --lang <language> [--yes]`       — scan external SOAP services called by a Node.js repo",
-        "  `/migrate reverse-eng --repo <url> [--to <language>] [--context <file>|--no-context] [--yes]` — persist reverse-engineering and graph artifacts",
-        "  `/migrate rewrite --repo <url> --to <language> [--context <file>|--no-context] [--yes]` — analyze a full codebase for framework-to-framework migration",
-        "  `/migrate dashboard [run-folder|repo-url] [--open]`              — generate/open the static web UI for a migration run",
-        "  `/migrate db --service <name> [--yes]`                       — live database schema extraction (read-only, user-approved)",
-        "  `/migrate status`                                              — show migration progress table",
-        "  `/migrate context <ServiceName>`                               — print a service context doc",
-        "  `/migrate verify <ServiceName> --by <name>`                   — mark a service as human-verified",
-        "  `/migrate done <ServiceName>`                                  — mark a verified service as fully rewritten",
-        "  `/migrate rescan <ServiceName>`                                — instructions to re-analyze a service",
-        "  `/migrate plugin list`                                         — list installed scanner plugins",
+        "| Action | Command |",
+        "| --- | --- |",
+        "| Analyze a repo | `/migrate rewrite --repo <url> --to csharp --context <file> --yes` |",
+        "| Open latest dashboard | `/migrate open --dashboard` |",
+        "| Open latest folder | `/migrate open` |",
+        "| Clean old runs | `/migrate clean` |",
+        "| Agent setup | `/setup` |",
         "",
-        "**Examples:**",
-        "  `/migrate scan --repo https://github.com/myorg/NodeBackend --lang csharp --yes`",
-        "  `/migrate reverse-eng --repo https://github.com/myorg/LegacyApp --to csharp --context docs/modern-use-case.md --yes`",
-        "  `/migrate rewrite --repo https://github.com/gothinkster/node-express-realworld-example-app --to csharp --no-context --yes`",
-        "  `/migrate rewrite --repo https://github.com/myorg/DotNetApi --to python --context docs/modern-use-case.md --yes`",
-        "  `/migrate dashboard --open`",
-        "  `/migrate db --service OrderManager --yes`",
+        "### Plain English also works",
+        "",
+        "`migrate https://github.com/org/repo to csharp`",
+        "",
+        "### More commands",
+        "",
+        "`/migrate reverse-eng` · `/migrate status` · `/migrate verify` · `/migrate db` · `/migrate plugin list`",
+        "",
+        "Run `/guide` for the full walkthrough.",
       ].join("\n");
     }
   }

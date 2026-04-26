@@ -20,12 +20,13 @@ export const LOGO_SMALL = [
   "▀▀▘ ▀▀▘ ▀▀▀",
 ];
 
-const ACCENT = "#93c5fd";
-const RULE = "#7c86a8";
+const ACCENT = "#8ab4f8";
+const MUTED = "#8b92ac";
 
 const HINTS: Array<{ command: string; desc: string }> = [
   { command: "/migrate rewrite", desc: "scan, reverse-engineer, verify" },
-  { command: "/migrate dashboard", desc: "open the static report UI" },
+  { command: "/migrate open",    desc: "open latest result folder" },
+  { command: "/migrate open --dashboard", desc: "open latest dashboard" },
   { command: "/setup",           desc: "wire Codex / Claude Code via MCP" },
   { command: "/guide",           desc: "interactive manual" },
 ];
@@ -54,30 +55,27 @@ export function WelcomeBox({ activeModel, workspacePath }: Props) {
   const model = activeModel === "Loading..." ? "…" : activeModel;
   const cwd = workspacePath.replace(homedir(), "~");
 
-  // Compact card — caps at 80 cols, narrows gracefully on small terminals.
-  const cardWidth = Math.max(50, Math.min(columns - 4, 80));
-  const innerWidth = cardWidth - 6;
+  // Compact Claude/Codex-style start panel. No heavy chrome; the terminal
+  // transcript should stay the primary UI.
+  const cardWidth = Math.max(50, Math.min(columns - 4, 88));
+  const innerWidth = cardWidth - 4;
 
   // Logo column reserved on the left of the header band.
   const logoCol = LOGO_SMALL[0]?.length ?? 11;
   const headerTextWidth = Math.max(20, innerWidth - logoCol - 3);
 
   // Command list dims.
-  const cmdCol = 18;
+  const cmdCol = 28;
   const descCol = Math.max(12, innerWidth - cmdCol - 2);
 
   const metaWidth = Math.max(20, innerWidth - 2);
   const cwdRoom = Math.max(8, metaWidth - model.length - 3);
 
   return (
-    <Box paddingX={1} marginTop={1} marginBottom={1}>
+    <Box paddingX={2} marginTop={1} marginBottom={1} flexDirection="column" width={cardWidth}>
       <Box
-        borderStyle="round"
-        borderColor={RULE}
         flexDirection="column"
         width={cardWidth}
-        paddingX={2}
-        paddingY={1}
       >
         {/* Header: small logo on the left, identity on the right ----------- */}
         <Box flexDirection="row">
@@ -88,12 +86,12 @@ export function WelcomeBox({ activeModel, workspacePath }: Props) {
           </Box>
           <Box flexDirection="column" width={headerTextWidth}>
             <Text>
-              Welcome back, <Text color={ACCENT} bold>{username}</Text>
+              <Text bold>CCS Code</Text> <Text color={MUTED}>for</Text> <Text color={ACCENT} bold>{username}</Text>
             </Text>
-            <Text dimColor>
+            <Text color={MUTED}>
               {truncateEnd("CCS Code · migration intelligence for legacy modernization", headerTextWidth)}
             </Text>
-            <Text dimColor>
+            <Text color={MUTED}>
               {truncateEnd(`${model} · ${truncateMiddle(cwd, cwdRoom)}`, headerTextWidth)}
             </Text>
           </Box>
@@ -104,14 +102,14 @@ export function WelcomeBox({ activeModel, workspacePath }: Props) {
           {HINTS.map((hint) => (
             <Box key={hint.command} flexDirection="row">
               <Text color={ACCENT} bold>{hint.command.padEnd(cmdCol)}</Text>
-              <Text dimColor>{truncateEnd(hint.desc, descCol)}</Text>
+              <Text color={MUTED}>{truncateEnd(hint.desc, descCol)}</Text>
             </Box>
           ))}
         </Box>
 
         {/* Natural-language hint ------------------------------------------- */}
         <Box marginTop={1}>
-          <Text dimColor>
+          <Text color={MUTED}>
             Type <Text color={ACCENT}>"{START_HINT}"</Text> to start — or describe your goal in plain words.
           </Text>
         </Box>

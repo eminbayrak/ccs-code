@@ -499,6 +499,8 @@ Migrating **${repoUrl.split("/").slice(-2).join("/")}** from **${frameworkInfo.s
 6. Do not implement components whose \`implementationStatus\` is \`needs_review\` or \`blocked\`. Stop and surface the verification reasons or human questions instead.
 7. Do not invent functionality not present in the original code or contract.
 8. After each component, validate against \`validationScenarios\`.
+9. Use \`test-scaffolds/\` as the starting point for parity tests; convert scaffold items into executable tests in the target project.
+10. Review \`dependency-risk-report.md\` before choosing target packages or authentication/security libraries.
 
 ## Migration Order
 
@@ -513,6 +515,8 @@ ${contextDocList}
 - \`README.md\` — human entry point and table of contents
 - \`migration-contract.json\` — machine-readable contract (your source of truth)
 - \`verification-summary.md\` — trust gate across all components
+- \`test-scaffolds/\` — generated parity test scaffolds from validation scenarios
+- \`dependency-risk-report.md\` — dependency inventory and deterministic risk notes
 - \`architecture-baseline.md\` — target landing-zone decision profile
 - \`preflight-readiness.md\` — readiness gates and missing inputs
 - \`component-disposition-matrix.md\` — target landing zone per component

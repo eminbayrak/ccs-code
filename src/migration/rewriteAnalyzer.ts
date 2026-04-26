@@ -259,6 +259,7 @@ export async function analyzeComponent(
   frameworkInfo: FrameworkInfo,
   provider: LLMProvider,
   modernizationGuidance = "",
+  correctionGuidance = "",
 ): Promise<ComponentAnalysis> {
   const mapping = getFrameworkMapping(
     frameworkInfo.sourceFramework,
@@ -286,6 +287,9 @@ export async function analyzeComponent(
   const coverageNote = sourceCoverage.filesTruncated.length > 0
     ? `\nIMPORTANT SOURCE COVERAGE LIMITATION:\n${summarizeCoverage(sourceCoverage).map((line) => `- ${line}`).join("\n")}\nIf a business rule, dependency, or contract could live outside the visible lines, mark the related field as inferred or unknown and do not use high confidence for it.\n`
     : "";
+  const correctionSection = correctionGuidance.trim()
+    ? `\nVerifier correction feedback from a previous analysis attempt:\n${correctionGuidance.trim()}\n\nCorrect the analysis before responding. Do not repeat unsupported claims unless you can cite stronger source evidence. If the source does not prove a claim, remove it, mark it unknown, or ask a human question.\n`
+    : "";
 
   const raw = await provider.chat(
     [
@@ -299,6 +303,7 @@ Dependencies: ${component.dependencies.join(", ") || "none"}
 ${mappingSection}
 ${modernizationSection}
 ${coverageNote}
+${correctionSection}
 Source files with line numbers:
 ${fileBundle}
 

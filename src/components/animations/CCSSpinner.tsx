@@ -5,25 +5,12 @@ import { ShimmerText } from "./ShimmerText.js";
 const FRAMES = ["·", "✢", "✳", "✶", "✻", "✽"];
 
 const THINKING_LABELS = [
-  "Thinkering…",
-  "Incubating…",
-  "Pondering…",
-  "Roosting…",
-  "Considering…",
-  "Brewing…",
+  "Thinking…",
+  "Analyzing…",
   "Synthesizing…",
-  "Stewing…",
-  "Shimmying…",
-  "Spelunking…",
-  "Boondoggling…",
-  "Snoozing…",
-  "Caramelizing…",
-  "Osmosing…",
-  "Ramening…",
-  "Whatchamacalling…",
-  "Shenaniganning…",
-  "Razzmatazzing…",
-  "Optum-izing…",
+  "Checking evidence…",
+  "Building context…",
+  "Preparing handoff…",
 ];
 
 const STALLED_LABELS = [

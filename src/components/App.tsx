@@ -6,8 +6,6 @@ import { promises as fs } from "fs";
 import { join, resolve } from "path";
 import { useTerminalSize } from "../hooks/useTerminalSize";
 import { usePaste } from "../hooks/usePaste";
-import { CCSSpinner } from "./animations/CCSSpinner";
-import { AgentProgressLine } from "./animations/AgentProgressLine";
 import { StatusBar } from "./StatusBar";
 import { HelpMenu } from "./HelpMenu";
 import { WelcomeBox, LOGO_LARGE, LOGO_SMALL } from "./WelcomeBox";
@@ -103,7 +101,7 @@ const SLASH_COMMANDS: SuggestionItem[] = [
   { id: "harvest", label: "/harvest", description: "Mine AI chat logs (Claude, Cursor, Copilot) into the vault" },
   { id: "guide", label: "/guide", description: "Open interactive how-to guide with diagrams in browser" },
   { id: "setup", label: "/setup", description: "Print Codex / Claude Code MCP setup snippets" },
-  { id: "migrate", label: "/migrate <rewrite|dashboard|reverse-eng|scan|clean>", description: "Analyze a legacy codebase and generate verified migration artifacts" },
+  { id: "migrate", label: "/migrate <rewrite|open|dashboard|reverse-eng|scan|clean>", description: "Analyze a legacy codebase and open verified migration artifacts" },
   // Core commands
   { id: "clear", label: "/clear", description: "Clear conversation history" },
   { id: "skills", label: "/skills", description: "List loaded skills" },
@@ -148,8 +146,64 @@ function detectSlashTrigger(value: string): { query: string; } | null {
 // Component
 // ---------------------------------------------------------------------------
 
-function Divider({ width }: { width: number }) {
-  return <Text dimColor>{"─".repeat(Math.max(1, width))}</Text>;
+function wrapLine(value: string, width: number): string[] {
+  const words = value.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (!current) {
+      current = word;
+      continue;
+    }
+    if (`${current} ${word}`.length <= width) {
+      current = `${current} ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
+}
+
+function UserPromptBlock({ content, width }: { content: string; width: number }) {
+  const barWidth = Math.max(24, width);
+  const textWidth = Math.max(8, barWidth - 6);
+  const lines = wrapLine(content, textWidth);
+  return (
+    <Box
+      flexDirection="column"
+      marginTop={1}
+      marginBottom={1}
+      paddingX={1}
+      paddingY={1}
+      width={barWidth}
+      backgroundColor="#30343d"
+    >
+      {lines.map((line, index) => {
+        const prefix = index === 0 ? "› " : "  ";
+        const rendered = `${prefix}${line}`;
+        return (
+          <Text key={index} color="#c8d1f0">
+            {rendered}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
+
+function AssistantMessageBlock({ content, width }: { content: string; width: number }) {
+  const icon = /^error:/i.test(content.trim()) ? "✕" : "●";
+  const iconColor = icon === "✕" ? "red" : "#8b92ac";
+  return (
+    <Box flexDirection="row" gap={1}>
+      <Text color={iconColor}>{icon}</Text>
+      <Box flexDirection="column" flexGrow={1}>
+        <MarkdownText content={content} width={Math.max(32, width - 3)} />
+      </Box>
+    </Box>
+  );
 }
 
 function formatElapsed(ms: number): string {
@@ -785,8 +839,8 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         };
 
         const startMsgMap: Record<string, string> = {
-          scan:    "Starting migration scan — this may take several minutes...",
-          rewrite: "Analyzing codebase for migration — this may take several minutes...",
+          scan:    "Starting migration scan",
+          rewrite: "Starting verified migration analysis",
           status:  "Loading migration status...",
           context: "Loading context doc...",
           verify:  "Processing verification...",
@@ -798,10 +852,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         const startMsg = startMsgMap[subcommand] ?? `Running /migrate ${subcommand}...`;
         const toolName = toolNameMap[subcommand] ?? `Executing migrate ${subcommand}`;
 
-        setMessages((prev) => [...prev, createUIMessage("assistant", startMsg)]);
         setIsProcessing(true);
         setActiveTools([{ id: "migrate-task", name: toolName, isComplete: false }]);
-        setMigrateLogs([]);
+        setMigrateLogs([startMsg]);
         processingStartRef.current = Date.now();
 
         handleMigrateCommand(args, process.cwd(), (msg) => {
@@ -813,6 +866,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
             setIsProcessing(false);
             setActiveTools([]);
+            setMigrateLogs([]);
             setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
           })
           .catch((err: unknown) => {
@@ -820,6 +874,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${msg}`)]);
             setIsProcessing(false);
             setActiveTools([]);
+            setMigrateLogs([]);
           });
         break;
       }
@@ -880,7 +935,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           "### Recommended workflow",
           "",
           "1. Run `/migrate rewrite --repo <url> --to <language> --context docs/your-baseline.md --yes`",
-          "2. Open `<repo-slug>/dashboard.html` for the human view, or `<repo-slug>/README.md` for the markdown entry point",
+          "2. Open the generated view with `/migrate open --dashboard`, or open the result folder with `/migrate open`",
           "3. Review `verification-summary.md` and resolve `human-questions.md` before coding",
           "4. Hand the work to Codex or Claude Code via MCP — they only pick up `ready` components",
           "5. After implementation, validate against `validationScenarios` from the contract",
@@ -981,6 +1036,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
       // Plain slash commands typed and submitted
       if (trimmed.startsWith("/")) {
+        setMessages((prev) => [...prev, createUIMessage("user", trimmed)]);
         executeSlashCommand(trimmed.slice(1));
         setInput("");
         return;
@@ -1224,8 +1280,6 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   // Render
   // ---------------------------------------------------------------------------
 
-  const dividerWidth = Math.max(1, terminalWidth - 4);
-
   if (isSetupMode) {
     const boxWidth = Math.max(42, terminalWidth - 4);
     const showLargeLogo = boxWidth >= 40;
@@ -1337,29 +1391,13 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     <Box flexDirection="column">
       {/* Scrollback History */}
       <Static items={messages}>
-        {(msg, index) => {
-          const prevMsg = index > 0 ? messages[index - 1] : null;
-          const showHeader = msg.role === "assistant" && (!prevMsg || prevMsg.role === "user");
-
+        {(msg) => {
           return (
-            <Box key={msg.id} flexDirection="column" marginTop={showHeader || msg.role === "user" ? 1 : 0} paddingX={2}>
+            <Box key={msg.id} flexDirection="column" marginTop={1} paddingX={2}>
               {msg.role === "user" ? (
-                <Box flexDirection="row" gap={1}>
-                  <Text color="#6366f1" bold>❯</Text>
-                  <Text color="white" bold>{msg.content}</Text>
-                </Box>
+                <UserPromptBlock content={msg.content} width={terminalWidth - 4} />
               ) : (
-                <Box flexDirection="column">
-                  {showHeader && (
-                    <Box flexDirection="row" gap={1} marginBottom={0}>
-                      <Text color="#f59e0b">◆</Text>
-                      <Text bold color="white">CCS Code</Text>
-                    </Box>
-                  )}
-                  <Box paddingLeft={2} flexDirection="column">
-                    <MarkdownText content={msg.content} width={terminalWidth - 6} />
-                  </Box>
-                </Box>
+                <AssistantMessageBlock content={msg.content} width={terminalWidth - 4} />
               )}
             </Box>
           );
@@ -1383,22 +1421,24 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
               logs={migrateLogs.length > 0 ? migrateLogs : operationLogs}
               isExpanded={areLogsExpanded}
               showSpinnerForLast={isProcessing}
+              modelLabel={activeModel}
+              width={terminalWidth - 4}
             />
-            {isProcessing && migrateLogs.length > 0 && <CCSSpinner isStalled={isStalled} />}
           </Box>
         )}
       </Box>
 
       {/* Input Area */}
-      <Box flexDirection="column" paddingX={1} marginTop={1}>
-        {/* Divider above input */}
-        <Box marginBottom={0}>
-          <Divider width={dividerWidth} />
-        </Box>
-
-        {/* Input Row */}
-        <Box flexDirection="row" gap={1} paddingY={0}>
-          <Text bold color="cyan">❯</Text>
+      <Box flexDirection="column" marginTop={1}>
+        <Box
+          flexDirection="row"
+          gap={1}
+          paddingX={1}
+          paddingY={1}
+          width={terminalWidth}
+          backgroundColor="#30343d"
+        >
+          <Text bold color="#aeb7d6">›</Text>
           <Box flexGrow={1}>
             <TextInput
               key={inputKey}
@@ -1433,11 +1473,6 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           {input !== "" && !isProcessing && (
             <Text dimColor>ctrl+u clear</Text>
           )}
-        </Box>
-
-        {/* Divider below input */}
-        <Box marginTop={0}>
-          <Divider width={dividerWidth} />
         </Box>
 
         {/* Status Bar */}

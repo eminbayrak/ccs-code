@@ -2,10 +2,12 @@ import {
   getArchitectureBaseline,
   getBusinessLogic,
   getComponentContext,
+  getDependencyRiskReport,
   getDependencyImpact,
   getHumanQuestions,
   getPreflightReadiness,
   getSystemGraph,
+  getTestScaffolds,
   getValidationContract,
   getVerificationReport,
   listReadyComponents,
@@ -160,6 +162,29 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "ccs_get_dependency_risk_report",
+    description: "Read the deterministic dependency inventory and migration/security planning risk report for the run.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        migrationDir: { type: "string", description: "Optional path to migration/rewrite or migration output directory." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ccs_get_test_scaffolds",
+    description: "Read generated parity test scaffolds. With no componentName, returns the scaffold index; with componentName, returns that component's scaffold.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        migrationDir: { type: "string", description: "Optional path to migration/rewrite or migration output directory." },
+        componentName: { type: "string", description: "Optional component name." },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 const prompts = [
@@ -229,6 +254,12 @@ async function callTool(params: ToolCallParams): Promise<object> {
       const componentName = asString(args["componentName"]);
       return textResult(await getVerificationReport(migrationDir, componentName));
     }
+    case "ccs_get_dependency_risk_report":
+      return textResult(await getDependencyRiskReport(migrationDir));
+    case "ccs_get_test_scaffolds": {
+      const componentName = asString(args["componentName"]);
+      return textResult(await getTestScaffolds(migrationDir, componentName));
+    }
     default:
       throw new Error(`Unknown CCS MCP tool: ${name}`);
   }
@@ -250,7 +281,7 @@ function promptMessages(params: PromptGetParams): object {
             type: "text",
             text: [
               `Use CCS MCP tools to inspect ${componentName}.${migrationHint}`,
-              "First call ccs_get_preflight_readiness, ccs_get_architecture_baseline, ccs_get_business_logic, ccs_get_dependency_impact, ccs_get_validation_contract, ccs_get_verification_report (for this component), and ccs_get_component_context.",
+              "First call ccs_get_preflight_readiness, ccs_get_architecture_baseline, ccs_get_business_logic, ccs_get_dependency_impact, ccs_get_validation_contract, ccs_get_verification_report (for this component), ccs_get_dependency_risk_report, ccs_get_test_scaffolds (for this component), and ccs_get_component_context.",
               "Only implement if implementationStatus is `ready`, the verification trustVerdict is `ready`, and humanQuestions is empty.",
               "If implementationStatus is `needs_review`, stop and report the verification reasons instead of writing code.",
               "Preserve observed business rules and validate against acceptanceCriteria.",
