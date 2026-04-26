@@ -209,31 +209,63 @@ function jsonScript(id: string, value: unknown): string {
 
 const STYLE = `
 :root {
+  /* Light theme — clean, GitHub-ish */
   --bg: #ffffff;
-  --bg-elev: #f6f7fb;
+  --bg-elev: #f7f8fb;
   --bg-card: #ffffff;
-  --fg: #14171f;
-  --fg-muted: #5b6175;
+  --fg: #1a1d27;
+  --fg-muted: #545a6b;
   --fg-dim: #8b91a3;
-  --border: #e1e5ee;
-  --border-strong: #c8cee0;
+  --border: #e3e6ee;
+  --border-strong: #cdd2de;
   --accent: #3b6cf6;
-  --accent-bg: #eaf0ff;
+  --accent-bg: #eef2ff;
   --ready: #1b8a3a;
   --ready-bg: #e6f5ec;
   --needs: #b35c00;
   --needs-bg: #fdf2dc;
   --blocked: #b3251f;
   --blocked-bg: #fce8e6;
-  --code-bg: #f1f3f9;
+  --code-bg: #f4f6fa;
+  --row-tint: rgba(15,18,25,.025);
   --shadow: 0 1px 2px rgba(20,23,31,.04), 0 4px 16px rgba(20,23,31,.04);
+
+  /* Graph workspace — light mode */
+  --graph-bg: #f8fafc;
+  --graph-grid: rgba(15,23,42,.06);
+  --graph-glow-1: rgba(59,108,246,.06);
+  --graph-glow-2: rgba(74,222,128,.05);
+  --graph-glow-3: rgba(245,158,11,.04);
+  --graph-panel: #ffffff;
+  --graph-panel-2: #f7f8fb;
+  --graph-border: #e3e6ee;
+  --graph-fg: #1a1d27;
+  --graph-muted: #6b7488;
+  --graph-accent: #3b6cf6;
+  --graph-accent-soft: rgba(59,108,246,.16);
+  --graph-edge-default: rgba(71,85,105,.30);
+  --graph-edge-target: rgba(22,163,74,.34);
+  --graph-edge-package: rgba(124,58,237,.32);
+  --graph-edge-active: rgba(59,108,246,.95);
+  --graph-label-bg: #ffffff;
+  --graph-label-fg: #1a1d27;
+  --graph-label-border: rgba(15,23,42,.18);
+
+  /* JSON viewer — readable on light bg */
+  --json-key: #1d4ed8;
+  --json-string: #047857;
+  --json-number: #b45309;
+  --json-boolean: #7c3aed;
+  --json-null: #64748b;
+  --json-punc: #475569;
 }
 
 [data-theme="dark"] {
+  /* Dark theme — Linear / GitNexus-ish */
   --bg: #0f1218;
   --bg-elev: #161a23;
   --bg-card: #1a1f2b;
-  --fg: #e5e8ee;
+  --fg: #e6e9f1;
   --fg-muted: #a4abbb;
   --fg-dim: #6c7588;
   --border: #262d3c;
@@ -247,7 +279,37 @@ const STYLE = `
   --blocked: #ff7872;
   --blocked-bg: #3d1614;
   --code-bg: #11151d;
+  --row-tint: rgba(255,255,255,.03);
   --shadow: 0 1px 2px rgba(0,0,0,.2), 0 8px 24px rgba(0,0,0,.25);
+
+  /* Graph workspace — dark mode (GitNexus canvas) */
+  --graph-bg: #05070d;
+  --graph-grid: rgba(99,118,160,.10);
+  --graph-glow-1: rgba(34,211,238,.08);
+  --graph-glow-2: rgba(124,58,237,.09);
+  --graph-glow-3: rgba(245,158,11,.06);
+  --graph-panel: #0b0e16;
+  --graph-panel-2: #111522;
+  --graph-border: #252b3f;
+  --graph-fg: #f1f5ff;
+  --graph-muted: #828b9d;
+  --graph-accent: #22d3ee;
+  --graph-accent-soft: rgba(34,211,238,.14);
+  --graph-edge-default: rgba(96,165,250,.20);
+  --graph-edge-target: rgba(74,222,128,.28);
+  --graph-edge-package: rgba(192,132,252,.26);
+  --graph-edge-active: rgba(34,211,238,.95);
+  --graph-label-bg: rgba(6,10,18,.88);
+  --graph-label-fg: #f1f5ff;
+  --graph-label-border: rgba(34,211,238,.42);
+
+  /* JSON viewer — readable on dark bg */
+  --json-key: #93c5fd;
+  --json-string: #86efac;
+  --json-number: #fbbf24;
+  --json-boolean: #c4b5fd;
+  --json-null: #94a3b8;
+  --json-punc: #8b95a7;
 }
 
 * { box-sizing: border-box; }
@@ -328,9 +390,10 @@ body {
 table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 th { font-weight: 600; color: var(--fg-muted); font-size: 12px;
-  text-transform: uppercase; letter-spacing: 0.04em; }
+  text-transform: uppercase; letter-spacing: 0.04em; background: var(--bg-elev); }
+tbody tr:nth-child(even) td { background: var(--row-tint); }
 tr.clickable { cursor: pointer; }
-tr.clickable:hover td { background: var(--bg-elev); }
+tr.clickable:hover td { background: var(--accent-bg); }
 
 .verdict {
   display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px;
@@ -358,23 +421,90 @@ tr.clickable:hover td { background: var(--bg-elev); }
   color: var(--fg-muted); background: var(--bg-elev); border-radius: 0 6px 6px 0; }
 .markdown ul, .markdown ol { padding-left: 22px; }
 
-.graph-shell {
+.graph-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  gap: 14px;
-  height: calc(100vh - 250px);
-  min-height: 560px;
+  grid-template-columns: 220px minmax(0, 1fr) 330px;
+  gap: 0;
+  height: calc(100vh - 210px);
+  min-height: 640px;
+  overflow: hidden;
+  border: 1px solid var(--graph-border);
+  border-radius: 14px;
+  background: var(--graph-bg);
+  box-shadow: var(--shadow);
+}
+.graph-filter-panel,
+.graph-panel {
+  background: var(--graph-panel);
+  color: var(--graph-fg);
+  border-color: var(--graph-border);
+}
+[data-theme="dark"] .graph-filter-panel,
+[data-theme="dark"] .graph-panel {
+  background: linear-gradient(180deg, var(--graph-panel-2), var(--graph-panel));
+}
+.graph-filter-panel {
+  border-right: 1px solid var(--graph-border);
+  padding: 14px 12px;
+  overflow: auto;
+}
+.graph-filter-panel h3,
+.graph-panel h3 {
+  margin: 18px 0 8px;
+  color: var(--graph-muted);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.graph-filter-panel h3:first-child,
+.graph-panel h3:first-child { margin-top: 0; }
+.graph-filter-panel .hint {
+  color: var(--graph-muted);
+  font-size: 12px;
+  margin: 4px 0 12px;
+}
+.graph-filter-list {
+  display: grid;
+  gap: 7px;
+}
+.graph-main-panel {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--graph-bg);
+}
+.graph-topbar {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--graph-border);
+  background: var(--graph-panel);
+  backdrop-filter: blur(6px);
+}
+[data-theme="dark"] .graph-topbar {
+  background: rgba(9,12,20,.78);
+}
+.graph-title {
+  color: var(--graph-fg);
+  font-weight: 700;
+  font-size: 13px;
+}
+.graph-counts {
+  color: var(--graph-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 #graph-host {
   position: relative;
   overflow: hidden;
-  border: 1px solid #20283a;
-  border-radius: 12px;
   background:
-    radial-gradient(circle at 18% 20%, rgba(59,108,246,.20), transparent 28%),
-    radial-gradient(circle at 80% 72%, rgba(156,95,255,.14), transparent 32%),
-    linear-gradient(180deg, #0b1020 0%, #0e1424 100%);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.03), var(--shadow);
+    radial-gradient(circle at 50% 45%, var(--graph-glow-1), transparent 26%),
+    radial-gradient(circle at 15% 20%, var(--graph-glow-2), transparent 26%),
+    radial-gradient(circle at 84% 78%, var(--graph-glow-3), transparent 28%),
+    var(--graph-bg);
 }
 #graph-canvas {
   display: block;
@@ -384,34 +514,87 @@ tr.clickable:hover td { background: var(--bg-elev); }
 }
 #graph-canvas.dragging { cursor: grabbing; }
 .graph-panel {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-card);
+  border-left: 1px solid var(--graph-border);
   padding: 14px;
   overflow: auto;
-  box-shadow: var(--shadow);
 }
-.graph-panel h2 { margin-top: 0; }
+.graph-panel h2 { margin: 4px 0 8px; color: var(--graph-fg); font-size: 18px; }
 .graph-panel .kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px 10px; font-size: 13px; }
-.graph-panel .kv span:nth-child(odd) { color: var(--fg-muted); }
+.graph-panel .kv span:nth-child(odd) { color: var(--graph-muted); }
+.graph-panel code {
+  background: var(--graph-accent-soft);
+  border: 1px solid var(--graph-accent-soft);
+  color: var(--graph-accent);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.graph-panel a { color: var(--graph-accent); }
+.graph-panel ul { padding-left: 18px; color: var(--graph-muted); }
+.graph-panel li { margin: 6px 0; }
+.inspector-kicker {
+  color: var(--graph-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.node-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--graph-fg);
+  border: 1px solid var(--graph-border);
+  background: var(--graph-panel-2);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+.node-type-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--node-dot, var(--graph-accent));
+}
 .graph-search {
-  min-width: 220px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-card);
-  color: var(--fg);
-  padding: 6px 10px;
+  width: 100%;
+  border: 1px solid var(--graph-border);
+  border-radius: 8px;
+  background: var(--graph-panel-2);
+  color: var(--graph-fg);
+  padding: 8px 10px;
   font-size: 13px;
+  outline: none;
 }
-.graph-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; align-items: center; }
+.graph-search:focus {
+  border-color: var(--graph-accent);
+  box-shadow: 0 0 0 3px var(--graph-accent-soft);
+}
+.graph-toolbar { display: grid; gap: 7px; align-items: center; }
 .graph-toolbar .chip {
-  font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
-  border: 1px solid var(--border); background: var(--bg-card); color: var(--fg-muted);
+  font-size: 12px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid var(--graph-border);
+  background: var(--graph-panel-2);
+  color: var(--graph-muted);
   user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
-.graph-toolbar .chip.active { color: var(--accent); border-color: var(--accent);
-  background: var(--accent-bg); }
-.graph-legend { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 14px; color: var(--fg-muted); font-size: 12px; }
+.graph-toolbar .chip:hover {
+  color: var(--graph-fg);
+  border-color: var(--graph-accent);
+}
+.graph-toolbar .chip.active {
+  color: var(--graph-accent);
+  border-color: var(--graph-accent);
+  background: var(--graph-accent-soft);
+}
+.graph-legend { display: grid; gap: 7px; margin: 8px 0 14px; color: var(--graph-muted); font-size: 12px; }
 .graph-legend span::before {
   content: "";
   display: inline-block;
@@ -420,6 +603,37 @@ tr.clickable:hover td { background: var(--bg-elev); }
   border-radius: 999px;
   margin-right: 5px;
   background: var(--dot);
+}
+.graph-controls {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  display: grid;
+  gap: 8px;
+}
+.graph-controls button {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--graph-border);
+  background: var(--graph-panel);
+  color: var(--graph-fg);
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+}
+.graph-controls button:hover {
+  border-color: var(--graph-accent);
+  color: var(--graph-accent);
+}
+.graph-watermark {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  color: var(--graph-muted);
+  opacity: .7;
+  font-size: 11px;
+  pointer-events: none;
 }
 
 .banner-error {
@@ -431,15 +645,42 @@ tr.clickable:hover td { background: var(--bg-elev); }
   overflow: auto;
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
+  border-radius: 10px;
+  padding: 0;
+  box-shadow: var(--shadow);
+}
+.json-pre {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--json-punc);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.58;
+  tab-size: 2;
+}
+.json-key { color: var(--json-key); font-weight: 600; }
+.json-string { color: var(--json-string); }
+.json-number { color: var(--json-number); }
+.json-boolean { color: var(--json-boolean); font-weight: 600; }
+.json-null { color: var(--json-null); font-style: italic; }
+.json-punc { color: var(--json-punc); }
+.json-viewer::-webkit-scrollbar,
+#graph-host::-webkit-scrollbar,
+.graph-panel::-webkit-scrollbar,
+.graph-filter-panel::-webkit-scrollbar { width: 10px; height: 10px; }
+.json-viewer::-webkit-scrollbar-thumb,
+#graph-host::-webkit-scrollbar-thumb,
+.graph-panel::-webkit-scrollbar-thumb,
+.graph-filter-panel::-webkit-scrollbar-thumb {
+  background: rgba(148,163,184,.35);
+  border-radius: 999px;
 }
 .mermaid-render {
   overflow: auto;
   min-height: 360px;
   background:
-    radial-gradient(circle at 14% 12%, rgba(59,108,246,.09), transparent 26%),
-    radial-gradient(circle at 84% 78%, rgba(74,213,122,.08), transparent 30%),
+    radial-gradient(circle at 14% 12%, var(--accent-bg), transparent 28%),
+    radial-gradient(circle at 84% 78%, var(--ready-bg), transparent 32%),
     var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -457,7 +698,10 @@ tr.clickable:hover td { background: var(--bg-elev); }
 }
 .mermaid-node rect {
   stroke-width: 1.6;
-  filter: drop-shadow(0 5px 10px rgba(20,23,31,.10));
+  filter: drop-shadow(0 5px 10px rgba(20,23,31,.08));
+}
+[data-theme="dark"] .mermaid-node rect {
+  filter: drop-shadow(0 5px 12px rgba(0,0,0,.45));
 }
 .mermaid-node text {
   font: 600 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -500,8 +744,9 @@ tr.clickable:hover td { background: var(--bg-elev); }
   .app { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .main { padding: 16px; }
-  .graph-shell { grid-template-columns: 1fr; height: auto; }
-  #graph-host { height: 520px; }
+  .graph-workspace { grid-template-columns: 1fr; height: auto; }
+  .graph-filter-panel, .graph-panel { border: 0; border-bottom: 1px solid var(--graph-border); }
+  #graph-host { height: 560px; }
 }
 `;
 
@@ -530,6 +775,14 @@ document.addEventListener('click', (e) => {
   if (t && t.id === 'theme-toggle') {
     const cur = document.documentElement.getAttribute('data-theme');
     applyTheme(cur === 'dark' ? 'light' : 'dark');
+    // Theme tokens just changed — repaint anything we rasterized with old colors.
+    if (typeof drawGraph === 'function' && document.getElementById('graph-canvas')) {
+      try { drawGraph(); } catch (_) {}
+    }
+    // Re-render Mermaid by re-running the active route renderer.
+    if (typeof renderRoute === 'function') {
+      try { renderRoute(); } catch (_) {}
+    }
   }
 });
 
@@ -685,6 +938,64 @@ function renderOverview() {
 
 function escapeText(s) { return String(s).replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
 
+function jsonWhitespace(ch) {
+  return ch === ' ' || ch === '\\n' || ch === '\\r' || ch === '\\t';
+}
+
+function jsonNumberChar(ch) {
+  return (ch >= '0' && ch <= '9') || ch === '-' || ch === '+' || ch === '.' || ch === 'e' || ch === 'E';
+}
+
+function renderJson(value) {
+  const raw = typeof value === 'string' ? value : JSON.stringify(value ?? {}, null, 2);
+  let html = '';
+  let i = 0;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < raw.length) {
+        if (raw[j] === '\\\\\\\\') { j += 2; continue; }
+        if (raw[j] === '"') { j++; break; }
+        j++;
+      }
+      const token = raw.slice(i, j);
+      let k = j;
+      while (jsonWhitespace(raw[k])) k++;
+      const cls = raw[k] === ':' ? 'json-key' : 'json-string';
+      html += '<span class="' + cls + '">' + escapeText(token) + '</span>';
+      i = j;
+      continue;
+    }
+    if (ch === '-' || (ch >= '0' && ch <= '9')) {
+      let j = i + 1;
+      while (j < raw.length && jsonNumberChar(raw[j])) j++;
+      html += '<span class="json-number">' + escapeText(raw.slice(i, j)) + '</span>';
+      i = j;
+      continue;
+    }
+    if (raw.startsWith('true', i) || raw.startsWith('false', i)) {
+      const token = raw.startsWith('true', i) ? 'true' : 'false';
+      html += '<span class="json-boolean">' + token + '</span>';
+      i += token.length;
+      continue;
+    }
+    if (raw.startsWith('null', i)) {
+      html += '<span class="json-null">null</span>';
+      i += 4;
+      continue;
+    }
+    if ('{}[]:,'.includes(ch)) {
+      html += '<span class="json-punc">' + escapeText(ch) + '</span>';
+      i++;
+      continue;
+    }
+    html += escapeText(ch);
+    i++;
+  }
+  return '<div class="json-viewer"><pre class="json-pre"><code>' + html + '</code></pre></div>';
+}
+
 function renderTrustGate() {
   const rows = data.components.map((c) => \`
     <tr class="clickable" onclick="window.location.hash = 'component:\${encodeURIComponent(c.name)}'">
@@ -742,28 +1053,52 @@ function renderComponent(name) {
 }
 
 function renderGraph() {
+  const nodeCount = data.graph?.nodes?.length || 0;
+  const edgeCount = data.graph?.edges?.length || 0;
   return \`
     <h1>System Graph</h1>
-    <p>Explore components, source files, packages, and target architecture roles discovered during migration analysis.</p>
-    <div class="graph-toolbar" id="graph-toolbar">
-      <input class="graph-search" id="graph-search" placeholder="Search nodes..." />
-      <span class="chip active" data-filter="all">All</span>
-      <span class="chip" data-filter="component">Components</span>
-      <span class="chip" data-filter="source_file">Source files</span>
-      <span class="chip" data-filter="target_role">Target roles</span>
-      <span class="chip" data-filter="source_package">Source packages</span>
-      <span class="chip" data-filter="target_package">Target packages</span>
-      <span class="chip" data-action="reset">Reset view</span>
-    </div>
-    <div class="graph-legend">
-      <span style="--dot:#67e8f9;">component</span>
-      <span style="--dot:#94a3b8;">source file</span>
-      <span style="--dot:#4ade80;">target role</span>
-      <span style="--dot:#c084fc;">source package</span>
-      <span style="--dot:#f59e0b;">target package</span>
-    </div>
-    <div class="graph-shell">
-      <div id="graph-host"><canvas id="graph-canvas" aria-label="Interactive system graph"></canvas></div>
+    <p>Explore the migration graph by component, file, package, and target architecture role.</p>
+    <div class="graph-workspace">
+      <aside class="graph-filter-panel">
+        <h3>Search</h3>
+        <input class="graph-search" id="graph-search" placeholder="Search nodes..." />
+        <p class="hint">Click a node to inspect dependencies and open its component report.</p>
+        <h3>Filters</h3>
+        <div class="graph-toolbar" id="graph-toolbar">
+          <span class="chip active" data-filter="all">All <span>\${nodeCount}</span></span>
+          <span class="chip" data-filter="component">Components</span>
+          <span class="chip" data-filter="source_file">Source files</span>
+          <span class="chip" data-filter="target_role">Target roles</span>
+          <span class="chip" data-filter="source_package">Source packages</span>
+          <span class="chip" data-filter="target_package">Target packages</span>
+        </div>
+        <h3>Legend</h3>
+        <div class="graph-legend">
+          <span style="--dot:#67e8f9;">component</span>
+          <span style="--dot:#94a3b8;">source file</span>
+          <span style="--dot:#4ade80;">target role</span>
+          <span style="--dot:#c084fc;">source package</span>
+          <span style="--dot:#f59e0b;">target package</span>
+        </div>
+      </aside>
+      <section class="graph-main-panel">
+        <div class="graph-topbar">
+          <div>
+            <div class="graph-title">Code Graph</div>
+            <div class="graph-counts">\${nodeCount} nodes · \${edgeCount} edges</div>
+          </div>
+          <div class="graph-counts">drag to pan · scroll to zoom · double-click to fit</div>
+        </div>
+        <div id="graph-host">
+          <canvas id="graph-canvas" aria-label="Interactive system graph"></canvas>
+          <div class="graph-controls">
+            <button type="button" data-graph-action="zoom-in" title="Zoom in">+</button>
+            <button type="button" data-graph-action="zoom-out" title="Zoom out">−</button>
+            <button type="button" data-graph-action="reset" title="Fit graph">⌂</button>
+          </div>
+          <div class="graph-watermark">CCS graph</div>
+        </div>
+      </section>
       <aside class="graph-panel" id="graph-detail"></aside>
     </div>
     <h2>Mermaid diagram</h2>
@@ -773,7 +1108,7 @@ function renderGraph() {
       <div class="mermaid-source">\${escapeText(data.docs.systemGraphMermaid || 'No system-graph.mmd was generated.')}</div>
     </details>
     <h2>system-graph.json</h2>
-    <div class="json-viewer"><pre><code>\${escapeText(JSON.stringify(data.graph || {}, null, 2))}</code></pre></div>
+    \${renderJson(data.graph || {})}
   \`;
 }
 
@@ -799,13 +1134,13 @@ function renderArchitecture() {
 }
 
 function renderReverse() {
-  const bl = data.businessLogic ? '<pre><code>' + escapeText(JSON.stringify(data.businessLogic, null, 2)) + '</code></pre>' : '<p style="color: var(--fg-muted);">_(no business-logic.json)_</p>';
+  const bl = data.businessLogic ? renderJson(data.businessLogic) : '<p style="color: var(--fg-muted);">_(no business-logic.json)_</p>';
   return \`
     <h1>Reverse Engineering</h1>
     <h2>Details</h2>
     <div class="card markdown">\${renderMarkdown(data.docs.reverseEngineeringDetails || '_(empty)_')}</div>
     <h2>business-logic.json</h2>
-    <div class="card">\${bl}</div>
+    \${bl}
   \`;
 }
 
@@ -837,11 +1172,10 @@ function renderValidationRisk() {
 }
 
 function renderRaw() {
-  const contractDump = data.contractJson ? JSON.stringify(data.contractJson, null, 2) : '(no contract)';
   return \`
     <h1>Migration Contract</h1>
     <p>The full machine-readable contract Codex / Claude / MCP read.</p>
-    <div class="card"><pre><code>\${escapeText(contractDump)}</code></pre></div>
+    \${renderJson(data.contractJson || { message: 'No migration contract was generated.' })}
   \`;
 }
 
@@ -1118,8 +1452,32 @@ function connectedToActive(edge) {
   return active && (edge.source === active || edge.target === active);
 }
 
+// Theme-reactive: read colors from the active CSS theme so the canvas
+// matches the rest of the dashboard in both light and dark mode.
+function readThemePalette() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name, fallback) => (cs.getPropertyValue(name).trim() || fallback);
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return {
+    isDark,
+    bg:           v('--graph-bg',           isDark ? '#05070d' : '#f8fafc'),
+    grid:         v('--graph-grid',         isDark ? 'rgba(99,118,160,.10)' : 'rgba(15,23,42,.06)'),
+    accent:       v('--graph-accent',       isDark ? '#22d3ee' : '#3b6cf6'),
+    accentSoft:   v('--graph-accent-soft',  isDark ? 'rgba(34,211,238,.14)' : 'rgba(59,108,246,.16)'),
+    edgeDefault:  v('--graph-edge-default', isDark ? 'rgba(96,165,250,.20)' : 'rgba(71,85,105,.30)'),
+    edgeTarget:   v('--graph-edge-target',  isDark ? 'rgba(74,222,128,.28)' : 'rgba(22,163,74,.34)'),
+    edgePackage:  v('--graph-edge-package', isDark ? 'rgba(192,132,252,.26)' : 'rgba(124,58,237,.32)'),
+    edgeActive:   v('--graph-edge-active',  isDark ? 'rgba(34,211,238,.95)' : 'rgba(59,108,246,.95)'),
+    labelBg:      v('--graph-label-bg',     isDark ? 'rgba(6,10,18,.88)' : '#ffffff'),
+    labelFg:      v('--graph-label-fg',     isDark ? '#f1f5ff' : '#1a1d27'),
+    labelBorder:  v('--graph-label-border', isDark ? 'rgba(34,211,238,.42)' : 'rgba(15,23,42,.18)'),
+    nodeRing:     isDark ? 'rgba(255,255,255,.6)' : 'rgba(15,23,42,.42)',
+  };
+}
+
 function drawGraph() {
   const canvas = document.getElementById('graph-canvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const width = canvas.width / dpr;
@@ -1127,15 +1485,23 @@ function drawGraph() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  const gradient = ctx.createRadialGradient(width * 0.5, height * 0.45, 20, width * 0.5, height * 0.45, Math.max(width, height));
-  gradient.addColorStop(0, '#17213a');
-  gradient.addColorStop(1, '#080c16');
-  ctx.fillStyle = gradient;
+  const palette = readThemePalette();
+
+  // Base background — flat color in light mode, subtle radial gradient in dark.
+  if (palette.isDark) {
+    const gradient = ctx.createRadialGradient(width * 0.5, height * 0.45, 20, width * 0.5, height * 0.45, Math.max(width, height));
+    gradient.addColorStop(0, '#111827');
+    gradient.addColorStop(0.45, '#080c16');
+    gradient.addColorStop(1, '#05070d');
+    ctx.fillStyle = gradient;
+  } else {
+    ctx.fillStyle = palette.bg;
+  }
   ctx.fillRect(0, 0, width, height);
 
+  // Subtle grid that respects the theme.
   ctx.save();
-  ctx.globalAlpha = 0.20;
-  ctx.strokeStyle = '#26334d';
+  ctx.strokeStyle = palette.grid;
   ctx.lineWidth = 1;
   for (let x = (graphState.offsetX % 44); x < width; x += 44) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
@@ -1145,22 +1511,37 @@ function drawGraph() {
   }
   ctx.restore();
 
+  // Edges, color-coded by relationship type and stronger when connected to
+  // the hovered/selected node.
   const nodeById = new Map(graphState.nodes.map((n) => [n.id, n]));
   for (const e of graphState.edges) {
     const a = nodeById.get(e.source), b = nodeById.get(e.target);
     if (!a || !b) continue;
     const pa = worldToScreen(a), pb = worldToScreen(b);
     const active = connectedToActive(e);
+    const edgeKind = String(e.type || e.label || '').toLowerCase();
+    const isTarget = edgeKind.includes('target') || edgeKind.includes('role');
+    const isPackage = edgeKind.includes('package');
     ctx.beginPath();
     ctx.moveTo(pa.x, pa.y);
     const mx = (pa.x + pb.x) / 2;
     const my = (pa.y + pb.y) / 2 - 18;
     ctx.quadraticCurveTo(mx, my, pb.x, pb.y);
-    ctx.strokeStyle = active ? 'rgba(125,211,252,.85)' : 'rgba(148,163,184,.22)';
-    ctx.lineWidth = active ? 1.9 : 1;
+    ctx.strokeStyle = active
+      ? palette.edgeActive
+      : isTarget
+        ? palette.edgeTarget
+        : isPackage
+          ? palette.edgePackage
+          : palette.edgeDefault;
+    ctx.lineWidth = active ? 2.1 : 1;
+    if (isTarget && !active) ctx.setLineDash([6, 7]);
+    else ctx.setLineDash([]);
     ctx.stroke();
+    ctx.setLineDash([]);
   }
 
+  // Nodes — soft glow on hover/select, theme-aware ring, label pill.
   for (const n of graphState.nodes) {
     const p = worldToScreen(n);
     const selected = n.id === graphState.selectedId;
@@ -1169,15 +1550,15 @@ function drawGraph() {
 
     ctx.save();
     ctx.shadowColor = n.color;
-    ctx.shadowBlur = selected || hovered ? 22 : 10;
+    ctx.shadowBlur = selected || hovered ? (palette.isDark ? 26 : 18) : (palette.isDark ? 9 : 5);
     ctx.beginPath();
     ctx.arc(p.x, p.y, radius + (selected ? 3 : 0), 0, Math.PI * 2);
     ctx.fillStyle = n.color;
-    ctx.globalAlpha = selected || hovered ? 1 : 0.88;
+    ctx.globalAlpha = selected || hovered ? 1 : 0.85;
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = selected ? '#ffffff' : 'rgba(255,255,255,.42)';
-    ctx.lineWidth = selected ? 2.4 : 1;
+    ctx.strokeStyle = selected ? palette.nodeRing : palette.accentSoft;
+    ctx.lineWidth = selected ? 2.5 : 1;
     ctx.stroke();
     ctx.restore();
 
@@ -1187,10 +1568,13 @@ function drawGraph() {
       ctx.font = selected ? '600 12px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif' : '500 11px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
       const text = label.length > 34 ? label.slice(0, 31) + '…' : label;
       const tw = ctx.measureText(text).width;
-      ctx.fillStyle = 'rgba(8,12,22,.82)';
-      roundRect(ctx, p.x - tw / 2 - 7, p.y + radius + 7, tw + 14, 22, 6);
+      ctx.fillStyle = palette.labelBg;
+      roundRect(ctx, p.x - tw / 2 - 8, p.y + radius + 7, tw + 16, 22, 5);
       ctx.fill();
-      ctx.fillStyle = '#e5e7eb';
+      ctx.strokeStyle = selected || hovered ? palette.accent : palette.labelBorder;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = palette.labelFg;
       ctx.fillText(text, p.x - tw / 2, p.y + radius + 22);
     }
   }
@@ -1217,24 +1601,27 @@ function updateGraphDetail() {
   const incoming = graphState.edges.filter((e) => e.target === node.id);
   const outgoing = graphState.edges.filter((e) => e.source === node.id);
   const component = data.components.find((c) => c.name === node.label);
+  const dot = nodeColor(node);
   detail.innerHTML = [
+    '<div class="inspector-kicker">Node inspector</div>',
     '<h2>' + escapeText(node.label || node.id) + '</h2>',
+    '<div class="node-type-pill" style="--node-dot:' + escapeText(dot) + '">' + escapeText(node.type || 'unknown') + '</div>',
     '<div class="kv">',
-    '<span>Type</span><strong>' + escapeText(node.type || 'unknown') + '</strong>',
     '<span>Incoming</span><strong>' + incoming.length + '</strong>',
     '<span>Outgoing</span><strong>' + outgoing.length + '</strong>',
     component ? '<span>Gate</span><strong><span class="verdict ' + component.verdict + '">' + component.verdict.replace('_', ' ') + '</span></strong>' : '',
     component ? '<span>Role</span><strong>' + escapeText(component.targetRole) + '</strong>' : '',
+    component ? '<span>Claims</span><strong>' + component.verifiedClaims + '/' + component.totalClaims + ' verified</strong>' : '',
+    component ? '<span>Questions</span><strong>' + component.humanQuestions + '</strong>' : '',
     '</div>',
     '<h3>Connected edges</h3>',
-    '<ul>' + [...incoming, ...outgoing].slice(0, 12).map((e) => '<li><code>' + escapeText(e.type || e.label || 'edge') + '</code> ' + escapeText(e.source) + ' → ' + escapeText(e.target) + '</li>').join('') + '</ul>',
+    '<ul>' + [...incoming, ...outgoing].slice(0, 14).map((e) => '<li><code>' + escapeText(e.type || e.label || 'edge') + '</code> ' + escapeText(e.source) + ' → ' + escapeText(e.target) + '</li>').join('') + '</ul>',
     component ? '<p><a href="#component:' + encodeURIComponent(component.name) + '">Open component report</a></p>' : '',
   ].join('');
 }
 
 function bindGraphToolbar() {
   const toolbar = document.getElementById('graph-toolbar');
-  if (!toolbar) return;
   const search = document.getElementById('graph-search');
   if (search && search.dataset.bound !== 'true') {
     search.dataset.bound = 'true';
@@ -1243,18 +1630,26 @@ function bindGraphToolbar() {
       buildGraph(graphState.filter);
     });
   }
-  toolbar.querySelectorAll('.chip').forEach((chip) => {
-    if (chip.dataset.bound === 'true') return;
-    chip.dataset.bound = 'true';
-    chip.addEventListener('click', () => {
-      if (chip.dataset.action === 'reset') {
-        fitGraphToView();
-        drawGraph();
-        return;
-      }
-      toolbar.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
-      chip.classList.add('active');
-      buildGraph(chip.dataset.filter);
+  if (toolbar) {
+    toolbar.querySelectorAll('.chip').forEach((chip) => {
+      if (chip.dataset.bound === 'true') return;
+      chip.dataset.bound = 'true';
+      chip.addEventListener('click', () => {
+        toolbar.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+        chip.classList.add('active');
+        buildGraph(chip.dataset.filter);
+      });
+    });
+  }
+  document.querySelectorAll('[data-graph-action]').forEach((button) => {
+    if (button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
+    button.addEventListener('click', () => {
+      const action = button.dataset.graphAction;
+      if (action === 'zoom-in') graphState.scale = Math.min(4, graphState.scale * 1.2);
+      else if (action === 'zoom-out') graphState.scale = Math.max(0.22, graphState.scale * 0.82);
+      else fitGraphToView();
+      drawGraph();
     });
   });
 }
