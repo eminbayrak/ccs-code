@@ -6,7 +6,7 @@ import { rebuildMasterIndex } from "../vault/masterIndex.js";
 import { syncRepo, type GitHubSyncConfig } from "../connectors/github.js";
 import { generateGraphHtml } from "../vault/graphBuilder.js";
 import { ingestAll } from "../vault/ingestor.js";
-import { enrichWiki } from "../vault/enricher.js";
+import { enrichWiki, type EnrichProgress } from "../vault/enricher.js";
 import { askWiki } from "../vault/wikiAsk.js";
 import { openInDefaultBrowser } from "../utils/platform.js";
 import { createProvider } from "../llm/index.js";
@@ -460,7 +460,11 @@ async function countMarkdownFiles(dir: string): Promise<number> {
 // /enrich command handler
 // ---------------------------------------------------------------------------
 
-export async function handleEnrichCommand(args: string[], cwd: string): Promise<string> {
+export async function handleEnrichCommand(
+  args: string[],
+  cwd: string,
+  onProgress?: (p: EnrichProgress) => void,
+): Promise<string> {
   const vaultPath = await resolveVaultPath(cwd);
   const wikiDir = join(vaultPath, "wiki");
 
@@ -477,7 +481,7 @@ export async function handleEnrichCommand(args: string[], cwd: string): Promise<
     return `No LLM provider configured.\nError: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  const { enriched, errors } = await enrichWiki(vaultPath, provider);
+  const { enriched, errors } = await enrichWiki(vaultPath, provider, onProgress);
 
   if (enriched === 0 && errors === 0) {
     return [

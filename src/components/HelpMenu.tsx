@@ -42,12 +42,16 @@ export function HelpMenu({ terminalWidth }: { terminalWidth?: number }) {
     ["/exit", !isWindows ? "exit  (or ctrl+c)" : "exit"],
   ];
 
-  const renderCol = (rows: string[][], width?: number) => (
-    <Box flexDirection="column" width={width} marginRight={2}>
+  const renderCol = (rows: string[][], colWidth?: number, keyWidth = 14) => (
+    <Box flexDirection="column" width={colWidth} marginRight={2}>
       {rows.map(([key, desc]) => (
-        <Box key={key} flexDirection="row" gap={1}>
-          <Text bold color="white">{key}</Text>
-          <Text dimColor>{desc}</Text>
+        <Box key={key} flexDirection="row">
+          <Box width={keyWidth} flexShrink={0}>
+            <Text bold color="white" wrap="truncate-end">{key}</Text>
+          </Box>
+          <Box flexShrink={1}>
+            <Text dimColor wrap="truncate-end">{desc}</Text>
+          </Box>
         </Box>
       ))}
     </Box>
@@ -55,9 +59,9 @@ export function HelpMenu({ terminalWidth }: { terminalWidth?: number }) {
 
   return (
     <Box paddingX={2} marginTop={1} flexDirection={narrow ? "column" : "row"}>
-      {renderCol(col1, narrow ? undefined : 28)}
-      {renderCol(col2, narrow ? undefined : 30)}
-      {renderCol(col3)}
+      {renderCol(col1, narrow ? undefined : 28, 10)}
+      {renderCol(col2, narrow ? undefined : 34, 18)}
+      {renderCol(col3, undefined, 14)}
     </Box>
   );
 }

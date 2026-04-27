@@ -1,219 +1,2002 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>CCS Migration Analysis Dashboard</title>
-<style>
-:root {
-  --bg: #f8fafc;
-  --bg-elev: #ffffff;
-  --bg-sidebar: #1e293b;
-  --bg-card: #ffffff;
-  --fg: #0f172a;
-  --fg-muted: #475569;
-  --fg-dim: #94a3b8;
-  --border: #e2e8f0;
-  --border-strong: #cbd5e1;
-  --accent: #3b82f6;
-  --accent-bg: #eff6ff;
-  --ready: #22c55e;
-  --ready-bg: #f0fdf4;
-  --needs: #f59e0b;
-  --needs-bg: #fffbeb;
-  --blocked: #ef4444;
-  --blocked-bg: #fef2f2;
-  --code-bg: #f1f5f9;
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCS Code — Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <style>
+    /* ─── Reset ──────────────────────────────────────────────────── */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-[data-theme="dark"] {
-  --bg: #0f172a;
-  --bg-elev: #1e293b;
-  --bg-sidebar: #0f172a;
-  --bg-card: #1e293b;
-  --fg: #f8fafc;
-  --fg-muted: #94a3b8;
-  --fg-dim: #64748b;
-  --border: #334155;
-  --accent: #60a5fa;
-  --accent-bg: #1e3a8a;
-  --ready: #4ade80;
-  --ready-bg: #064e3b;
-  --needs: #fbbf24;
-  --needs-bg: #78350f;
-  --blocked: #f87171;
-  --blocked-bg: #7f1d1d;
-  --code-bg: #020617;
-}
+    html {
+      scroll-behavior: smooth;
+    }
 
-* { box-sizing: border-box; }
-body {
-  margin: 0; padding: 0;
-  font-family: 'Inter', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--fg);
-  height: 100vh;
-  overflow: hidden;
-}
+    /* ─── Tokens ──────────────────────────────────────────────────── */
+    :root {
+      --bg: #0d0d0d;
+      --bg-sidebar: #0a0a0a;
+      --bg-card: #141414;
+      --bg-card2: #181818;
+      --bg-code: #111;
+      --border: rgba(255, 255, 255, 0.07);
+      --border-med: rgba(255, 255, 255, 0.12);
+      --text-1: #f0f0f0;
+      --text-2: #a0a0a0;
+      --text-3: #606060;
+      --accent: #5b9cf6;
+      --accent-dim: rgba(91, 156, 246, 0.12);
+      --accent-brd: rgba(91, 156, 246, 0.25);
+      --green: #4ade80;
+      --green-dim: rgba(74, 222, 128, 0.1);
+      --orange: #fb923c;
+      --orange-dim: rgba(251, 146, 60, 0.1);
+      --purple: #a78bfa;
+      --purple-dim: rgba(167, 139, 250, 0.1);
+      --pink: #f472b6;
+      --cyan: #22d3ee;
+      --yellow: #fbbf24;
+      --radius: 8px;
+      --font: 'Inter', system-ui, sans-serif;
+      --mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      --sidebar-w: 260px;
+      --header-h: 56px;
+    }
 
-.app { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+    /* ─── Base ──────────────────────────────────────────────────────── */
+    body {
+      background: var(--bg);
+      color: var(--text-1);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
 
-/* Sidebar */
-.sidebar { background: var(--bg-sidebar); color: #f8fafc; display: flex; flex-direction: column; }
-.sidebar-header { padding: 24px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.nav { flex: 1; padding: 20px 12px; }
-.nav-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 8px; color: #cbd5e1; text-decoration: none; font-size: 14px; margin-bottom: 4px; }
-.nav-item:hover { background: rgba(255,255,255,0.05); color: white; }
-.nav-item.active { background: var(--accent); color: white; font-weight: 600; }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
 
-/* Main Content */
-.main { overflow-y: auto; padding: 40px; height: 100vh; }
-.header { margin-bottom: 32px; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 32px; }
-.stat-card { background: var(--bg-card); padding: 24px; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); }
-.stat-val { font-size: 32px; font-weight: 700; }
-.stat-label { font-size: 13px; color: var(--fg-muted); text-transform: uppercase; }
+    a:hover {
+      text-decoration: underline;
+    }
 
-/* Split Viewer */
-.split-viewer { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; height: 600px; }
-.viewer-pane { overflow-y: auto; padding: 24px; background: var(--bg-elev); }
-.viewer-pane.json { background: var(--code-bg); color: #cbd5e1; border-left: 1px solid var(--border); }
+    code,
+    kbd {
+      font-family: var(--mono);
+      font-size: 0.88em;
+    }
 
-/* Graph Explorer */
-.graph-workspace { display: grid; grid-template-columns: 1fr 300px; height: 500px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
-canvas { background: var(--bg); cursor: grab; }
+    /* ─── Header ──────────────────────────────────────────────────────── */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--header-h);
+      background: rgba(13, 13, 13, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      z-index: 100;
+      gap: 32px;
+    }
 
-.hidden { display: none; }
-.verdict { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-.verdict.ready { background: var(--ready-bg); color: var(--ready); }
-</style>
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text-1);
+      letter-spacing: -0.01em;
+      text-decoration: none;
+    }
+
+    .logo-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #5b9cf6 0%, #a78bfa 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.05em;
+    }
+
+    .header-nav {
+      display: flex;
+      gap: 4px;
+      flex: 1;
+    }
+
+    .header-nav a {
+      color: var(--text-2);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 6px 10px;
+      border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .header-nav a:hover,
+    .header-nav a.active {
+      color: var(--text-1);
+      background: rgba(255, 255, 255, 0.06);
+      text-decoration: none;
+    }
+
+    .header-badge {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: var(--mono);
+      color: var(--text-3);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 8px;
+    }
+
+    /* ─── Layout ──────────────────────────────────────────────────────── */
+    .layout {
+      display: flex;
+      margin-top: var(--header-h);
+      min-height: calc(100vh - var(--header-h));
+    }
+
+    /* ─── Sidebar ──────────────────────────────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto;
+      padding: 24px 0 40px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    .sidebar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    .sidebar::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 2px;
+    }
+
+    .sidebar-section {
+      padding: 0 16px;
+      margin-bottom: 24px;
+    }
+
+    .sidebar-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      padding: 0 8px;
+      margin-bottom: 6px;
+    }
+
+    .sidebar-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 13px;
+      color: var(--text-2);
+      font-weight: 450;
+      transition: all 0.12s;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    .sidebar-link:hover {
+      color: var(--text-1);
+      background: rgba(255, 255, 255, 0.05);
+      text-decoration: none;
+    }
+
+    .sidebar-link.active {
+      color: var(--accent);
+      background: var(--accent-dim);
+      font-weight: 500;
+    }
+
+    .sidebar-link .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+      opacity: 0.5;
+    }
+
+    /* ─── Main content ──────────────────────────────────────────────── */
+    .main {
+      flex: 1;
+      min-width: 0;
+      padding: 48px 64px 96px;
+      max-width: 900px;
+    }
+
+    /* ─── Right TOC ──────────────────────────────────────────────────── */
+    .toc {
+      width: 200px;
+      min-width: 200px;
+      padding: 24px 0 40px 24px;
+      position: sticky;
+      top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto;
+    }
+
+    .toc-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      margin-bottom: 10px;
+    }
+
+    .toc-link {
+      display: block;
+      font-size: 12px;
+      color: var(--text-2);
+      padding: 3px 0;
+      border-left: 2px solid transparent;
+      padding-left: 10px;
+      transition: all 0.12s;
+      text-decoration: none;
+    }
+
+    .toc-link:hover {
+      color: var(--text-1);
+      text-decoration: none;
+    }
+
+    .toc-link.sub {
+      padding-left: 20px;
+      font-size: 11px;
+    }
+
+    /* ─── Typography ────────────────────────────────────────────────── */
+    .eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      color: var(--text-1);
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-1);
+      margin-top: 56px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-h) + 16px);
+    }
+
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-1);
+      margin-top: 28px;
+      margin-bottom: 10px;
+      scroll-margin-top: calc(var(--header-h) + 16px);
+    }
+
+    p {
+      color: var(--text-2);
+      margin-bottom: 14px;
+    }
+
+    p strong {
+      color: var(--text-1);
+      font-weight: 600;
+    }
+
+    /* ─── Intro hero ────────────────────────────────────────────────── */
+    .hero-desc {
+      font-size: 16px;
+      color: var(--text-2);
+      line-height: 1.7;
+      margin-bottom: 28px;
+      max-width: 680px;
+    }
+
+    .hero-pills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 36px;
+    }
+
+    .hero-pill {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid;
+    }
+
+    .hp-blue {
+      border-color: var(--accent-brd);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .hp-green {
+      border-color: rgba(74, 222, 128, 0.3);
+      color: var(--green);
+      background: var(--green-dim);
+    }
+
+    .hp-purple {
+      border-color: rgba(167, 139, 250, 0.3);
+      color: var(--purple);
+      background: var(--purple-dim);
+    }
+
+    .hp-orange {
+      border-color: rgba(251, 146, 60, 0.3);
+      color: var(--orange);
+      background: var(--orange-dim);
+    }
+
+    /* ─── Pipeline diagram ─────────────────────────────────────────── */
+    .pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      margin: 28px 0;
+    }
+
+    .pipeline-stage {
+      display: flex;
+      gap: 16px;
+      position: relative;
+    }
+
+    .pipeline-stage:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 18px;
+      top: 40px;
+      width: 2px;
+      bottom: -12px;
+      background: var(--border);
+    }
+
+    .stage-num {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 2px solid;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 13px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      position: relative;
+      z-index: 1;
+      background: var(--bg);
+    }
+
+    .stage-body {
+      flex: 1;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      border: 1px solid;
+      margin-bottom: 12px;
+    }
+
+    .stage-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+
+    .stage-title {
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .stage-cmd {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .stage-desc {
+      font-size: 13px;
+      color: var(--text-2);
+    }
+
+    .stage-tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    /* Stage colour themes */
+    .st1 .stage-num {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .st1 .stage-body {
+      border-color: var(--accent-brd);
+      background: var(--accent-dim);
+    }
+
+    .st1 .stage-title {
+      color: var(--accent);
+    }
+
+    .st1 .stage-cmd {
+      background: rgba(91, 156, 246, 0.15);
+      color: var(--accent);
+    }
+
+    .st2 .stage-num {
+      color: var(--purple);
+      border-color: var(--purple);
+    }
+
+    .st2 .stage-body {
+      border-color: rgba(167, 139, 250, 0.25);
+      background: var(--purple-dim);
+    }
+
+    .st2 .stage-title {
+      color: var(--purple);
+    }
+
+    .st2 .stage-cmd {
+      background: rgba(167, 139, 250, 0.15);
+      color: var(--purple);
+    }
+
+    .st3 .stage-num {
+      color: var(--orange);
+      border-color: var(--orange);
+    }
+
+    .st3 .stage-body {
+      border-color: rgba(251, 146, 60, 0.25);
+      background: var(--orange-dim);
+    }
+
+    .st3 .stage-title {
+      color: var(--orange);
+    }
+
+    .st3 .stage-cmd {
+      background: rgba(251, 146, 60, 0.15);
+      color: var(--orange);
+    }
+
+    .st4 .stage-num {
+      color: var(--pink);
+      border-color: var(--pink);
+    }
+
+    .st4 .stage-body {
+      border-color: rgba(244, 114, 182, 0.25);
+      background: rgba(244, 114, 182, 0.06);
+    }
+
+    .st4 .stage-title {
+      color: var(--pink);
+    }
+
+    .st4 .stage-cmd {
+      background: rgba(244, 114, 182, 0.15);
+      color: var(--pink);
+    }
+
+    .st5 .stage-num {
+      color: var(--cyan);
+      border-color: var(--cyan);
+    }
+
+    .st5 .stage-body {
+      border-color: rgba(34, 211, 238, 0.25);
+      background: rgba(34, 211, 238, 0.06);
+    }
+
+    .st5 .stage-title {
+      color: var(--cyan);
+    }
+
+    .st5 .stage-cmd {
+      background: rgba(34, 211, 238, 0.15);
+      color: var(--cyan);
+    }
+
+    .st6 .stage-num {
+      color: var(--yellow);
+      border-color: var(--yellow);
+    }
+
+    .st6 .stage-body {
+      border-color: rgba(251, 191, 36, 0.25);
+      background: rgba(251, 191, 36, 0.06);
+    }
+
+    .st6 .stage-title {
+      color: var(--yellow);
+    }
+
+    .st6 .stage-cmd {
+      background: rgba(251, 191, 36, 0.15);
+      color: var(--yellow);
+    }
+
+    .st7 .stage-num {
+      color: var(--green);
+      border-color: var(--green);
+    }
+
+    .st7 .stage-body {
+      border-color: rgba(74, 222, 128, 0.25);
+      background: var(--green-dim);
+    }
+
+    .st7 .stage-title {
+      color: var(--green);
+    }
+
+    .st7 .stage-cmd {
+      background: rgba(74, 222, 128, 0.15);
+      color: var(--green);
+    }
+
+    /* ─── Tag pill ──────────────────────────────────────────────────── */
+    .tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-med);
+      color: var(--text-2);
+    }
+
+    /* ─── Command table ─────────────────────────────────────────────── */
+    .cmd-section {
+      margin-bottom: 40px;
+    }
+
+    .cmd-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-1);
+      margin-bottom: 12px;
+      margin-top: 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .cmd-section-title::before {
+      content: '';
+      width: 3px;
+      height: 14px;
+      border-radius: 2px;
+      background: var(--accent);
+    }
+
+    .cmd-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      font-size: 13px;
+    }
+
+    .cmd-table thead tr {
+      background: var(--bg-card2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cmd-table th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+
+    .cmd-table tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.12s;
+    }
+
+    .cmd-table tbody tr:last-child {
+      border-bottom: none;
+    }
+
+    .cmd-table tbody tr:hover {
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .cmd-table td {
+      padding: 11px 14px;
+      vertical-align: top;
+    }
+
+    .cmd-table td:first-child {
+      width: 36%;
+    }
+
+    .cmd-table td:last-child {
+      width: 30%;
+      color: var(--text-3);
+    }
+
+    .cmd-mono {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--accent);
+      background: var(--accent-dim);
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid var(--accent-brd);
+      display: inline-block;
+      line-height: 1.5;
+    }
+
+    .cmd-flag {
+      color: var(--purple);
+    }
+
+    .cmd-val {
+      color: var(--green);
+    }
+
+    .cmd-desc {
+      color: var(--text-2);
+      line-height: 1.5;
+    }
+
+    .cmd-example {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-3);
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    /* ─── Code block ────────────────────────────────────────────────── */
+    .code-block {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin: 16px 0;
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .code-block pre {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.8;
+      color: var(--text-2);
+    }
+
+    .code-block .c-comment {
+      color: #4a5568;
+    }
+
+    .code-block .c-cmd {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .code-block .c-flag {
+      color: var(--purple);
+    }
+
+    .code-block .c-val {
+      color: var(--green);
+    }
+
+    .code-block .c-str {
+      color: var(--orange);
+    }
+
+    .code-block .c-key {
+      color: var(--cyan);
+    }
+
+    .code-block .c-num {
+      color: var(--yellow);
+    }
+
+    .code-block .lang-tag {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-3);
+      font-family: var(--mono);
+    }
+
+    /* ─── Callout ───────────────────────────────────────────────────── */
+    .callout {
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      border: 1px solid;
+      margin: 20px 0;
+      font-size: 13px;
+    }
+
+    .callout-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .callout-body {
+      flex: 1;
+    }
+
+    .callout-body strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .callout-body p {
+      margin: 0;
+      font-size: 13px;
+    }
+
+    .callout.tip {
+      border-color: rgba(91, 156, 246, 0.3);
+      background: var(--accent-dim);
+    }
+
+    .callout.tip strong {
+      color: var(--accent);
+    }
+
+    .callout.note {
+      border-color: rgba(251, 191, 36, 0.3);
+      background: rgba(251, 191, 36, 0.06);
+    }
+
+    .callout.note strong {
+      color: var(--yellow);
+    }
+
+    .callout.warn {
+      border-color: rgba(251, 146, 60, 0.3);
+      background: var(--orange-dim);
+    }
+
+    .callout.warn strong {
+      color: var(--orange);
+    }
+
+    /* ─── Provider grid ─────────────────────────────────────────────── */
+    .provider-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 20px 0;
+    }
+
+    .provider-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      background: var(--bg-card);
+      transition: border-color 0.15s;
+    }
+
+    .provider-card:hover {
+      border-color: var(--border-med);
+    }
+
+    .provider-name {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text-1);
+      margin-bottom: 6px;
+    }
+
+    .provider-key {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--orange);
+      background: var(--orange-dim);
+      border: 1px solid rgba(251, 146, 60, 0.2);
+      padding: 2px 6px;
+      border-radius: 3px;
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+
+    .provider-desc {
+      font-size: 12px;
+      color: var(--text-2);
+    }
+
+    /* ─── Vault tree ────────────────────────────────────────────────── */
+    .vault-tree {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.9;
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      color: var(--text-2);
+      overflow-x: auto;
+    }
+
+    .vt-dir {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .vt-file {
+      color: var(--text-2);
+    }
+
+    .vt-note {
+      color: var(--text-3);
+    }
+
+    .vt-arrow {
+      color: var(--text-3);
+    }
+
+    .vt-auto {
+      color: var(--purple);
+    }
+
+    .vt-gen {
+      color: var(--green);
+    }
+
+    /* ─── Integration table ─────────────────────────────────────────── */
+    .int-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 20px 0;
+    }
+
+    .int-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      background: var(--bg-card);
+    }
+
+    .int-name {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-1);
+      margin-bottom: 5px;
+    }
+
+    .int-how {
+      font-size: 12px;
+      color: var(--text-2);
+    }
+
+    /* ─── Status table ──────────────────────────────────────────────── */
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin: 20px 0;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-card);
+      font-size: 13px;
+    }
+
+    .status-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      margin-left: auto;
+      white-space: nowrap;
+    }
+
+    .sb-done {
+      background: var(--green-dim);
+      color: var(--green);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+    }
+
+    .sb-todo {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-3);
+      border: 1px solid var(--border);
+    }
+
+    /* ─── Flag reference ────────────────────────────────────────────── */
+    .flag-block {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin: 16px 0;
+    }
+
+    .flag-row {
+      display: flex;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      align-items: flex-start;
+    }
+
+    .flag-row:last-child {
+      border-bottom: none;
+    }
+
+    .flag-name {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--purple);
+      width: 200px;
+      flex-shrink: 0;
+      padding-top: 1px;
+    }
+
+    .flag-desc {
+      font-size: 13px;
+      color: var(--text-2);
+      flex: 1;
+    }
+
+    /* ─── Divider ───────────────────────────────────────────────────── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 48px 0;
+    }
+
+    /* ─── Footer ────────────────────────────────────────────────────── */
+    .footer {
+      margin-top: 80px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-3);
+    }
+  </style>
 </head>
-<body data-theme="dark">
 
-<div class="app">
-  <aside class="sidebar">
-    <div class="sidebar-header"><h1>CCS Migration</h1></div>
-    <nav class="nav">
-      <a href="#overview" class="nav-item active" onclick="showRoute('overview')">Overview</a>
-      <a href="#graph" class="nav-item" onclick="showRoute('graph')">Graph Explorer</a>
-      <a href="#reports" class="nav-item" onclick="showRoute('reports')">Reports</a>
+<body>
+
+  <!-- ═══════════ HEADER ═══════════ -->
+  <header class="header">
+    <a href="#" class="logo">
+      <div class="logo-mark">CCS</div>
+      CCS Code Docs
+    </a>
+    <nav class="header-nav">
+      <a href="#overview" class="active">Getting Started</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#commands">Commands</a>
+      <a href="#configuration">Configuration</a>
+      <a href="#providers">Providers</a>
+      <a href="#integration">Integration</a>
     </nav>
-    <div style="padding: 16px; border-top: 1px solid rgba(255,255,255,0.1);">
-      <button onclick="toggleTheme()" style="background:none; border:1px solid #fff3; color:white; padding:4px 8px; border-radius:4px; cursor:pointer;">Toggle Theme</button>
-    </div>
-  </aside>
+    <div class="header-badge">v1.0</div>
+  </header>
 
-  <main class="main">
-    <div id="route-overview" class="route">
-      <div class="header">
-        <h2>Migration Overview</h2>
-        <p>System-wide health and component status summary.</p>
+  <!-- ═══════════ LAYOUT ═══════════ -->
+  <div class="layout">
+
+    <!-- ─── Sidebar ─── -->
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Getting Started</div>
+        <a href="#overview" class="sidebar-link active"><span class="dot"></span>Overview</a>
+        <a href="#what-it-does" class="sidebar-link"><span class="dot"></span>What It Does</a>
+        <a href="#quick-start" class="sidebar-link"><span class="dot"></span>Quick Start</a>
       </div>
-      <div class="stats">
-        <div class="stat-card" style="border-left: 4px solid var(--ready);">
-          <div class="stat-val" style="color:var(--ready)">12</div>
-          <div class="stat-label">Ready for Migration</div>
-        </div>
-        <div class="stat-card" style="border-left: 4px solid var(--needs);">
-          <div class="stat-val" style="color:var(--needs)">4</div>
-          <div class="stat-label">Needs Architecture Review</div>
-        </div>
-        <div class="stat-card" style="border-left: 4px solid var(--blocked);">
-          <div class="stat-val" style="color:var(--blocked)">1</div>
-          <div class="stat-label">Blocked by Dependencies</div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Architecture</div>
+        <a href="#pipeline" class="sidebar-link"><span class="dot"></span>Pipeline</a>
+        <a href="#vault-structure" class="sidebar-link"><span class="dot"></span>Vault Structure</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Commands</div>
+        <a href="#vault-cmd" class="sidebar-link"><span class="dot"></span>/vault</a>
+        <a href="#sync-cmd" class="sidebar-link"><span class="dot"></span>/sync</a>
+        <a href="#harvest-cmd" class="sidebar-link"><span class="dot"></span>/harvest</a>
+        <a href="#ingest-cmd" class="sidebar-link"><span class="dot"></span>/ingest</a>
+        <a href="#enrich-cmd" class="sidebar-link"><span class="dot"></span>/enrich</a>
+        <a href="#graph-cmd" class="sidebar-link"><span class="dot"></span>/graph</a>
+        <a href="#ask-cmd" class="sidebar-link"><span class="dot"></span>/ask</a>
+        <a href="#migrate-cmd" class="sidebar-link"><span class="dot"></span>/migrate</a>
+        <a href="#utility-cmds" class="sidebar-link"><span class="dot"></span>Utilities</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Configuration</div>
+        <a href="#configuration" class="sidebar-link"><span class="dot"></span>ccs.yaml</a>
+        <a href="#providers" class="sidebar-link"><span class="dot"></span>LLM Providers</a>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Integration</div>
+        <a href="#integration" class="sidebar-link"><span class="dot"></span>AI Tools</a>
+        <a href="#implementation" class="sidebar-link"><span class="dot"></span>Implementation Status</a>
+      </div>
+    </aside>
+
+    <!-- ─── Main ─── -->
+    <main class="main">
+
+      <!-- ══════ OVERVIEW ══════ -->
+      <div id="overview">
+        <div class="eyebrow">Reference</div>
+        <h1>CCS Code</h1>
+        <p class="hero-desc">
+          An AI-powered personal knowledge base CLI. Sync from GitHub, harvest local IDE histories,
+          ingest files into a cross-linked wiki, visualize it as an interactive graph, and answer
+          questions from your own compounding knowledge.
+        </p>
+        <div class="hero-pills">
+          <span class="hero-pill hp-blue">Terminal-first</span>
+          <span class="hero-pill hp-green">Plain Markdown vault</span>
+          <span class="hero-pill hp-purple">LLM-enriched wiki</span>
+          <span class="hero-pill hp-orange">Migration intelligence</span>
         </div>
       </div>
-      
-      <div class="card" style="padding: 24px; background: var(--bg-elev);">
-        <h3>Migration Strategy</h3>
-        <p>The current analysis suggests a <strong>Parallel Phasing</strong> approach, starting with low-complexity leaf nodes (Logger, Utilities) before moving to core business logic (AuthService).</p>
-      </div>
-    </div>
 
-    <div id="route-graph" class="route hidden">
-      <div class="header"><h2>Graph Explorer</h2></div>
-      <div class="graph-workspace">
-        <canvas id="graph-canvas"></canvas>
-        <aside style="padding:20px; border-left:1px solid var(--border);">
-          <h3>Details</h3>
-          <div id="graph-details">Select a node</div>
-        </aside>
-      </div>
-    </div>
+      <!-- ══════ WHAT IT DOES ══════ -->
+      <h2 id="what-it-does">What It Does</h2>
+      <p>
+        You run <code>ccs-code</code> in your terminal. A set of composable commands form a pipeline.
+        Each time you run through it your knowledge base grows and compounds — conversations from Claude,
+        Cursor, and VS Code become searchable wiki pages linked by AI-generated wikilinks and tags.
+      </p>
 
-    <div id="route-reports" class="route hidden">
-      <div class="header"><h2>Component Reports</h2></div>
-      <div style="display: grid; grid-template-columns: 240px 1fr; gap: 20px; height: 600px;">
-        <div class="card" style="overflow-y: auto; padding: 12px; background: var(--bg-elev);">
-          <div id="report-nav-list"></div>
+      <div class="code-block">
+        <span class="lang-tag">pipeline</span>
+        <pre><span class="c-comment"># Sources</span>
+<span class="c-val">GitHub repos</span>  +  <span class="c-val">IDE histories (Cursor, VS Code, Claude)</span>  +  <span class="c-val">local files</span>
+        │
+        ▼ <span class="c-cmd">/sync</span> + <span class="c-cmd">/harvest</span> + drop into <span class="c-str">raw/</span>
+        │
+        ▼ <span class="c-cmd">/ingest</span>  →  <span class="c-str">wiki/</span> pages (Markdown, auto-merged)
+        │
+        ▼ <span class="c-cmd">/enrich</span>  →  AI summaries + tags + [[wikilinks]]
+        │
+        ├── <span class="c-cmd">/graph</span>   →  interactive vis.js graph in browser
+        └── <span class="c-cmd">/ask</span>     →  TF-IDF search → LLM answers with citations</pre>
+      </div>
+
+      <!-- ══════ QUICK START ══════ -->
+      <h2 id="quick-start">Quick Start</h2>
+
+      <h3>1. Initialize your vault</h3>
+      <div class="code-block">
+        <pre><span class="c-cmd">/vault init</span>                          <span class="c-comment"># creates vault at ./vault</span>
+<span class="c-cmd">/vault init</span> <span class="c-val">~/my-knowledge-base</span>      <span class="c-comment"># custom location</span></pre>
+      </div>
+
+      <h3>2. Add sources to ccs.yaml</h3>
+      <div class="code-block">
+        <span class="lang-tag">yaml</span>
+        <pre><span class="c-key">sources</span>:
+  - <span class="c-key">type</span>: <span class="c-val">github</span>
+    <span class="c-key">repos</span>:
+      - <span class="c-str">my-org/auth-svc</span>
+      - <span class="c-str">my-org/payment-svc</span>
+    <span class="c-key">include</span>: [<span class="c-val">commits</span>, <span class="c-val">prs</span>, <span class="c-val">issues</span>, <span class="c-val">readme</span>]
+    <span class="c-key">token_env</span>: <span class="c-val">GH_TOKEN</span>
+
+<span class="c-key">llm</span>:
+  <span class="c-key">provider</span>: <span class="c-val">anthropic</span>
+  <span class="c-key">model</span>: <span class="c-val">claude-sonnet-4-6</span></pre>
+      </div>
+
+      <h3>3. Run the pipeline</h3>
+      <div class="code-block">
+        <pre><span class="c-cmd">/sync</span>       <span class="c-comment"># pull GitHub sources</span>
+<span class="c-cmd">/harvest</span>    <span class="c-comment"># mine local AI chat histories</span>
+<span class="c-cmd">/ingest</span>     <span class="c-comment"># convert raw files → wiki pages</span>
+<span class="c-cmd">/enrich</span>     <span class="c-comment"># AI summaries + tags + wikilinks</span>
+<span class="c-cmd">/graph</span>      <span class="c-comment"># open interactive knowledge graph</span>
+<span class="c-cmd">/ask</span> <span class="c-str">"what did I work on last week?"</span></pre>
+      </div>
+
+      <div class="callout tip">
+        <div class="callout-icon">💡</div>
+        <div class="callout-body">
+          <strong>Tip — type <code>/</code> for commands</strong>
+          <p>In the terminal UI, type <code>/</code> for the full command menu, <code>?</code> for keyboard shortcuts,
+            and <code>↑</code> to retrieve a queued prompt.</p>
         </div>
-        <div class="split-viewer">
-          <div class="viewer-pane" id="md-viewer"><h3>Report</h3><p>Select a component.</p></div>
-          <div class="viewer-pane json" id="json-viewer"><pre id="json-pre">{}</pre></div>
+      </div>
+
+      <!-- ══════ PIPELINE ══════ -->
+      <h2 id="pipeline">Pipeline</h2>
+      <p>The seven stages form a compounding pipeline. You can run them independently or chain them together.</p>
+
+      <div class="pipeline">
+
+        <div class="pipeline-stage st1">
+          <div class="stage-num">1</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Vault Init</span>
+              <span class="stage-cmd">/vault init [path]</span>
+            </div>
+            <div class="stage-desc">Creates the folder structure and saves the vault path to
+              <code>~/.ccs/config.json</code>. All other commands auto-discover the active vault.</div>
+            <div class="stage-tags">
+              <span class="tag">~/.ccs/config.json</span>
+              <span class="tag">one-time setup</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-stage st2">
+          <div class="stage-num">2</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Sync</span>
+              <span class="stage-cmd">/sync</span>
+            </div>
+            <div class="stage-desc">Pulls commits, PRs, issues, and README from GitHub repos listed in
+              <code>ccs.yaml</code>. Writes raw files to <code>raw/github/</code>. Uses GitHub REST API — no local clone
+              needed.</div>
+            <div class="stage-tags">
+              <span class="tag">GitHub REST API</span>
+              <span class="tag">raw/github/</span>
+              <span class="tag">GH_TOKEN</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-stage st3">
+          <div class="stage-num">3</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Harvest</span>
+              <span class="stage-cmd">/harvest</span>
+            </div>
+            <div class="stage-desc">Extreme Scraper logic for the AI era. Mines conversation history from Cursor
+              generations, VS Code Copilot .jsonl sessions, Claude Code project logs, and Antigravity memories. Writes
+              one file per memory to <code>raw/memories/</code>.</div>
+            <div class="stage-tags">
+              <span class="tag">Cursor</span>
+              <span class="tag">VS Code Copilot</span>
+              <span class="tag">Claude Code</span>
+              <span class="tag">Antigravity</span>
+              <span class="tag">raw/memories/</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-stage st4">
+          <div class="stage-num">4</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Ingest</span>
+              <span class="stage-cmd">/ingest</span>
+            </div>
+            <div class="stage-desc">Reads everything in <code>raw/</code> and converts it to Markdown wiki pages in
+              <code>wiki/</code>. Re-running merges new content — never overwrites. HTML → <code>wiki/concepts/</code>,
+              conversations.json → <code>wiki/conversations/</code>.</div>
+            <div class="stage-tags">
+              <span class="tag">HTML parser</span>
+              <span class="tag">Markdown merge</span>
+              <span class="tag">YAML frontmatter</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-stage st5">
+          <div class="stage-num">5</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Enrich</span>
+              <span class="stage-cmd">/enrich</span>
+            </div>
+            <div class="stage-desc">Sends each un-enriched wiki page to the LLM. Gets back a one-paragraph summary,
+              keyword tags, and related page titles. Injects summary and tags into frontmatter. Appends
+              <code>## Related</code> with <code>[[wikilinks]]</code>. Safe to re-run — skips already-enriched pages.
+            </div>
+            <div class="stage-tags">
+              <span class="tag">LLM per-page</span>
+              <span class="tag">[[wikilinks]]</span>
+              <span class="tag">frontmatter injection</span>
+              <span class="tag">idempotent</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-stage st6">
+          <div class="stage-num">6</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Graph</span>
+              <span class="stage-cmd">/graph</span>
+            </div>
+            <div class="stage-desc">Builds an interactive vis.js knowledge graph. Node size scales with connections.
+              Colors group by topic (code=purple, design=pink, ai=green, data=yellow…). Hover fades unconnected nodes.
+              Click opens info panel. Search filters live.</div>
+            <div class="stage-tags">
+              <span class="tag">vis.js</span>
+              <span class="tag">TF-IDF keyword edges</span>
+              <span class="tag">Obsidian-style glow</span>
+              <span class="tag">output/graph.html</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="pipeline-stage st7">
+          <div class="stage-num">7</div>
+          <div class="stage-body">
+            <div class="stage-head">
+              <span class="stage-title">Ask</span>
+              <span class="stage-cmd">/ask &lt;question&gt;</span>
+            </div>
+            <div class="stage-desc">TF-IDF keyword search across all wiki pages. Top 6 matching pages injected into LLM
+              context. LLM answers with <code>[[page-title]]</code> citations. Title token matches score 5×, tag matches
+              3×, body term frequency 1 + log(freq).</div>
+            <div class="stage-tags">
+              <span class="tag">TF-IDF retrieval</span>
+              <span class="tag">RAG</span>
+              <span class="tag">[[citations]]</span>
+              <span class="tag">top-6 context</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ══════ VAULT STRUCTURE ══════ -->
+      <h2 id="vault-structure">Vault Structure</h2>
+      <p>The vault is plain Markdown — any AI tool that reads files can use it directly.</p>
+
+      <div class="vault-tree">
+        <span class="vt-dir">vault/</span>
+        ├── <span class="vt-file">ccs.yaml</span> <span class="vt-arrow">←</span> <span class="vt-note">sources + LLM
+          provider config</span>
+        ├── <span class="vt-dir">raw/</span> <span class="vt-arrow">←</span> <span class="vt-note">sync inbox (never
+          edit manually)</span>
+        │ ├── <span class="vt-dir">github/</span> <span class="vt-auto">← /sync writes here</span>
+        │ ├── <span class="vt-dir">memories/</span> <span class="vt-auto">← /harvest writes here</span>
+        │ └── <span class="vt-dir">uploads/</span> <span class="vt-note">← drop local files here</span>
+        ├── <span class="vt-dir">wiki/</span> <span class="vt-arrow">←</span> <span class="vt-auto">auto-maintained by
+          /ingest + /enrich</span>
+        │ ├── <span class="vt-gen">_master-index.md</span> <span class="vt-arrow">←</span> <span class="vt-auto">/index
+          rebuilds this</span>
+        │ ├── <span class="vt-dir">concepts/</span> <span class="vt-note">← from HTML + text</span>
+        │ └── <span class="vt-dir">conversations/</span> <span class="vt-note">← from conversations.json</span>
+        ├── <span class="vt-dir">output/</span>
+        │ ├── <span class="vt-gen">graph.html</span> <span class="vt-auto">← /graph output</span>
+        │ └── <span class="vt-dir">rewrite-context/</span>
+        ├── <span class="vt-dir">skills/</span>
+        │ ├── wiki-ingest/SKILL.md
+        │ ├── wiki-query/SKILL.md
+        │ ├── graph-build/SKILL.md
+        │ └── rewrite-plan/SKILL.md
+        └── <span class="vt-file">.claude-plugin/plugin.json</span> <span class="vt-arrow">←</span> <span
+          class="vt-note">Claude Code manifest</span>
+
+        <span class="vt-dir">~/.ccs/</span>
+        ├── <span class="vt-file">config.json</span> <span class="vt-arrow">←</span> <span class="vt-note">global:
+          stores activeVault path</span>
+        └── <span class="vt-gen">guide.html</span> <span class="vt-auto">← /guide output</span>
+      </div>
+
+      <h3>Wiki page frontmatter</h3>
+      <p>Every ingested page gets standard frontmatter. Enrich adds <code>summary</code> and <code>tags</code>.</p>
+      <div class="code-block">
+        <span class="lang-tag">yaml</span>
+        <pre>---
+<span class="c-key">title</span>:       <span class="c-str">auth-svc</span>
+<span class="c-key">type</span>:        <span class="c-val">concept</span>
+<span class="c-key">source</span>:      <span class="c-str">raw/github/auth-svc-readme.html</span>
+<span class="c-key">last_synced</span>: <span class="c-num">2026-04-22</span>
+<span class="c-key">staleness</span>:   <span class="c-val">fresh</span>
+<span class="c-key">summary</span>:     <span class="c-str">"JWT-based authentication service used by all frontend clients"</span>
+<span class="c-key">tags</span>:        [<span class="c-val">auth</span>, <span class="c-val">jwt</span>, <span class="c-val">security</span>, <span class="c-val">backend</span>]
+---</pre>
+      </div>
+
+      <hr class="divider">
+
+      <!-- ══════ COMMANDS ══════ -->
+      <h2 id="commands">Command Reference</h2>
+      <p>All commands are available in the terminal UI via the <code>/</code> menu. Type <code>/</code> to open the
+        command picker.</p>
+
+      <!-- /vault -->
+      <h3 id="vault-cmd">/vault</h3>
+      <p>Manages the active vault — creation, status, and health checks.</p>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/vault init [path]</span></td>
+            <td class="cmd-desc">Create a new vault. Saves path to <code>~/.ccs/config.json</code>. All other commands
+              pick it up automatically.</td>
+            <td class="cmd-example">/vault init ~/my-kb</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/vault status</span></td>
+            <td class="cmd-desc">Show active vault path and current counts: wiki pages, raw files ready to ingest,
+              skills loaded.</td>
+            <td class="cmd-example">/vault status</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/vault audit</span></td>
+            <td class="cmd-desc">Health check: compares harvested memory count against ingested wiki pages. Flags gaps
+              in coverage.</td>
+            <td class="cmd-example">/vault audit</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- /sync -->
+      <h3 id="sync-cmd">/sync</h3>
+      <p>Pulls the latest commits, PRs, issues, and README from GitHub repos configured in <code>ccs.yaml</code>.</p>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/sync</span></td>
+            <td class="cmd-desc">Sync all configured sources. Writes raw files to <code>raw/github/</code>. Uses
+              <code>GH_TOKEN</code> env var.</td>
+            <td class="cmd-example">/sync</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="callout note">
+        <div class="callout-icon">⚙️</div>
+        <div class="callout-body">
+          <strong>Requires <code>GH_TOKEN</code></strong>
+          <p>Set <code>GH_TOKEN</code> or <code>GITHUB_TOKEN</code> in your environment. Add repos to
+            <code>sources:</code> in <code>ccs.yaml</code>.</p>
         </div>
       </div>
-    </div>
-  </main>
-</div>
 
-<script>
-const components = [
-  { name: 'AuthService', status: 'ready', complexity: 'Low', claims: 12, doc: '# AuthService\n\nValidates users using JWT tokens. Matches existing security baseline.' },
-  { name: 'DataMapper', status: 'needs_review', complexity: 'High', claims: 5, doc: '# DataMapper\n\nComplex mapping logic for legacy SOAP payloads. Requires manual review of XML schemas.' },
-  { name: 'Logger', status: 'ready', complexity: 'Low', claims: 8, doc: '# Logger\n\nStandard logging utility. To be replaced with cloud-native structured logging.' }
-];
+      <!-- /harvest -->
+      <h3 id="harvest-cmd">/harvest</h3>
+      <p>Mines conversation history from your local development environment. No manual export needed.</p>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>What it reads</th>
+            <th>Output</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">Cursor</span></td>
+            <td class="cmd-desc">Generations (prompt logs) + composer histories from local SQLite DB</td>
+            <td class="cmd-example">raw/memories/cursor-*</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">VS Code</span></td>
+            <td class="cmd-desc">GitHub Copilot chat sessions stored as <code>.jsonl</code> files</td>
+            <td class="cmd-example">raw/memories/vscode-*</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">Claude Code</span></td>
+            <td class="cmd-desc">Project-specific session logs from Claude Code CLI</td>
+            <td class="cmd-example">raw/memories/claude-*</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">Antigravity</span></td>
+            <td class="cmd-desc">Local brain memories from the Antigravity tool</td>
+            <td class="cmd-example">raw/memories/antigravity-*</td>
+          </tr>
+        </tbody>
+      </table>
 
-function populateReportNav() {
-  const list = document.getElementById('report-nav-list');
-  list.innerHTML = components.map(c => `
-    <div onclick="selectComponent('${c.name}')" style="padding: 10px; cursor: pointer; border-radius: 6px; margin-bottom: 4px; border: 1px solid var(--border);" onmouseover="this.style.background='var(--accent-bg)'" onmouseout="this.style.background='none'">
-      <strong>${c.name}</strong>
-      <div style="font-size: 11px; opacity: 0.7;">${c.status.replace('_', ' ')}</div>
-    </div>
-  `).join('');
-}
+      <!-- /ingest -->
+      <h3 id="ingest-cmd">/ingest</h3>
+      <p>Converts everything in <code>raw/</code> to Markdown wiki pages. Re-running is safe — new content is merged,
+        existing pages are never overwritten.</p>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/ingest</span></td>
+            <td class="cmd-desc">Process all raw files. HTML → <code>wiki/concepts/</code>, conversations →
+              <code>wiki/conversations/</code>. Merges into existing pages.</td>
+            <td class="cmd-example">/ingest</td>
+          </tr>
+        </tbody>
+      </table>
 
-function selectComponent(name) {
-  const c = components.find(x => x.name === name);
-  document.getElementById('md-viewer').innerHTML = `<h3>${c.name} Report</h3><div class="markdown">${c.doc.replace(/\n/g, '<br>')}</div>`;
-  document.getElementById('json-pre').textContent = JSON.stringify(c, null, 2);
-}
+      <!-- /enrich -->
+      <h3 id="enrich-cmd">/enrich</h3>
+      <p>AI-enriches every wiki page that doesn't already have a <code>summary:</code> field. Makes one LLM call per
+        page — runs best overnight on large vaults.</p>
+      <div class="flag-block">
+        <div class="flag-row">
+          <div class="flag-name">summary</div>
+          <div class="flag-desc">One-paragraph plain-language description of what the page covers, injected into
+            frontmatter.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">tags</div>
+          <div class="flag-desc">3–6 keyword tags added to frontmatter for search and graph grouping.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">relatedTitles</div>
+          <div class="flag-desc">2–5 exact page titles from the same vault that are semantically related. Used to build
+            <code>[[wikilinks]]</code> in the <code>## Related</code> section.</div>
+        </div>
+      </div>
+      <div class="callout tip">
+        <div class="callout-icon">⚡</div>
+        <div class="callout-body">
+          <strong>Progress tracking</strong>
+          <p>The tool card shows live progress: <code>47/180 · 26% · react-hooks-2024</code>. Press <kbd>Esc</kbd> to
+            cancel — your queued prompt will be restored to the input box.</p>
+        </div>
+      </div>
 
-function showRoute(id) {
-  document.querySelectorAll('.route').forEach(r => r.classList.add('hidden'));
-  document.getElementById('route-' + id).classList.remove('hidden');
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  const navItem = document.querySelector(`[onclick="showRoute('${id}')"]`);
-  if (navItem) navItem.classList.add('active');
-  
-  if (id === 'graph') initGraph();
-  if (id === 'reports') populateReportNav();
-}
+      <!-- /graph -->
+      <h3 id="graph-cmd">/graph</h3>
+      <p>Builds a self-contained <code>output/graph.html</code> and opens it in the browser. All rendering is
+        client-side — no server needed.</p>
+      <div class="flag-block">
+        <div class="flag-row">
+          <div class="flag-name">Node size</div>
+          <div class="flag-desc"><code>7 + min(22, connections × 2.5)</code> — hubs are visually prominent.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">Node color</div>
+          <div class="flag-desc">Topic group — code=purple, design=pink, ai=green, data=yellow, devops=blue. Glow shadow
+            per color (Obsidian-style).</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">Edge building</div>
+          <div class="flag-desc">TF-IDF keywords from title + summary. Keywords appearing in 2–30 nodes create edges.
+            Max 12 connections per node.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">Interactions</div>
+          <div class="flag-desc">Hover → fade unconnected nodes. Click → info panel. Search bar → live node filter.
+            Legend click → isolate topic group.</div>
+        </div>
+      </div>
 
-function toggleTheme() {
-  document.body.setAttribute('data-theme', document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-}
+      <!-- /ask -->
+      <h3 id="ask-cmd">/ask</h3>
+      <p>Retrieval-augmented search over your entire wiki. Fast and runs offline (TF-IDF) before sending the top matches
+        to the LLM.</p>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/ask &lt;question&gt;</span></td>
+            <td class="cmd-desc">Search wiki, inject top 6 pages into LLM context, return answer with
+              <code>[[citations]]</code>.</td>
+            <td class="cmd-example">/ask what does auth-svc depend on?</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="flag-block">
+        <div class="flag-row">
+          <div class="flag-name">Title token match</div>
+          <div class="flag-desc">Score multiplier: <strong>5×</strong></div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">Tag match</div>
+          <div class="flag-desc">Score multiplier: <strong>3×</strong></div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">Body frequency</div>
+          <div class="flag-desc"><code>1 + log(freq)</code>, normalized by query length</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">Context window</div>
+          <div class="flag-desc">Top 6 scoring pages injected. LLM answers with <code>[[page-title]]</code> inline
+            citations.</div>
+        </div>
+      </div>
 
-function initGraph() {
-  const canvas = document.getElementById('graph-canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = canvas.parentElement.clientWidth;
-  canvas.height = canvas.parentElement.clientHeight;
-  
-  const nodes = components.map((c, i) => ({ x: 100 + i*150, y: 150, label: c.name }));
-  
-  function draw() {
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    nodes.forEach(n => {
-      ctx.fillStyle = '#3b82f6';
-      ctx.beginPath(); ctx.arc(n.x, n.y, 20, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = document.body.getAttribute('data-theme') === 'dark' ? 'white' : 'black';
-      ctx.fillText(n.label, n.x - 20, n.y + 35);
-    });
-  }
-  draw();
-}
-</script>
+      <!-- /migrate -->
+      <h3 id="migrate-cmd">/migrate</h3>
+      <p>Migration intelligence — analyze legacy codebases and generate verified migration contracts and per-component
+        context docs for AI agents.</p>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/migrate rewrite</span></td>
+            <td class="cmd-desc">Full pipeline: fetch repo → detect framework → analyze components → verify claims →
+              write artifacts + dashboard.</td>
+            <td class="cmd-example">/migrate rewrite --repo &lt;url&gt; --to csharp --yes</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate scan</span></td>
+            <td class="cmd-desc">Scan for SOAP/WCF external service calls. Falls back to general code analysis if none
+              found.</td>
+            <td class="cmd-example">/migrate scan --repo &lt;url&gt; --lang csharp --yes</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate reverse-eng</span></td>
+            <td class="cmd-desc">Persist reverse-engineering artifacts only — no agent migration contract. Good for
+              documentation.</td>
+            <td class="cmd-example">/migrate reverse-eng --repo &lt;url&gt; --yes</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate status</span></td>
+            <td class="cmd-desc">Component-by-component migration progress table.</td>
+            <td class="cmd-example">/migrate status</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate open</span></td>
+            <td class="cmd-desc">Open the latest run folder in Finder/Explorer, or open its dashboard.html.</td>
+            <td class="cmd-example">/migrate open --dashboard</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate verify</span></td>
+            <td class="cmd-desc">Mark a component as human-verified after reviewing its context doc.</td>
+            <td class="cmd-example">/migrate verify AuthService --by max</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate db</span></td>
+            <td class="cmd-desc">Live database schema extraction. Read-only, user-approved, credentials never stored.
+            </td>
+            <td class="cmd-example">/migrate db --service UserService --yes</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/migrate clean</span></td>
+            <td class="cmd-desc">Remove old run folders to keep the migration root tidy.</td>
+            <td class="cmd-example">/migrate clean --all --yes</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>migrate rewrite — flags</h3>
+      <div class="flag-block">
+        <div class="flag-row">
+          <div class="flag-name">--repo &lt;url&gt;</div>
+          <div class="flag-desc">GitHub URL of the source repository. Required.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">--to &lt;language&gt;</div>
+          <div class="flag-desc">Target language: <code>csharp</code>, <code>typescript</code>, <code>python</code>,
+            <code>java</code>, <code>go</code>. Default: <code>python</code>.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">--from &lt;framework&gt;</div>
+          <div class="flag-desc">Override auto-detected source framework: <code>aspnet-core</code>,
+            <code>spring-boot</code>, <code>express</code>.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">--context &lt;path&gt;</div>
+          <div class="flag-desc">Load a business/architecture doc to anchor LLM decisions. Repeatable. Copied into
+            <code>architecture-context/</code> for run reproducibility.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">--no-context</div>
+          <div class="flag-desc">Disable all context docs, including auto-discovered workspace docs.</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">--yes</div>
+          <div class="flag-desc">Skip cost confirmation gate. Without this flag, the command shows a token estimate and
+            waits.</div>
+        </div>
+      </div>
+
+      <h3>migrate rewrite — outputs</h3>
+      <div class="code-block">
+        <span class="lang-tag">output</span>
+        <pre><span class="vt-dir">migration/node-express-realworld-example-app/</span>
+├── <span class="vt-gen">README.md</span>                     <span class="c-comment">← start here, trust posture overview</span>
+├── <span class="vt-gen">dashboard.html</span>                <span class="c-comment">← self-contained web UI</span>
+├── <span class="vt-gen">migration-contract.json</span>       <span class="c-comment">← machine-readable for AI agents</span>
+├── <span class="vt-gen">verification-summary.md</span>       <span class="c-comment">← which components are ready</span>
+├── <span class="vt-gen">human-questions.md</span>            <span class="c-comment">← open decisions for you to answer</span>
+├── <span class="vt-gen">system-graph.mmd</span>              <span class="c-comment">← Mermaid dependency diagram</span>
+├── <span class="vt-gen">system-graph.json</span>             <span class="c-comment">← graph data for MCP tools</span>
+├── <span class="vt-gen">AGENTS.md</span>                     <span class="c-comment">← Codex / Claude Code agent context</span>
+├── <span class="vt-dir">components/</span>                   <span class="c-comment">← per-component context docs</span>
+│   └── <span class="vt-gen">ArticlesRoute.md</span>
+├── <span class="vt-dir">architecture-context/</span>         <span class="c-comment">← your --context files, copied</span>
+├── <span class="vt-dir">claude-commands/</span>              <span class="c-comment">← optional Claude Code slash commands</span>
+├── <span class="vt-dir">reverse-engineering/</span>
+│   ├── <span class="vt-gen">reverse-engineering-details.md</span>
+│   └── <span class="vt-gen">business-logic.json</span>
+└── <span class="vt-dir">test-scaffolds/</span></pre>
+      </div>
+
+      <!-- Utility commands -->
+      <h3 id="utility-cmds">Utility Commands</h3>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Command</th>
+            <th>Description</th>
+            <th>Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/index</span></td>
+            <td class="cmd-desc">Rebuild <code>wiki/_master-index.md</code> — single file listing every page with title,
+              type, tags.</td>
+            <td class="cmd-example">/index</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/lint</span></td>
+            <td class="cmd-desc">Wiki health check: orphan pages, broken links, stale content, missing frontmatter.</td>
+            <td class="cmd-example">/lint</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/guide</span></td>
+            <td class="cmd-desc">Generate and open <code>~/.ccs/guide.html</code> — full interactive HTML guide with
+              Mermaid flowcharts.</td>
+            <td class="cmd-example">/guide</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/model</span></td>
+            <td class="cmd-desc">Show the active LLM model.</td>
+            <td class="cmd-example">/model</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/mode &lt;mode&gt;</span></td>
+            <td class="cmd-desc">Set permission mode: <code>default</code>, <code>plan</code>, or
+              <code>permissive</code>.</td>
+            <td class="cmd-example">/mode plan</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/clear</span></td>
+            <td class="cmd-desc">Clear conversation history.</td>
+            <td class="cmd-example">/clear</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">/exit</span></td>
+            <td class="cmd-desc">Exit CCS Code (also: Ctrl+C).</td>
+            <td class="cmd-example">/exit</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Keyboard shortcuts -->
+      <h3>Keyboard Shortcuts</h3>
+      <table class="cmd-table">
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="cmd-mono">/</span></td>
+            <td class="cmd-desc">Open the command picker with live search and descriptions</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">?</span></td>
+            <td class="cmd-desc">Toggle keyboard shortcuts help menu</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">↑ ↓</span></td>
+            <td class="cmd-desc">Navigate command suggestions (when picker is open), or retrieve queued prompt (when
+              input is empty)</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">Tab / Enter</span></td>
+            <td class="cmd-desc">Accept highlighted suggestion</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">Esc</span></td>
+            <td class="cmd-desc">Cancel current operation (queued prompt restored to input box), or close suggestion
+              list</td>
+          </tr>
+          <tr>
+            <td><span class="cmd-mono">@path/to/file</span></td>
+            <td class="cmd-desc">Attach a local file to your message</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <hr class="divider">
+
+      <!-- ══════ CONFIGURATION ══════ -->
+      <h2 id="configuration">Configuration — ccs.yaml</h2>
+      <p>Place <code>ccs.yaml</code> at the root of your vault. It controls sources and the LLM provider.</p>
+      <div class="code-block">
+        <span class="lang-tag">yaml</span>
+        <pre><span class="c-comment"># Sources to sync</span>
+<span class="c-key">sources</span>:
+  - <span class="c-key">type</span>: <span class="c-val">github</span>
+    <span class="c-key">repos</span>:
+      - <span class="c-str">my-org/auth-svc</span>
+      - <span class="c-str">my-org/payment-svc</span>
+    <span class="c-key">include</span>: [<span class="c-val">commits</span>, <span class="c-val">prs</span>, <span class="c-val">issues</span>, <span class="c-val">readme</span>]
+    <span class="c-key">token_env</span>: <span class="c-val">GH_TOKEN</span>
+
+<span class="c-comment"># LLM provider for /enrich and /ask</span>
+<span class="c-key">llm</span>:
+  <span class="c-key">provider</span>: <span class="c-val">anthropic</span>
+  <span class="c-key">model</span>: <span class="c-val">claude-sonnet-4-6</span></pre>
+      </div>
+
+      <!-- ══════ PROVIDERS ══════ -->
+      <h2 id="providers">LLM Providers</h2>
+      <p>Configure your provider in <code>ccs.yaml</code> and set the required environment variables.</p>
+
+      <div class="provider-grid">
+        <div class="provider-card">
+          <div class="provider-name">Anthropic</div>
+          <div class="provider-key">ANTHROPIC_API_KEY</div>
+          <div class="provider-desc">Claude Sonnet, Opus, Haiku. Best for enrichment and migration analysis.</div>
+          <div class="code-block" style="margin-top:10px;padding:8px 10px;">
+            <pre style="font-size:11px;"><span class="c-key">provider</span>: <span class="c-val">anthropic</span>
+<span class="c-key">model</span>: <span class="c-val">claude-sonnet-4-6</span></pre>
+          </div>
+        </div>
+        <div class="provider-card">
+          <div class="provider-name">OpenAI</div>
+          <div class="provider-key">OPENAI_API_KEY</div>
+          <div class="provider-desc">GPT-4o and compatible models. Full feature parity.</div>
+          <div class="code-block" style="margin-top:10px;padding:8px 10px;">
+            <pre style="font-size:11px;"><span class="c-key">provider</span>: <span class="c-val">openai</span>
+<span class="c-key">model</span>: <span class="c-val">gpt-4o</span></pre>
+          </div>
+        </div>
+        <div class="provider-card">
+          <div class="provider-name">Enterprise</div>
+          <div class="provider-key">CCS_ENTERPRISE_*</div>
+          <div class="provider-desc">Azure OpenAI with OAuth 2.0 client credentials. Five env vars required.</div>
+          <div class="code-block" style="margin-top:10px;padding:8px 10px;">
+            <pre
+              style="font-size:11px;"><span class="c-key">provider</span>: <span class="c-val">enterprise</span></pre>
+          </div>
+        </div>
+      </div>
+
+      <h3>Enterprise environment variables</h3>
+      <div class="flag-block">
+        <div class="flag-row">
+          <div class="flag-name">CCS_ENTERPRISE_CLIENT_ID</div>
+          <div class="flag-desc">OAuth client ID for the Azure AD application</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">CCS_ENTERPRISE_CLIENT_SECRET</div>
+          <div class="flag-desc">OAuth client secret</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">CCS_ENTERPRISE_AUTH_URL</div>
+          <div class="flag-desc">Token endpoint URL (e.g.
+            <code>https://login.microsoftonline.com/&lt;tenant&gt;/oauth2/v2.0/token</code>)</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">CCS_ENTERPRISE_SCOPE</div>
+          <div class="flag-desc">OAuth scope string</div>
+        </div>
+        <div class="flag-row">
+          <div class="flag-name">CCS_ENTERPRISE_API_BASE</div>
+          <div class="flag-desc">Azure OpenAI endpoint base URL</div>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- ══════ INTEGRATION ══════ -->
+      <h2 id="integration">Integration with AI Tools</h2>
+      <p>The vault is plain Markdown. Any AI tool that reads files can index it and use it as live context.</p>
+
+      <div class="int-grid">
+        <div class="int-card">
+          <div class="int-name">Claude Code</div>
+          <div class="int-how">Point at the vault directory — <code>CLAUDE.md</code> + <code>skills/</code> auto-load as
+            context for the agent.</div>
+        </div>
+        <div class="int-card">
+          <div class="int-name">GitHub Copilot</div>
+          <div class="int-how">Open vault as a VS Code workspace — wiki pages appear as context in Copilot Chat.</div>
+        </div>
+        <div class="int-card">
+          <div class="int-name">Cursor / Windsurf</div>
+          <div class="int-how">Use <code>@filename</code> to reference any wiki page in chat. Point the AI rules at
+            <code>wiki/</code>.</div>
+        </div>
+        <div class="int-card">
+          <div class="int-name">Any vector agent</div>
+          <div class="int-how">Index <code>wiki/</code> in your vector store — YAML frontmatter fields map directly to
+            metadata.</div>
+        </div>
+      </div>
+
+      <!-- ══════ IMPLEMENTATION STATUS ══════ -->
+      <h2 id="implementation">Implementation Status</h2>
+
+      <div class="status-grid">
+        <div class="status-row"><span>/vault init + status</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>/sync (GitHub)</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>/harvest (4 sources)</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>/ingest (merge)</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>/enrich (LLM + wikilinks)</span><span class="status-badge sb-done">✓ Done</span>
+        </div>
+        <div class="status-row"><span>/graph (vis.js, glow)</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>/ask (TF-IDF RAG)</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>/index + /guide</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>Enterprise provider</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>Anthropic + OpenAI</span><span class="status-badge sb-done">✓ Done</span></div>
+        <div class="status-row"><span>WelcomeBox (responsive)</span><span class="status-badge sb-done">✓ Done</span>
+        </div>
+        <div class="status-row"><span>Prompt queue + Esc cancel</span><span class="status-badge sb-done">✓ Done</span>
+        </div>
+        <div class="status-row"><span>/lint (full)</span><span class="status-badge sb-todo">Planned</span></div>
+        <div class="status-row"><span>PDF ingestor</span><span class="status-badge sb-todo">Planned</span></div>
+        <div class="status-row"><span>Confluence sync</span><span class="status-badge sb-todo">Planned</span></div>
+        <div class="status-row"><span>Embedding-based search</span><span class="status-badge sb-todo">Planned</span>
+        </div>
+      </div>
+
+      <div class="footer">
+        <span>CCS Code — AI-powered knowledge base CLI</span>
+        <span>Built with TypeScript · React · Ink</span>
+      </div>
+
+    </main>
+
+    <!-- ─── Right TOC ─── -->
+    <aside class="toc">
+      <div class="toc-label">On This Page</div>
+      <a href="#overview" class="toc-link">Overview</a>
+      <a href="#what-it-does" class="toc-link sub">What It Does</a>
+      <a href="#quick-start" class="toc-link sub">Quick Start</a>
+      <a href="#pipeline" class="toc-link">Pipeline</a>
+      <a href="#vault-structure" class="toc-link sub">Vault Structure</a>
+      <a href="#commands" class="toc-link">Commands</a>
+      <a href="#vault-cmd" class="toc-link sub">/vault</a>
+      <a href="#sync-cmd" class="toc-link sub">/sync</a>
+      <a href="#harvest-cmd" class="toc-link sub">/harvest</a>
+      <a href="#ingest-cmd" class="toc-link sub">/ingest</a>
+      <a href="#enrich-cmd" class="toc-link sub">/enrich</a>
+      <a href="#graph-cmd" class="toc-link sub">/graph</a>
+      <a href="#ask-cmd" class="toc-link sub">/ask</a>
+      <a href="#migrate-cmd" class="toc-link sub">/migrate</a>
+      <a href="#utility-cmds" class="toc-link sub">Utilities</a>
+      <a href="#configuration" class="toc-link">Configuration</a>
+      <a href="#providers" class="toc-link">LLM Providers</a>
+      <a href="#integration" class="toc-link">Integration</a>
+      <a href="#implementation" class="toc-link sub">Status</a>
+    </aside>
+
+  </div>
+
+  <script>
+    // Highlight active sidebar link on scroll
+    const links = document.querySelectorAll('.sidebar-link, .toc-link');
+    const sections = [...document.querySelectorAll('h2[id], h3[id]')];
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          links.forEach(l => {
+            l.classList.toggle('active', l.getAttribute('href') === '#' + id);
+          });
+        }
+      });
+    }, { rootMargin: '-56px 0px -70% 0px' });
+
+    sections.forEach(s => observer.observe(s));
+  </script>
 </body>
+
 </html>

@@ -7,7 +7,6 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 import { useTerminalSize } from "../hooks/useTerminalSize";
 import { usePaste } from "../hooks/usePaste";
-import { StatusBar } from "./StatusBar";
 import { HelpMenu } from "./HelpMenu";
 import { WelcomeBox } from "./WelcomeBox";
 import { MarkdownText } from "./MarkdownText";
@@ -81,6 +80,7 @@ function createUIMessage(role: UIMessage["role"], content: string): UIMessage {
 type ToolExecution = {
   id: string;
   name: string;
+  description?: string;
   details?: string;
   isComplete: boolean;
 };
@@ -121,6 +121,7 @@ const SLASH_COMMANDS: SuggestionItem[] = [
     description: "Migration intelligence — type /m to see all subcommands" },
 
   // ---- Agent / setup -------------------------------------------------------
+  { id: "doc",         label: "/doc",         description: "Open the Knowledge Transfer guide in your browser" },
   { id: "setup",       label: "/setup",       description: "Codex / Claude Code MCP setup snippets" },
   { id: "guide",       label: "/guide",       description: "Open the interactive how-to guide" },
 
@@ -254,11 +255,14 @@ function UserPromptBlock({ content, width }: { content: string; width: number })
 }
 
 function AssistantMessageBlock({ content, width }: { content: string; width: number }) {
-  const icon = /^error:/i.test(content.trim()) ? "✕" : "●";
-  const iconColor = icon === "✕" ? "red" : "#8b92ac";
+  const isError = /^error:/i.test(content.trim());
+  const icon = isError ? "✕" : "✦";
+  const iconColor = isError ? "#f56565" : "#63b3ed";
   return (
     <Box flexDirection="row" gap={1}>
-      <Text color={iconColor}>{icon}</Text>
+      <Box width={2}>
+        <Text color={iconColor} bold={!isError}>{icon}</Text>
+      </Box>
       <Box flexDirection="column" flexGrow={1}>
         <MarkdownText content={content} width={Math.max(32, width - 3)} />
       </Box>
@@ -317,31 +321,45 @@ function taskStatusIcon(status: string): string {
 
 import { ToolBlock } from "./ToolBlock";
 
-// ... (keep other imports)
+// Gemini-style color phases: blue (0-8s) → purple (8-20s) → green (20s+)
+function getThinkingColor(elapsed: number): string {
+  if (elapsed < 8)  return "#63b3ed"; // blue
+  if (elapsed < 20) return "#b794f4"; // purple
+  return "#68d391";                   // green
+}
+
+const TIPS = [
+  "Use /ask to query your knowledge base",
+  "Type /migrate status to check progress",
+  "Press Esc to cancel any operation",
+  "Use @filename to attach files",
+  "Try /graph to visualize your wiki",
+];
 
 function ThinkingBlock({ startTime }: { startTime: number }) {
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   const [frame, setFrame] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  const [tipIdx] = useState(() => Math.floor(Math.random() * TIPS.length));
 
   useEffect(() => {
-    const frameTimer = setInterval(() => setFrame(f => (f + 1) % frames.length), 80);
+    const frameTimer  = setInterval(() => setFrame(f => (f + 1) % frames.length), 80);
     const elapsedTimer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTime) / 1000));
     }, 100);
-    return () => {
-      clearInterval(frameTimer);
-      clearInterval(elapsedTimer);
-    };
+    return () => { clearInterval(frameTimer); clearInterval(elapsedTimer); };
   }, [startTime]);
+
+  const color = getThinkingColor(elapsed);
 
   return (
     <Box flexDirection="row" justifyContent="space-between" paddingX={1} marginTop={1}>
       <Box gap={1}>
-        <Text color="#63b3ed" bold>{frames[frame]} Thinking...</Text>
-        <Text color="#718096">(esc to cancel, {elapsed}s)</Text>
+        <Text color={color} bold>{frames[frame]}</Text>
+        <Text color={color}>Working</Text>
+        <Text color="#4a5568">({elapsed}s · esc to cancel)</Text>
       </Box>
-      <Text color="#718096">Tip: Use /migrate open --dashboard to see visual reports</Text>
+      <Text color="#4a5568" dimColor>Tip: {TIPS[tipIdx]}</Text>
     </Box>
   );
 }
@@ -449,6 +467,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   const [showWelcome, setShowWelcome] = useState(!initialPrompt);
   const [completionLabel, setCompletionLabel] = useState<string | null>(null);
   const processingStartRef = useRef<number>(0);
+  // Set to true when user cancels mid-operation — all .then() handlers check this
+  // before updating state, so stale results don't overwrite the reset UI.
+  const cancelledRef = useRef<boolean>(false);
 
   // Vault state
   const [vaultPath, setVaultPath] = useState<string | null>(null);
@@ -469,6 +490,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
   // Migration scan live log (accumulated progress lines shown during scan)
   const [migrateLogs, setMigrateLogs] = useState<string[]>([]);
   const [operationLogs, setOperationLogs] = useState<string[]>([]);
+
+  // Queued prompt state
+  const [queuedPrompt, setQueuedPrompt] = useState<string | null>(null);
 
   // Environment
   const [instructions, setInstructions] = useState<ConfigFile[]>([]);
@@ -572,6 +596,16 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     triggerBoot();
   }, [triggerBoot]);
 
+  // Auto-execute queued prompt as soon as processing finishes
+  useEffect(() => {
+    if (!isProcessing && queuedPrompt) {
+      const toRun = queuedPrompt;
+      setQueuedPrompt(null);
+      // Small delay so UI settles before the next run starts
+      const t = setTimeout(() => handleSubmit(toRun), 80);
+      return () => clearTimeout(t);
+    }
+  }, [isProcessing, queuedPrompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------------------
   // Input change — detect @ and / triggers
@@ -633,6 +667,29 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     if (key.escape && isMigrateWizard) {
       setIsMigrateWizard(false);
       setMessages((prev) => [...prev, createUIMessage("assistant", "Migration Wizard cancelled.")]);
+      return;
+    }
+
+    // Up Arrow with empty input -> retrieve queued prompt
+    if (key.upArrow && input === "" && queuedPrompt) {
+      setInput(queuedPrompt);
+      setQueuedPrompt(null);
+      return;
+    }
+
+    // Esc during processing → cancel the operation, restore queued prompt to input
+    if (key.escape && isProcessing) {
+      cancelledRef.current = true;
+      setIsProcessing(false);
+      setActiveTools([]);
+      setOperationLogs([]);
+      setMigrateLogs([]);
+      // Put queued prompt back into the input box so user can edit and resubmit
+      if (queuedPrompt) {
+        setInput(queuedPrompt);
+        setQueuedPrompt(null);
+      }
+      setMessages((prev) => [...prev, createUIMessage("assistant", "Operation cancelled.")]);
       return;
     }
 
@@ -732,19 +789,33 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
     // Dismiss welcome box on any command, regardless of how it was triggered
     setShowWelcome(false);
-    // Clear previous operation logs
+    // Clear previous operation logs and stale completion label
     setMigrateLogs([]);
     setOperationLogs([]);
+    setCompletionLabel(null);
+    cancelledRef.current = false; // reset any prior cancellation
 
     if (!id) return;
 
-    const vaultCommands = ["vault", "sync", "ingest", "graph", "lint", "rewrite", "index", "enrich", "ask", "harvest", "migrate"];
-    if (vaultCommands.includes(id) && !vaultPath) {
+    // "vault init" must always work — it IS the vault-creation command.
+    // All other vault-dependent commands require an active vault.
+    const requiresVault = ["sync", "ingest", "graph", "lint", "rewrite", "index", "enrich", "ask", "harvest", "migrate"];
+    const isVaultSubcommand = id === "vault" && args[0] !== "init";
+    if ((requiresVault.includes(id) || isVaultSubcommand) && !vaultPath) {
       setIsSetupMode(true);
       return;
     }
 
     switch (id) {
+      case "doc": {
+        const docPath = resolve(process.cwd(), "docs/guide/index.html");
+        import("child_process").then(({ exec }) => {
+          const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+          exec(`${opener} "${docPath}"`);
+        });
+        setMessages((prev) => [...prev, createUIMessage("assistant", "Opening Knowledge Transfer guide in your browser...")]);
+        break;
+      }
       // ------------------------------------------------------------------
       // CCS Code vault commands
       // ------------------------------------------------------------------
@@ -754,11 +825,13 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         setOperationLogs(["Managing vault"]);
         processingStartRef.current = Date.now();
         handleVaultCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
           setOperationLogs([]);
         }).catch(err => {
+          if (cancelledRef.current) return;
           setIsProcessing(false);
           setActiveTools([]);
           setOperationLogs([]);
@@ -771,12 +844,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         setActiveTools([{ id: "sync", name: "Source Syncer", details: "Syncing sources...", isComplete: false }]);
         processingStartRef.current = Date.now();
         handleSyncCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
+          if (cancelledRef.current) return;
           setIsProcessing(false);
           setActiveTools([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
@@ -788,12 +863,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         setActiveTools([{ id: "ingest", name: "Ingestor", details: "Processing raw files...", isComplete: false }]);
         processingStartRef.current = Date.now();
         handleIngestCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
+          if (cancelledRef.current) return;
           setIsProcessing(false);
           setActiveTools([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
@@ -801,14 +878,40 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         break;
       }
       case "graph": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "graph", name: "Graph Builder", description: "Building knowledge graph (vis.js)", details: "Reading wiki pages...", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleGraphCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          if (cancelledRef.current) return;
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
       case "lint": {
+        setIsProcessing(true);
+        setActiveTools([{ id: "lint", name: "Lint", description: "Checking wiki health", details: "Scanning for broken links and orphans...", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleLintCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          if (cancelledRef.current) return;
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
@@ -817,16 +920,40 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           setMessages((prev) => [...prev, createUIMessage("assistant", "Usage: /rewrite <service-name>\n       /rewrite order")]);
           break;
         }
+        setIsProcessing(true);
+        setActiveTools([{ id: "rewrite", name: "Code Analyzer", description: `Rewrite plan for: ${arg}`, details: "Analyzing dependencies...", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleRewriteCommand([id, ...args], process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          if (cancelledRef.current) return;
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
       case "index": {
-        setOperationLogs(["Rebuilding master index"]);
+        setIsProcessing(true);
+        setActiveTools([{ id: "index", name: "Index Builder", description: "Rebuilding master index", details: "Scanning wiki pages...", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleIndexCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
-          setOperationLogs([]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          if (cancelledRef.current) return;
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
@@ -838,16 +965,20 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         }
         setShowWelcome(false);
         setIsProcessing(true);
-        setActiveTools([{ id: "1", name: `Searching wiki for: ${question}`, isComplete: false }]);
-        setOperationLogs([`Searching wiki for: ${question}`]);
+        setActiveTools([{ id: "ask", name: "WikiSearch", description: "Searching knowledge base", details: question, isComplete: false }]);
         processingStartRef.current = Date.now();
         handleAskCommand(question, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setActiveTools([]);
           setIsProcessing(false);
-          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          if (cancelledRef.current) return;
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
@@ -857,6 +988,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         setOperationLogs(["Mining local AI histories", "Reading Claude, Cursor, and VS Code logs"]);
         processingStartRef.current = Date.now();
         handleHarvestCommand(args, process.cwd()).then((output) => {
+          if (cancelledRef.current) return;
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
@@ -864,6 +996,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
+          if (cancelledRef.current) return;
           setIsProcessing(false);
           setActiveTools([]);
           setOperationLogs([]);
@@ -872,19 +1005,40 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         break;
       }
       case "guide": {
-        setOperationLogs(["Generating guide"]);
+        setIsProcessing(true);
+        setActiveTools([{ id: "guide", name: "Guide", description: "Generating interactive how-to guide", details: "Building HTML guide...", isComplete: false }]);
+        processingStartRef.current = Date.now();
         handleGuideCommand().then((output) => {
+          if (cancelledRef.current) return;
+          const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
-          setOperationLogs([]);
+          setIsProcessing(false);
+          setActiveTools([]);
+          setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
+        }).catch(err => {
+          if (cancelledRef.current) return;
+          setIsProcessing(false);
+          setActiveTools([]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
       case "enrich": {
         setIsProcessing(true);
-        setActiveTools([{ id: "enrich", name: "AI Analysis", isComplete: false }]);
-        setOperationLogs([`Enriching wiki with ${activeModel}`, "Analyzing pages"]);
+        setActiveTools([{ id: "enrich", name: "AI Analysis", isComplete: false, details: "Scanning wiki pages…" }]);
+        setOperationLogs([`Enriching wiki with ${activeModel}`]);
         processingStartRef.current = Date.now();
-        handleEnrichCommand(args, process.cwd()).then((output) => {
+        handleEnrichCommand(args, process.cwd(), (p) => {
+          if (cancelledRef.current) return;
+          const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+          // Shorten UUID-style filenames to keep the detail line readable
+          const name = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/.test(p.current)
+            ? p.current.slice(0, 8) + "…"
+            : p.current;
+          const detail = `${p.done}/${p.total} · ${pct}% · ${name}`;
+          setActiveTools([{ id: "enrich", name: "AI Analysis", isComplete: false, details: detail }]);
+        }).then((output) => {
+          if (cancelledRef.current) return;
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
@@ -892,6 +1046,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
+          if (cancelledRef.current) return;
           setIsProcessing(false);
           setActiveTools([]);
           setOperationLogs([]);
@@ -1023,17 +1178,27 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           plugin:  "Plugin Loader",
         };
 
+        const toolDescMap: Record<string, string> = {
+          scan:    "Scanning repository for external dependencies",
+          rewrite: "Deep-code analysis and modernization planning",
+          status:  "Collecting current migration health metrics",
+          verify:  "Validating source-backed implementation claims",
+        };
+
         const toolName = toolNameMap[subcommand] || "Migration Tool";
+        const toolDesc = toolDescMap[subcommand] || "Executing migration operation";
 
         setIsProcessing(true);
-        setActiveTools([{ id: "migrate-task", name: toolName, details: "Initializing...", isComplete: false }]);
+        setActiveTools([{ id: "migrate-task", name: toolName, description: toolDesc, details: "Initializing workflow...", isComplete: false }]);
         setMigrateLogs([]);
         processingStartRef.current = Date.now();
 
         handleMigrateCommand(args, process.cwd(), (msg) => {
-          setActiveTools([{ id: "migrate-task", name: toolName, details: msg, isComplete: false }]);
+          if (cancelledRef.current) return;
+          setActiveTools([{ id: "migrate-task", name: toolName, description: toolDesc, details: msg, isComplete: false }]);
         })
           .then((output) => {
+            if (cancelledRef.current) return;
             const elapsed = formatElapsed(Date.now() - processingStartRef.current);
             setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
             setIsProcessing(false);
@@ -1042,6 +1207,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
           })
           .catch((err: unknown) => {
+            if (cancelledRef.current) return;
             const msg = err instanceof Error ? err.message : String(err);
             setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${msg}`)]);
             setIsProcessing(false);
@@ -1250,6 +1416,21 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
       const trimmed = value.trim();
       if (!trimmed) return;
+
+      // Queue logic: if already processing, stash it
+      if (isProcessing) {
+        setQueuedPrompt(trimmed);
+        setInput("");
+        return;
+      }
+
+      // '?' is a UI shortcut — never send to LLM. Help is already open because
+      // handleInputChange set helpOpen=true while the user was typing '?'.
+      // Just clear the input and leave help visible (Esc closes it).
+      if (trimmed === "?") {
+        setInput("");
+        return;
+      }
 
       if (isMigrateWizard) {
         handleMigrateWizardSubmit(trimmed);
@@ -1672,6 +1853,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             <ToolBlock
               key={tool.id}
               name={name}
+              description={tool.description}
               status={tool.isComplete ? "Done" : "Working"}
               details={details}
               isComplete={tool.isComplete}
@@ -1696,7 +1878,29 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
       {/* Input Area */}
       <Box flexDirection="column" marginTop={1}>
+        {/* Help Menu — shown when user types ? or runs /help */}
+        {helpOpen && !isProcessing && (
+          <HelpMenu terminalWidth={terminalWidth} />
+        )}
+
+        {/* Completion label — shown briefly after each operation */}
+        {completionLabel && !isProcessing && !helpOpen && (
+          <Box paddingX={2} marginBottom={0}>
+            <Text color="#48bb78">✓ {completionLabel}</Text>
+          </Box>
+        )}
+
         {isProcessing && <ThinkingBlock startTime={processingStartRef.current} />}
+
+        {/* Queued Prompt View */}
+        {queuedPrompt && (
+          <Box flexDirection="column" paddingX={2} marginBottom={1}>
+            <Text color="#718096">Queued (press ↑ to edit):</Text>
+            <Box marginLeft={2}>
+              <Text color="#4a5568" wrap="truncate-end">{queuedPrompt}</Text>
+            </Box>
+          </Box>
+        )}
 
         <Box
           flexDirection="row"
@@ -1712,7 +1916,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             <TextInput
               key={inputKey}
               value={input}
-              focus={!isProcessing}
+              focus={true} // Allow typing while busy
               onChange={(val) => {
                 activeInputRef.current = isMigrateWizard ? "wizard" : "main";
                 handleInputChange(val);
@@ -1721,34 +1925,26 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             />
             {input === "" && (
               <Box position="absolute" marginLeft={1}>
-                {isProcessing ? (
-                  <Box gap={1}>
-                    <Text color="#718096">Type your message or @path/to/file</Text>
-                  </Box>
-                ) : (
-                  <Text dimColor>
-                    {isMigrateWizard
-                      ? migrateWizardStep === 0
-                        ? "https://github.com/org/repo"
-                        : migrateWizardStep === 1
-                        ? "e.g. csharp, typescript, python  (Enter for default)"
-                        : "y / n"
-                      : "Type your message or @path/to/file"}
-                  </Text>
-                )}
+                <Text dimColor>
+                  {isMigrateWizard
+                    ? "..." 
+                    : "Type your message or @path/to/file"}
+                </Text>
               </Box>
             )}
           </Box>
         </Box>
 
-        {/* Autocomplete */}
+        {/* Autocomplete (Below Input) */}
         {suggestionMode && suggestions.length > 0 && !isProcessing && (
-          <SuggestionList
-            items={suggestions}
-            selectedIndex={selectedIdx}
-            mode={suggestionMode}
-            terminalWidth={terminalWidth}
-          />
+          <Box marginLeft={1}>
+            <SuggestionList
+              items={suggestions}
+              selectedIndex={selectedIdx}
+              mode={suggestionMode}
+              terminalWidth={terminalWidth}
+            />
+          </Box>
         )}
 
         {/* New Multi-column Footer */}
