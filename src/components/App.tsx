@@ -808,10 +808,13 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
     switch (id) {
       case "doc": {
-        const docPath = resolve(process.cwd(), "docs/guide/index.html");
         import("child_process").then(({ exec }) => {
-          const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-          exec(`${opener} "${docPath}"`);
+          const docFile = resolve(process.cwd(), "docs/index.html");
+          const url = `file://${docFile}#what-it-does`;
+          const opener = process.platform === "darwin" ? "open"
+            : process.platform === "win32" ? "start"
+            : "xdg-open";
+          exec(`${opener} "${url}"`);
         });
         setMessages((prev) => [...prev, createUIMessage("assistant", "Opening Knowledge Transfer guide in your browser...")]);
         break;

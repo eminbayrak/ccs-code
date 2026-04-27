@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCS Code — Docs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    /* ─── Dark theme (default) ─── */
+    :root {
+      --bg:         #0d0d0d;
+      --bg-sidebar: #0a0a0a;
+      --bg-card:    #141414;
+      --bg-card2:   #181818;
+      --bg-code:    #111;
+      --border:     rgba(255,255,255,0.07);
+      --border-med: rgba(255,255,255,0.12);
+      --text-1:     #f0f0f0;
+      --text-2:     #a0a0a0;
+      --text-3:     #606060;
+      --accent:     #5b9cf6;
+      --accent-dim: rgba(91,156,246,0.12);
+      --accent-brd: rgba(91,156,246,0.25);
+      --green:      #4ade80;
+      --green-dim:  rgba(74,222,128,0.1);
+      --orange:     #fb923c;
+      --orange-dim: rgba(251,146,60,0.1);
+      --purple:     #a78bfa;
+      --purple-dim: rgba(167,139,250,0.1);
+      --pink:       #f472b6;
+      --cyan:       #22d3ee;
+      --yellow:     #fbbf24;
+      --radius:     8px;
+      --font:       'Inter', system-ui, sans-serif;
+      --mono:       'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+      --sidebar-w:  260px;
+      --header-h:   56px;
+    }
+
+    /* ─── Light theme ─── */
+    [data-theme="light"] {
+      --bg:         #ffffff;
+      --bg-sidebar: #f8f9fa;
+      --bg-card:    #f1f3f5;
+      --bg-card2:   #e9ecef;
+      --bg-code:    #f6f8fa;
+      --border:     rgba(0,0,0,0.08);
+      --border-med: rgba(0,0,0,0.14);
+      --text-1:     #0d1117;
+      --text-2:     #424a53;
+      --text-3:     #8c959f;
+      --accent:     #0969da;
+      --accent-dim: rgba(9,105,218,0.08);
+      --accent-brd: rgba(9,105,218,0.2);
+      --green:      #1a7f37;
+      --green-dim:  rgba(26,127,55,0.08);
+      --orange:     #bc4c00;
+      --orange-dim: rgba(188,76,0,0.08);
+      --purple:     #6639ba;
+      --purple-dim: rgba(102,57,186,0.08);
+      --pink:       #bf3989;
+      --cyan:       #0969a2;
+      --yellow:     #9a6700;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text-1);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+      transition: background 0.2s, color 0.2s;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, kbd { font-family: var(--mono); font-size: 0.88em; }
+
+    /* ─── Header ─── */
+    .header {
+      position: fixed; top: 0; left: 0; right: 0;
+      height: var(--header-h);
+      background: color-mix(in srgb, var(--bg) 92%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center;
+      padding: 0 24px; z-index: 100; gap: 32px;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 15px; color: var(--text-1);
+      letter-spacing: -0.01em; text-decoration: none;
+    }
+    .logo-mark {
+      width: 28px; height: 28px; border-radius: 6px;
+      background: linear-gradient(135deg, #5b9cf6 0%, #a78bfa 100%);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      color: #fff; letter-spacing: -0.05em;
+    }
+    .header-nav { display: flex; gap: 4px; flex: 1; }
+    .header-nav a {
+      color: var(--text-2); font-size: 13px; font-weight: 500;
+      padding: 6px 10px; border-radius: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .header-nav a:hover, .header-nav a.active {
+      color: var(--text-1); background: var(--border); text-decoration: none;
+    }
+    .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+    .header-badge {
+      font-size: 11px; font-weight: 600; font-family: var(--mono);
+      color: var(--text-3); background: var(--bg-card);
+      border: 1px solid var(--border); border-radius: 5px; padding: 3px 8px;
+    }
+
+    /* ─── Theme toggle ─── */
+    .theme-btn {
+      width: 32px; height: 32px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text-2); cursor: pointer; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .theme-btn:hover { color: var(--text-1); border-color: var(--border-med); }
+
+    /* ─── Layout ─── */
+    .layout {
+      display: flex; margin-top: var(--header-h);
+      min-height: calc(100vh - var(--header-h));
+    }
+
+    /* ─── Sidebar ─── */
+    .sidebar {
+      width: var(--sidebar-w); min-width: var(--sidebar-w);
+      background: var(--bg-sidebar); border-right: 1px solid var(--border);
+      position: sticky; top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto; padding: 24px 0 40px;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .sidebar::-webkit-scrollbar { width: 4px; }
+    .sidebar::-webkit-scrollbar-track { background: transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .sidebar-section { padding: 0 16px; margin-bottom: 24px; }
+    .sidebar-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-3);
+      padding: 0 8px; margin-bottom: 6px;
+    }
+    .sidebar-link {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px; border-radius: 6px;
+      font-size: 13px; color: var(--text-2); font-weight: 450;
+      transition: all 0.12s; cursor: pointer; text-decoration: none;
+    }
+    .sidebar-link:hover { color: var(--text-1); background: var(--border); text-decoration: none; }
+    .sidebar-link.active { color: var(--accent); background: var(--accent-dim); font-weight: 500; }
+    .sidebar-link .dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: currentColor; flex-shrink: 0; opacity: 0.5;
+    }
+
+    /* ─── Main ─── */
+    .main { flex: 1; min-width: 0; padding: 48px 64px 96px; max-width: 900px; }
+
+    /* ─── Right TOC ─── */
+    .toc {
+      width: 200px; min-width: 200px;
+      padding: 24px 0 40px 24px;
+      position: sticky; top: var(--header-h);
+      height: calc(100vh - var(--header-h));
+      overflow-y: auto;
+    }
+    .toc-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--text-3); margin-bottom: 10px;
+    }
+    .toc-link {
+      display: block; font-size: 12px; color: var(--text-2);
+      padding: 3px 0; border-left: 2px solid transparent;
+      padding-left: 10px; transition: all 0.12s; text-decoration: none;
+    }
+    .toc-link:hover { color: var(--text-1); text-decoration: none; }
+    .toc-link.active { color: var(--accent); border-left-color: var(--accent); }
+    .toc-link.sub { padding-left: 20px; font-size: 11px; }
+
+    /* ─── Typography ─── */
+    .eyebrow {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 36px; font-weight: 700; letter-spacing: -0.03em;
+      color: var(--text-1); line-height: 1.2; margin-bottom: 12px;
+    }
+    h2 {
+      font-size: 22px; font-weight: 700; letter-spacing: -0.02em;
+      color: var(--text-1); margin-top: 56px; margin-bottom: 16px;
+      padding-bottom: 12px; border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-h) + 16px);
+    }
+    h3 {
+      font-size: 15px; font-weight: 600; color: var(--text-1);
+      margin-top: 28px; margin-bottom: 10px;
+      scroll-margin-top: calc(var(--header-h) + 16px);
+    }
+    p { color: var(--text-2); margin-bottom: 14px; }
+    p strong { color: var(--text-1); font-weight: 600; }
+    .hero-desc { font-size: 16px; color: var(--text-2); line-height: 1.7; margin-bottom: 28px; max-width: 680px; }
+    .hero-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 36px; }
+    .hero-pill { font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 20px; border: 1px solid; }
+    .hp-blue   { border-color: var(--accent-brd); color: var(--accent); background: var(--accent-dim); }
+    .hp-green  { border-color: rgba(74,222,128,0.3); color: var(--green); background: var(--green-dim); }
+    .hp-purple { border-color: rgba(167,139,250,0.3); color: var(--purple); background: var(--purple-dim); }
+    .hp-orange { border-color: rgba(251,146,60,0.3); color: var(--orange); background: var(--orange-dim); }
+
+    /* ─── Feature split ─── */
+    .feature-split {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 24px 0;
+    }
+    .feature-card {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 20px; background: var(--bg-card);
+      transition: border-color 0.15s;
+    }
+    .feature-card:hover { border-color: var(--border-med); }
+    .feature-card h4 { font-size: 14px; font-weight: 700; color: var(--text-1); margin-bottom: 8px; }
+    .feature-card p { font-size: 13px; color: var(--text-2); margin-bottom: 10px; line-height: 1.65; }
+    .feature-card ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .feature-card ul li { font-size: 12px; color: var(--text-2); padding-left: 14px; position: relative; }
+    .feature-card ul li::before { content: "›"; position: absolute; left: 0; color: var(--text-3); }
+    .feature-card-blue  { border-top: 2px solid var(--accent); }
+    .feature-card-purple { border-top: 2px solid var(--purple); }
+    @media (max-width: 700px) { .feature-split { grid-template-columns: 1fr; } }
+
+    /* ─── Pipeline ─── */
+    .pipeline { display: flex; flex-direction: column; gap: 0; margin: 28px 0; }
+    .pipeline-stage { display: flex; gap: 16px; position: relative; }
+    .pipeline-stage:not(:last-child)::after {
+      content: ''; position: absolute; left: 18px; top: 40px;
+      width: 2px; bottom: -12px; background: var(--border);
+    }
+    .stage-num {
+      width: 36px; height: 36px; border-radius: 50%; border: 2px solid;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-weight: 700; font-size: 13px;
+      flex-shrink: 0; margin-top: 1px; position: relative; z-index: 1;
+      background: var(--bg);
+    }
+    .stage-body { flex: 1; padding: 14px 16px; border-radius: var(--radius); border: 1px solid; margin-bottom: 12px; }
+    .stage-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+    .stage-title { font-weight: 600; font-size: 14px; }
+    .stage-cmd { font-family: var(--mono); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+    .stage-desc { font-size: 13px; color: var(--text-2); }
+    .stage-tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .st1 .stage-num { color: var(--accent); border-color: var(--accent); }
+    .st1 .stage-body { border-color: var(--accent-brd); background: var(--accent-dim); }
+    .st1 .stage-title { color: var(--accent); }
+    .st1 .stage-cmd { background: rgba(91,156,246,0.15); color: var(--accent); }
+    .st2 .stage-num { color: var(--purple); border-color: var(--purple); }
+    .st2 .stage-body { border-color: rgba(167,139,250,0.25); background: var(--purple-dim); }
+    .st2 .stage-title { color: var(--purple); }
+    .st2 .stage-cmd { background: rgba(167,139,250,0.15); color: var(--purple); }
+    .st3 .stage-num { color: var(--orange); border-color: var(--orange); }
+    .st3 .stage-body { border-color: rgba(251,146,60,0.25); background: var(--orange-dim); }
+    .st3 .stage-title { color: var(--orange); }
+    .st3 .stage-cmd { background: rgba(251,146,60,0.15); color: var(--orange); }
+    .st4 .stage-num { color: var(--pink); border-color: var(--pink); }
+    .st4 .stage-body { border-color: rgba(244,114,182,0.25); background: rgba(244,114,182,0.06); }
+    .st4 .stage-title { color: var(--pink); }
+    .st4 .stage-cmd { background: rgba(244,114,182,0.15); color: var(--pink); }
+    .st5 .stage-num { color: var(--cyan); border-color: var(--cyan); }
+    .st5 .stage-body { border-color: rgba(34,211,238,0.25); background: rgba(34,211,238,0.06); }
+    .st5 .stage-title { color: var(--cyan); }
+    .st5 .stage-cmd { background: rgba(34,211,238,0.15); color: var(--cyan); }
+    .st6 .stage-num { color: var(--yellow); border-color: var(--yellow); }
+    .st6 .stage-body { border-color: rgba(251,191,36,0.25); background: rgba(251,191,36,0.06); }
+    .st6 .stage-title { color: var(--yellow); }
+    .st6 .stage-cmd { background: rgba(251,191,36,0.15); color: var(--yellow); }
+    .st7 .stage-num { color: var(--green); border-color: var(--green); }
+    .st7 .stage-body { border-color: rgba(74,222,128,0.25); background: var(--green-dim); }
+    .st7 .stage-title { color: var(--green); }
+    .st7 .stage-cmd { background: rgba(74,222,128,0.15); color: var(--green); }
+
+    /* migrate pipeline colors */
+    .sm0 .stage-num { color: var(--text-3); border-color: var(--border-med); }
+    .sm0 .stage-body { border-color: var(--border); background: var(--bg-card); }
+    .sm0 .stage-title { color: var(--text-2); }
+    .sm0 .stage-cmd { background: var(--bg-card2); color: var(--text-2); }
+
+    /* ─── Tag ─── */
+    .tag {
+      font-family: var(--mono); font-size: 10px; padding: 2px 6px;
+      border-radius: 3px; background: rgba(255,255,255,0.05);
+      border: 1px solid var(--border-med); color: var(--text-2);
+    }
+    [data-theme="light"] .tag {
+      background: rgba(0,0,0,0.04); border-color: var(--border-med);
+    }
+
+    /* ─── Code block ─── */
+    .code-block {
+      background: var(--bg-code); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 18px;
+      margin: 16px 0; overflow-x: auto; position: relative;
+    }
+    .code-block pre { font-family: var(--mono); font-size: 12px; line-height: 1.8; color: var(--text-2); }
+    .c-comment { color: #4a5568; }
+    [data-theme="light"] .c-comment { color: #8c959f; }
+    .c-cmd    { color: var(--accent); font-weight: 600; }
+    .c-flag   { color: var(--purple); }
+    .c-val    { color: var(--green); }
+    .c-str    { color: var(--orange); }
+    .c-key    { color: var(--cyan); }
+    .c-num    { color: var(--yellow); }
+    .lang-tag {
+      position: absolute; top: 8px; right: 12px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-3); font-family: var(--mono);
+    }
+
+    /* ─── Callout ─── */
+    .callout {
+      display: flex; gap: 12px; padding: 14px 16px;
+      border-radius: var(--radius); border: 1px solid; margin: 20px 0; font-size: 13px;
+    }
+    .callout-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .callout-body { flex: 1; }
+    .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; }
+    .callout-body p { margin: 0; font-size: 13px; }
+    .callout.tip  { border-color: rgba(91,156,246,0.3); background: var(--accent-dim); }
+    .callout.tip strong { color: var(--accent); }
+    .callout.note { border-color: rgba(251,191,36,0.3); background: rgba(251,191,36,0.06); }
+    .callout.note strong { color: var(--yellow); }
+    .callout.warn { border-color: rgba(251,146,60,0.3); background: var(--orange-dim); }
+    .callout.warn strong { color: var(--orange); }
+
+    /* ─── Tables ─── */
+    .cmd-table {
+      width: 100%; border-collapse: collapse; border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; font-size: 13px;
+    }
+    .cmd-table thead tr { background: var(--bg-card2); border-bottom: 1px solid var(--border); }
+    .cmd-table th {
+      text-align: left; padding: 10px 14px;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--text-3);
+    }
+    .cmd-table tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
+    .cmd-table tbody tr:last-child { border-bottom: none; }
+    .cmd-table tbody tr:hover { background: var(--border); }
+    .cmd-table td { padding: 11px 14px; vertical-align: top; }
+    .cmd-table td:first-child { width: 36%; }
+    .cmd-table td:last-child { width: 30%; color: var(--text-3); }
+    .cmd-mono {
+      font-family: var(--mono); font-size: 12px; color: var(--accent);
+      background: var(--accent-dim); padding: 2px 7px;
+      border-radius: 4px; border: 1px solid var(--accent-brd);
+      display: inline-block; line-height: 1.5;
+    }
+    .cmd-desc { color: var(--text-2); line-height: 1.5; }
+    .cmd-example { font-family: var(--mono); font-size: 11px; color: var(--text-3); word-break: break-all; line-height: 1.6; }
+
+    /* ─── Flag block ─── */
+    .flag-block {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 18px; margin: 16px 0;
+    }
+    .flag-row {
+      display: flex; gap: 12px; padding: 8px 0;
+      border-bottom: 1px solid var(--border); align-items: flex-start;
+    }
+    .flag-row:last-child { border-bottom: none; }
+    .flag-name { font-family: var(--mono); font-size: 12px; color: var(--purple); width: 200px; flex-shrink: 0; padding-top: 1px; }
+    .flag-desc { font-size: 13px; color: var(--text-2); flex: 1; }
+
+    /* ─── Provider grid ─── */
+    .provider-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 20px 0; }
+    .provider-card {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px; background: var(--bg-card); transition: border-color 0.15s;
+    }
+    .provider-card:hover { border-color: var(--border-med); }
+    .provider-name { font-weight: 700; font-size: 14px; color: var(--text-1); margin-bottom: 6px; }
+    .provider-key {
+      font-family: var(--mono); font-size: 10px; color: var(--orange);
+      background: var(--orange-dim); border: 1px solid rgba(251,146,60,0.2);
+      padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 8px;
+    }
+    .provider-desc { font-size: 12px; color: var(--text-2); }
+
+    /* ─── Vault tree ─── */
+    .vault-tree {
+      font-family: var(--mono); font-size: 12px; line-height: 1.9;
+      background: var(--bg-code); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px; color: var(--text-2); overflow-x: auto;
+    }
+    .vt-dir  { color: var(--accent); font-weight: 600; }
+    .vt-note { color: var(--text-3); }
+    .vt-arrow{ color: var(--text-3); }
+    .vt-auto { color: var(--purple); }
+    .vt-gen  { color: var(--green); }
+
+    /* ─── Integration grid ─── */
+    .int-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+    .int-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; background: var(--bg-card); }
+    .int-name { font-weight: 600; font-size: 13px; color: var(--text-1); margin-bottom: 5px; }
+    .int-how  { font-size: 12px; color: var(--text-2); }
+
+    /* ─── Output grid ─── */
+    .output-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); gap: 10px; margin: 20px 0; }
+    .output-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+    .output-file { font-family: var(--mono); font-size: 11px; color: var(--accent); margin-bottom: 4px; }
+    .output-desc { font-size: 12px; color: var(--text-2); line-height: 1.55; }
+
+    /* ─── Status grid ─── */
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 20px 0; }
+    .status-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--bg-card); font-size: 13px;
+    }
+    .status-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-left: auto; white-space: nowrap; }
+    .sb-done { background: var(--green-dim); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+    .sb-todo { background: rgba(255,255,255,0.04); color: var(--text-3); border: 1px solid var(--border); }
+    [data-theme="light"] .sb-todo { background: rgba(0,0,0,0.04); }
+
+    /* ─── Misc ─── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+    .footer {
+      margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 12px; color: var(--text-3);
+    }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 1100px) { .toc { display: none; } }
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .main { padding: 32px 24px 80px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header class="header">
+  <a href="#overview" class="logo">
+    <div class="logo-mark">CCS</div>
+    CCS Code Docs
+  </a>
+  <nav class="header-nav">
+    <a href="#overview" class="active">Overview</a>
+    <a href="#migration">Migration</a>
+    <a href="#vault">Knowledge Vault</a>
+    <a href="#commands">Commands</a>
+    <a href="#configuration">Configuration</a>
+    <a href="#integration">Integration</a>
+  </nav>
+  <div class="header-right">
+    <button class="theme-btn" id="themeBtn" title="Toggle theme">🌙</button>
+    <div class="header-badge">v2.0</div>
+  </div>
+</header>
+
+<!-- ═══ LAYOUT ═══ -->
+<div class="layout">
+
+  <!-- ─── Sidebar ─── -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Overview</div>
+      <a href="#overview"      class="sidebar-link active"><span class="dot"></span>Introduction</a>
+      <a href="#two-features"  class="sidebar-link"><span class="dot"></span>Two Features</a>
+      <a href="#quick-start"   class="sidebar-link"><span class="dot"></span>Quick Start</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Migration Intelligence</div>
+      <a href="#migration"        class="sidebar-link"><span class="dot"></span>What It Does</a>
+      <a href="#migrate-arch"     class="sidebar-link"><span class="dot"></span>Architecture</a>
+      <a href="#migrate-pipeline" class="sidebar-link"><span class="dot"></span>Pipeline</a>
+      <a href="#migrate-outputs"  class="sidebar-link"><span class="dot"></span>Outputs</a>
+      <a href="#migrate-cmd"      class="sidebar-link"><span class="dot"></span>/migrate Commands</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Knowledge Vault</div>
+      <a href="#vault"          class="sidebar-link"><span class="dot"></span>What It Does</a>
+      <a href="#vault-pipeline" class="sidebar-link"><span class="dot"></span>Pipeline</a>
+      <a href="#vault-structure"class="sidebar-link"><span class="dot"></span>Vault Structure</a>
+      <a href="#vault-cmd"      class="sidebar-link"><span class="dot"></span>/vault Commands</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Configuration</div>
+      <a href="#configuration" class="sidebar-link"><span class="dot"></span>ccs.yaml</a>
+      <a href="#providers"     class="sidebar-link"><span class="dot"></span>LLM Providers</a>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Integration</div>
+      <a href="#integration"     class="sidebar-link"><span class="dot"></span>AI Tools & MCP</a>
+      <a href="#implementation"  class="sidebar-link"><span class="dot"></span>Implementation Status</a>
+    </div>
+  </aside>
+
+  <!-- ─── Main ─── -->
+  <main class="main">
+
+    <!-- ══ OVERVIEW ══ -->
+    <div id="overview">
+      <div class="eyebrow">Reference</div>
+      <h1>CCS Code</h1>
+      <p class="hero-desc">A local AI intelligence platform with two independent features: a <strong>migration engine</strong> that reverse-engineers any legacy codebase into a verified agent-ready contract, and a <strong>knowledge vault</strong> that turns your AI conversations, repos, and docs into a queryable, graph-linked wiki.</p>
+      <div class="hero-pills">
+        <span class="hero-pill hp-blue">Terminal-first CLI</span>
+        <span class="hero-pill hp-green">AST + LLM analysis</span>
+        <span class="hero-pill hp-purple">Plain Markdown vault</span>
+        <span class="hero-pill hp-orange">Migration intelligence</span>
+      </div>
+    </div>
+
+    <!-- ══ TWO FEATURES ══ -->
+    <h2 id="two-features">Two Independent Features</h2>
+    <p>CCS Code is not a single tool — it is two tools sharing the same CLI. You can use Migration Intelligence without ever touching the vault, and vice versa. Each has its own commands, its own pipeline, and its own output folder.</p>
+
+    <div class="feature-split">
+      <div class="feature-card feature-card-blue">
+        <h4>⚡ Feature 1 — Migration Intelligence</h4>
+        <p>Point it at a legacy GitHub repo. CCS scans it with a three-tier engine — free AST parsing first, then Haiku for structure discovery, then Sonnet for behavior extraction — and produces a verified migration contract your AI coding agents can implement without guessing.</p>
+        <ul>
+          <li>Multi-language AST parser (TS, Python, Java, C#, Go, C++, VB6…)</li>
+          <li>Every claim traced to an exact file + line on GitHub</li>
+          <li>Independent verification pass before agents touch code</li>
+          <li>Interactive dashboard + vis.js system graph auto-generated</li>
+          <li>Agent-ready: Claude Code slash commands + Codex AGENTS.md</li>
+          <li>Enforced human-sign-off gates for low-confidence components</li>
+        </ul>
+      </div>
+      <div class="feature-card feature-card-purple">
+        <h4>🧠 Feature 2 — Knowledge Vault</h4>
+        <p>Ingest GitHub repos, Claude sessions, Cursor logs, VS Code Copilot histories, and local files. CCS enriches every page with AI summaries and <code>[[wikilinks]]</code>, then renders your entire knowledge base as an interactive graph you can browse and query in natural language.</p>
+        <ul>
+          <li>Auto-harvest from Cursor, VS Code Copilot, Claude Code, Antigravity</li>
+          <li>Sync GitHub repos: commits, PRs, issues, READMEs</li>
+          <li>AI enrichment: summary + tags + wikilinks per page</li>
+          <li>vis.js knowledge graph with topic clusters and search</li>
+          <li>TF-IDF + LLM /ask with [[citation]] inline answers</li>
+          <li>Plain Markdown — readable by any AI tool</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout tip">
+      <div class="callout-icon">💡</div>
+      <div class="callout-body">
+        <strong>Completely independent</strong>
+        <p>You can run migration against a repo you have never vaulted, and run a vault on a project that has nothing to do with migration. The only thing they share is the terminal and the LLM provider config in <code>ccs.yaml</code>.</p>
+      </div>
+    </div>
+
+    <!-- ══ QUICK START ══ -->
+    <h2 id="quick-start">Quick Start</h2>
+    <h3>Run a migration analysis</h3>
+    <div class="code-block">
+      <span class="lang-tag">shell</span>
+      <pre><span class="c-comment"># Analyze a legacy repo and generate the full migration contract</span>
+<span class="c-cmd">/migrate rewrite</span> <span class="c-flag">--repo</span> <span class="c-str">https://github.com/org/legacy-app</span> <span class="c-flag">--to</span> <span class="c-val">python</span> <span class="c-flag">--yes</span>
+
+<span class="c-comment"># Open the generated dashboard and system graph</span>
+<span class="c-cmd">/migrate open</span> <span class="c-flag">--dashboard</span></pre>
+    </div>
+    <h3>Build a knowledge vault</h3>
+    <div class="code-block">
+      <span class="lang-tag">shell</span>
+      <pre><span class="c-cmd">/vault init</span>                          <span class="c-comment"># create vault at ./vault</span>
+<span class="c-cmd">/sync</span>                                <span class="c-comment"># pull GitHub sources</span>
+<span class="c-cmd">/harvest</span>                             <span class="c-comment"># mine local AI chat histories</span>
+<span class="c-cmd">/ingest</span>                              <span class="c-comment"># convert raw files → wiki pages</span>
+<span class="c-cmd">/enrich</span>                              <span class="c-comment"># AI summaries + tags + wikilinks</span>
+<span class="c-cmd">/graph</span>                               <span class="c-comment"># open interactive knowledge graph</span>
+<span class="c-cmd">/ask</span> <span class="c-str">"what did I work on last week?"</span></pre>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ══ MIGRATION ══ -->
+    <h2 id="migration">Migration Intelligence — What It Does</h2>
+    <p>The migration engine sits between your source repository and your AI coding agents. It does the expensive, error-prone work that LLMs do badly when given raw code — reading a full codebase, tracing all dependencies, extracting every business rule, and verifying every claim — so your agents can focus on writing correct code rather than reverse-engineering it.</p>
+
+    <div class="callout warn">
+      <div class="callout-icon">⚠️</div>
+      <div class="callout-body">
+        <strong>The tool never writes code.</strong>
+        <p>CCS prepares the verified context that makes AI rewrites accurate. The contract it produces tells each agent: here is the component, here is what it does, here are its dependencies with source citations, here is the target framework mapping, here are the validation scenarios — now implement it.</p>
+      </div>
+    </div>
+
+    <h3>Two migration pipelines</h3>
+    <div class="feature-split">
+      <div class="feature-card feature-card-blue">
+        <h4>/migrate rewrite — Full framework migration</h4>
+        <p>Analyzes an entire codebase for a framework-to-framework rewrite (e.g., .NET → Python, Spring Boot → FastAPI, Express → Go). Discovers every component, extracts behavior, produces a topologically-sorted contract with per-component context docs.</p>
+      </div>
+      <div class="feature-card feature-card-purple">
+        <h4>/migrate scan — SOAP / service dependency trace</h4>
+        <p>Traces external SOAP service dependencies in a Node.js repo. Finds every service call, resolves each namespace to its source repo, recursively follows nested calls, and builds a per-service knowledge base with confidence ratings.</p>
+      </div>
+    </div>
+
+    <!-- ══ MIGRATE ARCH ══ -->
+    <h2 id="migrate-arch">Migration Architecture — Three-Tier Engine</h2>
+    <p>Analysis runs in tiers of increasing cost and depth. The LLM is only invoked when static analysis can no longer answer the question.</p>
+
+    <div class="pipeline">
+      <div class="pipeline-stage st7">
+        <div class="stage-num">0</div>
+        <div class="stage-body">
+          <div class="stage-head">
+            <span class="stage-title">AST &amp; Static Scan</span>
+            <span class="stage-cmd">Tier 0 — Free</span>
+          </div>
+          <div class="stage-desc">The TypeScript compiler AST parses JS/TS natively. Tree-sitter grammars cover Python, Java, C#, Go, C/C++, Pascal, and VB6. Every import, export, class, function, route, call site, SQL query, and ORM call is extracted without running the code and without calling any LLM. Results are written to <code>code-intelligence.json</code>.</div>
+          <div class="stage-tags">
+            <span class="tag">TypeScript compiler API</span>
+            <span class="tag">Tree-sitter</span>
+            <span class="tag">call graph</span>
+            <span class="tag">SQL/ORM extraction</span>
+            <span class="tag">zero cost</span>
+          </div>
+        </div>
+      </div>
+      <div class="pipeline-stage st1">
+        <div class="stage-num">1</div>
+        <div class="stage-body">
+          <div class="stage-head">
+            <span class="stage-title">Structure Discovery</span>
+            <span class="stage-cmd">Tier 1 — Haiku</span>
+          </div>
+          <div class="stage-desc">Key project files (<code>.csproj</code>, <code>pom.xml</code>, <code>Startup.cs</code>, <code>package.json</code>, <code>appsettings.json</code>…) are bundled and sent to Haiku, which identifies the source framework, source language, and recommended target framework. Haiku then groups the file tree into typed components: <code>controller</code>, <code>service</code>, <code>repository</code>, <code>model</code>, <code>dto</code>, <code>middleware</code>, <code>config</code>, <code>utility</code>. Two fast calls, done once per run.</div>
+          <div class="stage-tags">
+            <span class="tag">framework detection</span>
+            <span class="tag">component grouping</span>
+            <span class="tag">2 LLM calls total</span>
+          </div>
+        </div>
+      </div>
+      <div class="pipeline-stage st2">
+        <div class="stage-num">2</div>
+        <div class="stage-body">
+          <div class="stage-head">
+            <span class="stage-title">Behavior Extraction</span>
+            <span class="stage-cmd">Tier 2 — Sonnet 4.6</span>
+          </div>
+          <div class="stage-desc">Each component's source files are bundled with a framework mapping table (e.g., <code>ControllerBase → APIRouter</code>, <code>DbContext → SQLAlchemy Session</code>) and sent to Sonnet. The model extracts business rules, data contracts, database interactions, nested service calls, and complexity ratings. It is explicitly instructed to return <code>"unknown"</code> rather than infer where source evidence is absent. Results checkpoint to disk after every component — crashes resume from where they left off.</div>
+          <div class="stage-tags">
+            <span class="tag">business rules</span>
+            <span class="tag">data contracts</span>
+            <span class="tag">framework mapping</span>
+            <span class="tag">per-component checkpoint</span>
+          </div>
+        </div>
+      </div>
+      <div class="pipeline-stage st3">
+        <div class="stage-num">3</div>
+        <div class="stage-body">
+          <div class="stage-head">
+            <span class="stage-title">Verification Pass</span>
+            <span class="stage-cmd">Sonnet 4.6 (configurable)</span>
+          </div>
+          <div class="stage-desc">After extraction, every claim is cross-checked against the source evidence. Claims that cannot be traced to a file and line are flagged. The verifier produces a per-claim audit trail with a <code>trusted</code>, <code>needs_review</code>, or <code>blocked</code> verdict. You can run a different model for verification than for extraction to eliminate shared blind spots between the two passes.</div>
+          <div class="stage-tags">
+            <span class="tag">per-claim audit</span>
+            <span class="tag">source tracing</span>
+            <span class="tag">trust verdict</span>
+            <span class="tag">configurable verifier model</span>
+          </div>
+        </div>
+      </div>
+      <div class="pipeline-stage st7">
+        <div class="stage-num">4</div>
+        <div class="stage-body">
+          <div class="stage-head">
+            <span class="stage-title">Topological Sort + Output Generation</span>
+            <span class="stage-cmd">Free</span>
+          </div>
+          <div class="stage-desc">Components are sorted so leaf nodes (models, repositories) come before their callers (services, controllers). This is the safe implementation order enforced in the migration contract. All artifacts are then written: dashboard HTML, interactive system graph, per-component context docs, Claude Code slash commands, Codex AGENTS.md, and the machine-readable contract JSON.</div>
+          <div class="stage-tags">
+            <span class="tag">topological sort</span>
+            <span class="tag">dashboard.html</span>
+            <span class="tag">vis.js graph</span>
+            <span class="tag">agent wiring</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Supported languages</h3>
+    <table class="cmd-table">
+      <thead><tr><th>Language</th><th>Extensions</th><th>Method</th></tr></thead>
+      <tbody>
+        <tr><td>TypeScript / JavaScript</td><td><span class="cmd-mono">.ts .tsx .js .jsx .mjs</span></td><td class="cmd-desc">TypeScript compiler AST — always available</td></tr>
+        <tr><td>Python</td><td><span class="cmd-mono">.py</span></td><td class="cmd-desc">Tree-sitter → regex fallback</td></tr>
+        <tr><td>Java</td><td><span class="cmd-mono">.java</span></td><td class="cmd-desc">Tree-sitter → regex fallback</td></tr>
+        <tr><td>C#</td><td><span class="cmd-mono">.cs</span></td><td class="cmd-desc">Tree-sitter → regex fallback</td></tr>
+        <tr><td>Go</td><td><span class="cmd-mono">.go</span></td><td class="cmd-desc">Tree-sitter → regex fallback</td></tr>
+        <tr><td>C / C++</td><td><span class="cmd-mono">.c .h .cpp .hpp</span></td><td class="cmd-desc">Tree-sitter → regex fallback</td></tr>
+        <tr><td>Pascal / Delphi</td><td><span class="cmd-mono">.pas .dpr .inc</span></td><td class="cmd-desc">Tree-sitter → regex fallback</td></tr>
+        <tr><td>VB6 / VBA</td><td><span class="cmd-mono">.bas .cls .frm .vb</span></td><td class="cmd-desc">Regex (no tree-sitter grammar)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout tip">
+      <div class="callout-icon">⚡</div>
+      <div class="callout-body">
+        <strong>Parser coverage is automatic</strong>
+        <p>Tree-sitter grammars are <code>optionalDependencies</code> and install with <code>npm install</code>. If compilation fails on a restricted machine, CCS falls back to regex silently. The method used per file is recorded in <code>code-intelligence.json</code>.</p>
+      </div>
+    </div>
+
+    <!-- ══ MIGRATE OUTPUTS ══ -->
+    <h2 id="migrate-outputs">Migration Outputs</h2>
+    <p>Every run writes a complete set of artifacts to a timestamped run folder. Agent integration files are wired automatically — no manual copy-paste.</p>
+
+    <div class="output-grid">
+      <div class="output-card">
+        <div class="output-file">dashboard.html</div>
+        <div class="output-desc">Self-contained interactive HTML dashboard — component inventory, complexity heatmap, confidence distribution, trust verdicts. Opens automatically in the browser.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">vis.js system graph</div>
+        <div class="output-desc">Force-directed graph embedded in the dashboard. Nodes = components, target roles, packages. Hover for summary + trust level. Click to drill into the context doc.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">migration-contract.json</div>
+        <div class="output-desc">Machine-readable contract for agents: target role, implementation gate, evidence ledger, risk flags, validation scenarios, acceptance criteria.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">rewrite/context/&lt;Name&gt;.md</div>
+        <div class="output-desc">Per-component doc: business rules, data contracts, framework mapping table, source links with GitHub line anchors, migration checklist.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">verification-summary.md</div>
+        <div class="output-desc">Per-claim audit trail: evidence, confidence level, source file + line, overall trust verdict.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">human-questions.md</div>
+        <div class="output-desc">Architecture decisions CCS cannot safely infer. Components with unresolved questions are blocked from agent implementation.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">component-disposition-matrix.md</div>
+        <div class="output-desc">Landing-zone map: Azure Function, Databricks, API, workflow, shared lib, adapter, or human review — driven by architecture baseline.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">HOW-TO-MIGRATE.md</div>
+        <div class="output-desc">Step-by-step guide: one step per component, with context doc path, Claude Code command, Codex prompt, and validation scenarios.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">.claude/commands/rewrite-&lt;Name&gt;.md</div>
+        <div class="output-desc">Claude Code slash commands — one per component. Type <code>/project:rewrite-OrderController</code> and the agent has full context.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">AGENTS.md</div>
+        <div class="output-desc">Auto-read by Codex. Migration order, component summaries, context doc locations, target dependency install instructions.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">code-intelligence.json</div>
+        <div class="output-desc">Symbol map, call graph, SQL/ORM extractions, package inventory — queryable via MCP tools.</div>
+      </div>
+      <div class="output-card">
+        <div class="output-file">dependency-risk-report.md</div>
+        <div class="output-desc">Package inventory with security-sensitive packages flagged and optional OSV advisory matches.</div>
+      </div>
+    </div>
+
+    <!-- ══ MIGRATE COMMANDS ══ -->
+    <h2 id="migrate-cmd">/migrate Commands</h2>
+    <p>Type <code>/m</code> in the terminal UI to see all migrate subcommands with autocomplete.</p>
+
+    <table class="cmd-table">
+      <thead><tr><th>Command</th><th>Description</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="cmd-mono">/migrate rewrite</span></td>
+          <td class="cmd-desc">Full pipeline: AST scan → detect framework → discover components → extract behavior → verify claims → write all artifacts + dashboard.</td>
+          <td class="cmd-example">/migrate rewrite --repo &lt;url&gt; --to csharp --yes</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate scan</span></td>
+          <td class="cmd-desc">Trace SOAP/WCF external service calls. Resolves namespaces to source repos, follows nested calls recursively.</td>
+          <td class="cmd-example">/migrate scan --repo &lt;url&gt; --lang csharp --yes</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate reverse-eng</span></td>
+          <td class="cmd-desc">Reverse-engineering artifacts only — no migration contract. Good for documentation or pre-planning.</td>
+          <td class="cmd-example">/migrate reverse-eng --repo &lt;url&gt; --yes</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate dashboard</span></td>
+          <td class="cmd-desc">Regenerate dashboard.html for an existing run without re-running the full analysis.</td>
+          <td class="cmd-example">/migrate dashboard my-run --open</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate status</span></td>
+          <td class="cmd-desc">Component-by-component migration progress table with confidence and verification status.</td>
+          <td class="cmd-example">/migrate status</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate open</span></td>
+          <td class="cmd-desc">Open the latest run folder in Finder/Explorer, or open its dashboard.</td>
+          <td class="cmd-example">/migrate open --dashboard</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate verify</span></td>
+          <td class="cmd-desc">Human sign-off on a component context doc. Required before <code>/migrate done</code>.</td>
+          <td class="cmd-example">/migrate verify AuthService --by max</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate done</span></td>
+          <td class="cmd-desc">Mark a verified component as fully rewritten. Requires prior <code>verify</code>.</td>
+          <td class="cmd-example">/migrate done AuthService</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate db</span></td>
+          <td class="cmd-desc">Live read-only database schema extraction. User-approved, credentials never stored.</td>
+          <td class="cmd-example">/migrate db --service UserService --yes</td>
+        </tr>
+        <tr>
+          <td><span class="cmd-mono">/migrate clean</span></td>
+          <td class="cmd-desc">Remove old run folders to keep the migration root tidy.</td>
+          <td class="cmd-example">/migrate clean --all --yes</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>migrate rewrite — flags</h3>
+    <div class="flag-block">
+      <div class="flag-row"><div class="flag-name">--repo &lt;url&gt;</div><div class="flag-desc">GitHub URL of the source repository to analyze. Required.</div></div>
+      <div class="flag-row"><div class="flag-name">--to &lt;lang&gt;</div><div class="flag-desc">Target language: <code>csharp</code>, <code>typescript</code>, <code>python</code>, <code>java</code>, <code>go</code>. Default: <code>python</code>.</div></div>
+      <div class="flag-row"><div class="flag-name">--from &lt;framework&gt;</div><div class="flag-desc">Override auto-detected source framework: <code>aspnet-core</code>, <code>spring-boot</code>, <code>express</code>.</div></div>
+      <div class="flag-row"><div class="flag-name">--context &lt;path&gt;</div><div class="flag-desc">Load a business or architecture doc to anchor LLM decisions. Repeatable. Copied into <code>architecture-context/</code> for run reproducibility.</div></div>
+      <div class="flag-row"><div class="flag-name">--no-context</div><div class="flag-desc">Disable all context docs, including auto-discovered workspace docs.</div></div>
+      <div class="flag-row"><div class="flag-name">--yes</div><div class="flag-desc">Skip cost confirmation gate. Without this flag the command shows a token estimate and waits for confirmation.</div></div>
+    </div>
+
+    <h3>LLM cost tiers</h3>
+    <table class="cmd-table">
+      <thead><tr><th>Stage</th><th>Model</th><th>Frequency</th></tr></thead>
+      <tbody>
+        <tr><td>AST parsing, call graph, graph build</td><td class="cmd-desc"><em>None — free</em></td><td class="cmd-desc">Every run</td></tr>
+        <tr><td>Framework detection</td><td class="cmd-desc">Haiku</td><td class="cmd-desc">Once per rewrite run</td></tr>
+        <tr><td>Component discovery</td><td class="cmd-desc">Haiku</td><td class="cmd-desc">Once per rewrite run</td></tr>
+        <tr><td>Namespace ranking (scan)</td><td class="cmd-desc">Haiku</td><td class="cmd-desc">Only when multiple candidates found</td></tr>
+        <tr><td>Per-component behavior extraction</td><td class="cmd-desc">Sonnet 4.6</td><td class="cmd-desc">Once per component</td></tr>
+        <tr><td>Verification pass</td><td class="cmd-desc">Sonnet 4.6 (configurable)</td><td class="cmd-desc">Once per run</td></tr>
+        <tr><td>System overview</td><td class="cmd-desc">Sonnet 4.6</td><td class="cmd-desc">Once per run</td></tr>
+      </tbody>
+    </table>
+
+    <hr class="divider">
+
+    <!-- ══ VAULT ══ -->
+    <h2 id="vault">Knowledge Vault — What It Does</h2>
+    <p>The vault is a local, AI-enriched wiki built entirely from your own sources. It does not sync to a cloud service, does not require an account, and never leaves your machine. Every page it creates is plain Markdown — readable by any editor, any AI tool, any agent that can open a file.</p>
+
+    <div class="code-block">
+      <span class="lang-tag">pipeline</span>
+      <pre><span class="c-val">GitHub repos</span>  +  <span class="c-val">IDE histories (Cursor, VS Code, Claude)</span>  +  <span class="c-val">local files</span>
+        │
+        ▼ <span class="c-cmd">/sync</span> + <span class="c-cmd">/harvest</span> + drop into <span class="c-str">raw/</span>
+        │
+        ▼ <span class="c-cmd">/ingest</span>  →  <span class="c-str">wiki/</span> pages (Markdown, auto-merged)
+        │
+        ▼ <span class="c-cmd">/enrich</span>  →  AI summaries + tags + [[wikilinks]]
+        │
+        ├── <span class="c-cmd">/graph</span>   →  interactive vis.js graph in browser
+        └── <span class="c-cmd">/ask</span>     →  TF-IDF search → LLM answers with citations</pre>
+    </div>
+
+    <!-- ══ VAULT PIPELINE ══ -->
+    <h2 id="vault-pipeline">Vault Pipeline</h2>
+
+    <div class="pipeline">
+      <div class="pipeline-stage st1">
+        <div class="stage-num">1</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Vault Init</span><span class="stage-cmd">/vault init [path]</span></div>
+          <div class="stage-desc">Creates the folder structure and saves the vault path to <code>~/.ccs/config.json</code>. All other commands auto-discover the active vault — you only run this once.</div>
+          <div class="stage-tags"><span class="tag">~/.ccs/config.json</span><span class="tag">one-time setup</span></div>
+        </div>
+      </div>
+      <div class="pipeline-stage st2">
+        <div class="stage-num">2</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Sync</span><span class="stage-cmd">/sync</span></div>
+          <div class="stage-desc">Pulls commits, PRs, issues, and README from GitHub repos listed in <code>ccs.yaml</code>. Writes raw files to <code>raw/github/</code>. Uses GitHub REST API — no local clone needed.</div>
+          <div class="stage-tags"><span class="tag">GitHub REST API</span><span class="tag">raw/github/</span><span class="tag">GH_TOKEN</span></div>
+        </div>
+      </div>
+      <div class="pipeline-stage st3">
+        <div class="stage-num">3</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Harvest</span><span class="stage-cmd">/harvest</span></div>
+          <div class="stage-desc">Extreme Scraper logic for the AI era. Mines conversation history from Cursor generations and composer histories, VS Code Copilot <code>.jsonl</code> sessions, Claude Code project logs, and Antigravity brain memories. Writes one file per memory to <code>raw/memories/</code> — no manual export needed.</div>
+          <div class="stage-tags"><span class="tag">Cursor</span><span class="tag">VS Code Copilot</span><span class="tag">Claude Code</span><span class="tag">Antigravity</span><span class="tag">raw/memories/</span></div>
+        </div>
+      </div>
+      <div class="pipeline-stage st4">
+        <div class="stage-num">4</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Ingest</span><span class="stage-cmd">/ingest</span></div>
+          <div class="stage-desc">Reads everything in <code>raw/</code> and converts it to Markdown wiki pages in <code>wiki/</code>. Re-running merges new content — never overwrites existing pages. HTML → <code>wiki/concepts/</code>, conversations.json → <code>wiki/conversations/</code>. Every page gets standard YAML frontmatter.</div>
+          <div class="stage-tags"><span class="tag">HTML parser</span><span class="tag">Markdown merge</span><span class="tag">YAML frontmatter</span></div>
+        </div>
+      </div>
+      <div class="pipeline-stage st5">
+        <div class="stage-num">5</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Enrich</span><span class="stage-cmd">/enrich</span></div>
+          <div class="stage-desc">Sends each un-enriched wiki page to the configured LLM. Gets back a one-paragraph summary, 3–6 keyword tags, and related page titles. Injects summary and tags into frontmatter. Appends <code>## Related</code> section with <code>[[wikilinks]]</code>. Safe to re-run — skips already-enriched pages. Idempotent.</div>
+          <div class="stage-tags"><span class="tag">LLM per-page</span><span class="tag">[[wikilinks]]</span><span class="tag">frontmatter injection</span><span class="tag">idempotent</span></div>
+        </div>
+      </div>
+      <div class="pipeline-stage st6">
+        <div class="stage-num">6</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Graph</span><span class="stage-cmd">/graph</span></div>
+          <div class="stage-desc">Builds a self-contained interactive vis.js knowledge graph from <code>wiki/</code> and opens it in the browser. One node per wiki page. Size scales with connection count — hubs are visually prominent. Color groups pages by topic: code=purple, AI=green, design=pink, data=yellow, devops=blue. Glow shadow per color (Obsidian-style). Hover fades unconnected nodes, brightens the connected cluster. Click opens the summary panel. Search bar filters live. Legend click isolates a topic group.</div>
+          <div class="stage-tags"><span class="tag">vis.js</span><span class="tag">TF-IDF edges</span><span class="tag">Obsidian glow</span><span class="tag">output/graph.html</span></div>
+        </div>
+      </div>
+      <div class="pipeline-stage st7">
+        <div class="stage-num">7</div>
+        <div class="stage-body">
+          <div class="stage-head"><span class="stage-title">Ask</span><span class="stage-cmd">/ask &lt;question&gt;</span></div>
+          <div class="stage-desc">TF-IDF keyword search across all wiki pages. Top 6 matching pages injected into LLM context. LLM answers with <code>[[page-title]]</code> inline citations. Title token matches score 5×, tag matches 3×, body term frequency 1 + log(freq), normalized by query length.</div>
+          <div class="stage-tags"><span class="tag">TF-IDF retrieval</span><span class="tag">RAG</span><span class="tag">[[citations]]</span><span class="tag">top-6 context</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ VAULT STRUCTURE ══ -->
+    <h2 id="vault-structure">Vault Structure</h2>
+    <p>The vault is plain Markdown — any AI tool that reads files can use it directly.</p>
+
+    <div class="vault-tree">
+<span class="vt-dir">vault/</span>
+├── <span class="vt-file">ccs.yaml</span>                <span class="vt-arrow">←</span> <span class="vt-note">sources + LLM provider config</span>
+├── <span class="vt-dir">raw/</span>                    <span class="vt-arrow">←</span> <span class="vt-note">sync inbox (never edit manually)</span>
+│   ├── <span class="vt-dir">github/</span>             <span class="vt-auto">← /sync writes here</span>
+│   ├── <span class="vt-dir">memories/</span>           <span class="vt-auto">← /harvest writes here</span>
+│   └── <span class="vt-dir">uploads/</span>            <span class="vt-note">← drop local files here</span>
+├── <span class="vt-dir">wiki/</span>                   <span class="vt-arrow">←</span> <span class="vt-auto">auto-maintained by /ingest + /enrich</span>
+│   ├── <span class="vt-gen">_master-index.md</span>    <span class="vt-arrow">←</span> <span class="vt-auto">/index rebuilds this</span>
+│   ├── <span class="vt-dir">concepts/</span>           <span class="vt-note">← from HTML + text</span>
+│   └── <span class="vt-dir">conversations/</span>      <span class="vt-note">← from conversations.json</span>
+├── <span class="vt-dir">output/</span>
+│   ├── <span class="vt-gen">graph.html</span>          <span class="vt-auto">← /graph output</span>
+│   └── <span class="vt-dir">rewrite-context/</span>
+├── <span class="vt-dir">skills/</span>
+│   ├── wiki-ingest/SKILL.md
+│   ├── wiki-query/SKILL.md
+│   ├── graph-build/SKILL.md
+│   └── rewrite-plan/SKILL.md
+└── <span class="vt-file">.claude-plugin/plugin.json</span>  <span class="vt-arrow">←</span> <span class="vt-note">Claude Code manifest</span>
+
+<span class="vt-dir">~/.ccs/</span>
+├── <span class="vt-file">config.json</span>             <span class="vt-arrow">←</span> <span class="vt-note">global: stores activeVault path</span>
+└── <span class="vt-gen">guide.html</span>              <span class="vt-auto">← /guide output</span>
+    </div>
+
+    <!-- ══ VAULT COMMANDS ══ -->
+    <h2 id="vault-cmd">Vault Commands</h2>
+
+    <h3>/vault</h3>
+    <table class="cmd-table">
+      <thead><tr><th>Command</th><th>Description</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td><span class="cmd-mono">/vault init [path]</span></td><td class="cmd-desc">Create a new vault. Saves path to <code>~/.ccs/config.json</code>. All other commands pick it up automatically.</td><td class="cmd-example">/vault init ~/my-kb</td></tr>
+        <tr><td><span class="cmd-mono">/vault status</span></td><td class="cmd-desc">Show active vault path and current counts: wiki pages, raw files ready to ingest, skills loaded.</td><td class="cmd-example">/vault status</td></tr>
+        <tr><td><span class="cmd-mono">/vault audit</span></td><td class="cmd-desc">Health check: compares harvested memory count against ingested wiki pages. Flags coverage gaps.</td><td class="cmd-example">/vault audit</td></tr>
+      </tbody>
+    </table>
+
+    <h3>/enrich, /graph, /ask — key behaviors</h3>
+    <div class="flag-block">
+      <div class="flag-row"><div class="flag-name">/enrich — idempotent</div><div class="flag-desc">Skips pages that already have a <code>summary:</code> field. Safe to re-run at any time — only un-enriched pages are processed.</div></div>
+      <div class="flag-row"><div class="flag-name">/graph — edge building</div><div class="flag-desc">TF-IDF keywords from title + summary. Keywords appearing in 2–30 nodes create edges. Max 12 connections per node. Keywords in &gt;30 nodes are too common to be meaningful edges.</div></div>
+      <div class="flag-row"><div class="flag-name">/ask — scoring</div><div class="flag-desc">Title token match: <strong>5×</strong> · Tag match: <strong>3×</strong> · Body frequency: <code>1 + log(freq)</code> · Normalized by query length. Top 6 pages injected into LLM context.</div></div>
+      <div class="flag-row"><div class="flag-name">/index</div><div class="flag-desc">Rebuilds <code>wiki/_master-index.md</code> — a single file listing every wiki page with title, type, and tags. Useful for quick grep or AI context injection.</div></div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ══ CONFIGURATION ══ -->
+    <h2 id="configuration">Configuration — ccs.yaml</h2>
+    <p>Every vault has a <code>ccs.yaml</code> at its root. This file controls GitHub sources and the LLM provider used by <code>/enrich</code>, <code>/ask</code>, and <code>/migrate</code>.</p>
+
+    <div class="code-block">
+      <span class="lang-tag">yaml</span>
+      <pre><span class="c-key">sources</span>:
+  - <span class="c-key">type</span>: <span class="c-val">github</span>
+    <span class="c-key">repos</span>:
+      - <span class="c-str">my-org/auth-svc</span>
+      - <span class="c-str">my-org/payment-svc</span>
+    <span class="c-key">include</span>: [<span class="c-val">commits</span>, <span class="c-val">prs</span>, <span class="c-val">issues</span>, <span class="c-val">readme</span>]
+    <span class="c-key">token_env</span>: <span class="c-str">GH_TOKEN</span>
+
+<span class="c-key">llm</span>:
+  <span class="c-key">provider</span>: <span class="c-val">anthropic</span>        <span class="c-comment"># anthropic | openai | enterprise</span>
+  <span class="c-key">model</span>: <span class="c-val">claude-sonnet-4-6</span>
+
+  <span class="c-comment"># Optional: use a different model for the verification pass</span>
+  <span class="c-key">verifier_provider</span>: <span class="c-val">anthropic</span>
+  <span class="c-key">verifier_model_flash</span>: <span class="c-val">claude-haiku-4-5-20251001</span></pre>
+    </div>
+
+    <!-- ══ PROVIDERS ══ -->
+    <h2 id="providers">LLM Providers</h2>
+    <div class="provider-grid">
+      <div class="provider-card">
+        <div class="provider-name">Anthropic</div>
+        <div class="provider-key">ANTHROPIC_API_KEY</div>
+        <div class="provider-desc">Claude Haiku + Sonnet 4.6. Default provider. Best balance of speed and quality for migration analysis.</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">OpenAI</div>
+        <div class="provider-key">OPENAI_API_KEY</div>
+        <div class="provider-desc">GPT-4o and family. Use as primary or as independent verifier to reduce shared blind spots.</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">Enterprise</div>
+        <div class="provider-key">CCS_ENTERPRISE_*</div>
+        <div class="provider-desc">Azure OpenAI with OAuth2 client credentials. Set <code>CCS_ENTERPRISE_CLIENT_ID</code>, <code>CLIENT_SECRET</code>, <code>AUTH_URL</code>, <code>SCOPE</code>, <code>API_BASE</code>.</div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <!-- ══ INTEGRATION ══ -->
+    <h2 id="integration">AI Tools &amp; MCP Integration</h2>
+    <p>CCS exposes a local MCP server that lets your coding agent read all migration artifacts directly. Start it with <code>ccs-code mcp</code>.</p>
+
+    <div class="code-block">
+      <span class="lang-tag">shell</span>
+      <pre><span class="c-comment"># Start the MCP server</span>
+<span class="c-cmd">ccs-code mcp</span>
+
+<span class="c-comment"># Register with Codex CLI</span>
+<span class="c-cmd">codex mcp add ccs</span> -- ccs-code mcp
+
+<span class="c-comment"># Add to Claude Code .mcp.json</span></pre>
+    </div>
+    <div class="code-block">
+      <span class="lang-tag">json</span>
+      <pre>{
+  <span class="c-key">"mcpServers"</span>: {
+    <span class="c-key">"ccs"</span>: {
+      <span class="c-key">"command"</span>: <span class="c-str">"ccs-code"</span>,
+      <span class="c-key">"args"</span>: [<span class="c-str">"mcp"</span>]
+    }
+  }
+}</pre>
+    </div>
+
+    <h3>Available MCP tools</h3>
+    <div class="flag-block">
+      <div class="flag-row"><div class="flag-name">ccs_list_ready_components</div><div class="flag-desc">Components that passed verification and are safe for an agent to implement.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_component_context</div><div class="flag-desc">Full source-backed context for one component: rules, contracts, mapping, checklist.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_verification_report</div><div class="flag-desc">Per-claim audit and trust verdict for any component.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_human_questions</div><div class="flag-desc">Unresolved architecture decisions that block implementation.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_system_graph</div><div class="flag-desc">Components, files, symbols, calls, packages, target roles, edges.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_code_intelligence</div><div class="flag-desc">Lightweight symbol and call-map artifact from the AST scan.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_dependency_impact</div><div class="flag-desc">Dependencies, transitive impact, calls, and retest scope for a component.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_search_artifacts</div><div class="flag-desc">Search all CCS markdown/JSON reports by business or code term.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_dependency_risk_report</div><div class="flag-desc">Package inventory, security-sensitive packages, OSV advisory matches.</div></div>
+      <div class="flag-row"><div class="flag-name">ccs_get_test_scaffolds</div><div class="flag-desc">Parity-test starting points generated from validation scenarios.</div></div>
+    </div>
+
+    <h3>Vault integration with AI tools</h3>
+    <div class="int-grid">
+      <div class="int-card">
+        <div class="int-name">Claude Code</div>
+        <div class="int-how">Point at the vault directory — <code>CLAUDE.md</code> and <code>skills/</code> auto-load. Claude has full knowledge base context automatically.</div>
+      </div>
+      <div class="int-card">
+        <div class="int-name">GitHub Copilot</div>
+        <div class="int-how">Open vault as workspace. Use <code>@workspace</code> in Copilot Chat — wiki pages appear as context automatically.</div>
+      </div>
+      <div class="int-card">
+        <div class="int-name">Cursor / Windsurf</div>
+        <div class="int-how"><code>@</code>-reference any wiki page in chat. The full Markdown context is injected automatically.</div>
+      </div>
+      <div class="int-card">
+        <div class="int-name">Codex CLI</div>
+        <div class="int-how">Run <code>codex mcp add ccs -- ccs-code mcp</code>. Codex can query vault pages, search by term, and get enriched context docs via MCP.</div>
+      </div>
+    </div>
+
+    <!-- ══ STATUS ══ -->
+    <h2 id="implementation">Implementation Status</h2>
+    <div class="status-grid">
+      <div class="status-row">/vault init + status + audit <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/sync (GitHub) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/ingest (HTML + conversations, merge) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/enrich (LLM summaries + wikilinks) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/graph (vis.js, glow, hover/search) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/ask (TF-IDF RAG + LLM) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/migrate rewrite (full pipeline) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/migrate scan (SOAP trace) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">AST: TypeScript compiler <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">AST: Tree-sitter (8 languages) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">Verification pass <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">Migration dashboard + vis.js graph <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">Enterprise provider (Azure OAuth2) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">MCP server (14 tools) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">WelcomeBox + ThinkingBlock UI <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">/harvest (4 sources) <span class="status-badge sb-done">✓ Done</span></div>
+      <div class="status-row">PDF ingestor <span class="status-badge sb-todo">Planned</span></div>
+      <div class="status-row">Confluence sync <span class="status-badge sb-todo">Planned</span></div>
+      <div class="status-row">Semantic embedding search <span class="status-badge sb-todo">Planned</span></div>
+      <div class="status-row">/lint (wiki health check) <span class="status-badge sb-todo">Planned</span></div>
+    </div>
+
+    <div class="footer">
+      <span>CCS Code · Migration Intelligence + Knowledge Vault</span>
+      <span>Built for principal-engineer-grade AI-assisted modernization</span>
+    </div>
+
+  </main>
+
+  <!-- ─── Right TOC ─── -->
+  <aside class="toc">
+    <div class="toc-label">On this page</div>
+    <a href="#overview"        class="toc-link">Introduction</a>
+    <a href="#two-features"    class="toc-link">Two Features</a>
+    <a href="#quick-start"     class="toc-link">Quick Start</a>
+    <a href="#migration"       class="toc-link">Migration</a>
+    <a href="#migrate-arch"    class="toc-link sub">Architecture</a>
+    <a href="#migrate-pipeline"class="toc-link sub">Pipeline</a>
+    <a href="#migrate-outputs" class="toc-link sub">Outputs</a>
+    <a href="#migrate-cmd"     class="toc-link sub">Commands</a>
+    <a href="#vault"           class="toc-link">Knowledge Vault</a>
+    <a href="#vault-pipeline"  class="toc-link sub">Pipeline</a>
+    <a href="#vault-structure" class="toc-link sub">Structure</a>
+    <a href="#vault-cmd"       class="toc-link sub">Commands</a>
+    <a href="#configuration"   class="toc-link">Configuration</a>
+    <a href="#providers"       class="toc-link sub">Providers</a>
+    <a href="#integration"     class="toc-link">Integration</a>
+    <a href="#implementation"  class="toc-link">Status</a>
+  </aside>
+
+</div>
+
+<script>
+  // ── Theme toggle ──
+  const btn = document.getElementById('themeBtn');
+  const html = document.documentElement;
+  let dark = true;
+  btn.addEventListener('click', () => {
+    dark = !dark;
+    html.setAttribute('data-theme', dark ? 'dark' : 'light');
+    btn.textContent = dark ? '🌙' : '☀️';
+  });
+
+  // ── Active sidebar + TOC on scroll ──
+  const sections = document.querySelectorAll('h2[id], h3[id], div[id]');
+  const sideLinks = document.querySelectorAll('.sidebar-link');
+  const tocLinks  = document.querySelectorAll('.toc-link');
+
+  function setActive(links, id) {
+    links.forEach(l => {
+      l.classList.toggle('active', l.getAttribute('href') === '#' + id);
+    });
+  }
+
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        setActive(sideLinks, e.target.id);
+        setActive(tocLinks,  e.target.id);
+      }
+    });
+  }, { rootMargin: '-56px 0px -60% 0px', threshold: 0 });
+
+  sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

@@ -758,6 +758,140 @@ async function runVaultAudit(vaultPath: string): Promise<string> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// /doc command — generate HTML guide and open in browser
+// ---------------------------------------------------------------------------
+
+export async function handleDocCommand(): Promise<string> {
+  const guideMarkdown = await handleGuideCommand();
+  const outPath = join(homedir(), ".ccs", "guide.html");
+
+  // Ensure ~/.ccs exists
+  await fs.mkdir(join(homedir(), ".ccs"), { recursive: true });
+
+  // Convert markdown to a self-contained HTML page
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCS Code — Guide</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0d1117; color: #c9d1d9;
+      line-height: 1.65; padding: 2rem 1rem;
+    }
+    .content { max-width: 820px; margin: 0 auto; }
+    h1 { color: #63b3ed; font-size: 2rem; margin-bottom: 1.5rem; border-bottom: 1px solid #30363d; padding-bottom: .75rem; }
+    h2 { color: #b794f4; font-size: 1.25rem; margin: 2rem 0 .75rem; border-bottom: 1px solid #21262d; padding-bottom: .4rem; }
+    h3 { color: #68d391; font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+    p { margin: .5rem 0 1rem; }
+    a { color: #63b3ed; }
+    code {
+      font-family: "JetBrains Mono", "Fira Code", Menlo, monospace;
+      background: #161b22; border: 1px solid #30363d;
+      border-radius: 4px; padding: .15em .45em; font-size: .875em; color: #e6edf3;
+    }
+    pre {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      padding: 1rem 1.25rem; overflow-x: auto; margin: 1rem 0;
+    }
+    pre code { background: none; border: none; padding: 0; font-size: .85rem; color: #79c0ff; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .9rem; }
+    th { background: #161b22; color: #b794f4; text-align: left; padding: .5rem .75rem; border: 1px solid #30363d; }
+    td { padding: .45rem .75rem; border: 1px solid #21262d; }
+    tr:nth-child(even) td { background: #0d1117; }
+    tr:nth-child(odd)  td { background: #161b22; }
+    ul, ol { padding-left: 1.5rem; margin: .5rem 0 1rem; }
+    li { margin: .3rem 0; }
+    strong { color: #e6edf3; }
+    .badge {
+      display: inline-block; background: #1f2937; border: 1px solid #374151;
+      border-radius: 12px; padding: .15em .6em; font-size: .75rem; color: #9ca3af; margin-right: .25rem;
+    }
+  </style>
+</head>
+<body>
+<div class="content">
+${markdownToHtml(guideMarkdown)}
+</div>
+</body>
+</html>`;
+
+  await fs.writeFile(outPath, html, "utf8");
+  await openInDefaultBrowser(outPath);
+  return `Knowledge Transfer guide opened.\nSaved to: ${outPath}`;
+}
+
+/** Minimal markdown → HTML converter (no external deps) */
+function markdownToHtml(md: string): string {
+  const lines = md.split("\n");
+  const out: string[] = [];
+  let inPre = false;
+  let inTable = false;
+  let inList = false;
+
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s: string) =>
+    s
+      .replace(/`([^`]+)`/g, (_, c) => `<code>${esc(c)}</code>`)
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+
+  for (const raw of lines) {
+    const line = raw;
+
+    if (line.startsWith("```")) {
+      if (!inPre) { out.push("<pre><code>"); inPre = true; }
+      else         { out.push("</code></pre>"); inPre = false; }
+      continue;
+    }
+    if (inPre) { out.push(esc(line)); continue; }
+
+    // Close open list/table if blank line
+    if (line.trim() === "") {
+      if (inList)  { out.push("</ul>"); inList = false; }
+      if (inTable) { out.push("</table>"); inTable = false; }
+      out.push("<p></p>");
+      continue;
+    }
+
+    // Tables
+    if (line.startsWith("|")) {
+      if (!inTable) { out.push('<table>'); inTable = true; }
+      const cells = line.split("|").slice(1, -1);
+      if (cells.every(c => /^[-: ]+$/.test(c))) continue; // separator row
+      const isHeader = !out.some(l => l === "<table>");
+      const tag = out[out.length - 1] === "<table>" ? "th" : "td";
+      out.push(`<tr>${cells.map(c => `<${tag}>${inline(c.trim())}</${tag}>`).join("")}</tr>`);
+      continue;
+    }
+    if (inTable) { out.push("</table>"); inTable = false; }
+
+    if (line.startsWith("# "))   { out.push(`<h1>${inline(line.slice(2))}</h1>`); continue; }
+    if (line.startsWith("## "))  { out.push(`<h2>${inline(line.slice(3))}</h2>`); continue; }
+    if (line.startsWith("### ")) { out.push(`<h3>${inline(line.slice(4))}</h3>`); continue; }
+
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inline(line.slice(2))}</li>`);
+      continue;
+    }
+    if (inList) { out.push("</ul>"); inList = false; }
+
+    out.push(`<p>${inline(line)}</p>`);
+  }
+
+  if (inPre)   out.push("</code></pre>");
+  if (inList)  out.push("</ul>");
+  if (inTable) out.push("</table>");
+
+  return out.join("\n");
+}
+
 /**
  * Helper for recursive file listing
  */
