@@ -232,29 +232,31 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
 
   const flushFence = () => {
     if (fenceLines.length === 0) return;
+    const lang = fenceLang || "";
     elements.push(
-      <Box key={key++} flexDirection="column" marginBottom={1} width={w}>
-        {fenceLang && (
-          <Box paddingLeft={2}>
-            <Text dimColor>{fenceLang}</Text>
-          </Box>
-        )}
-        <Box
-          flexDirection="column"
-          borderStyle="single"
-          borderColor="gray"
-          borderLeft
-          borderRight={false}
-          borderTop={false}
-          borderBottom={false}
-          paddingLeft={1}
-          width={w - 2}
-        >
-          {fenceLines.map((l, i) => (
-            <Box key={i} width={w - 4}>
-              <HighlightedLine line={l || " "} lang={fenceLang} />
+      <Box key={key++} flexDirection="column" marginTop={1} marginBottom={1} width={w}>
+        {/* ── header bar: lang badge + top rule ── */}
+        <Box flexDirection="row" paddingLeft={1} gap={1}>
+          <Text color="gray">{"╭"}</Text>
+          {lang && <Text color="blueBright" dimColor>{` ${lang} `}</Text>}
+          <Text color="gray">{"─".repeat(Math.max(0, w - (lang ? lang.length + 5 : 4)))}</Text>
+          <Text color="gray">{"╮"}</Text>
+        </Box>
+        {/* ── code lines ── */}
+        {fenceLines.map((l, i) => (
+          <Box key={i} flexDirection="row" width={w}>
+            <Text color="gray">{"│"}</Text>
+            <Box width={w - 4} paddingLeft={1}>
+              <HighlightedLine line={l || " "} lang={lang} />
             </Box>
-          ))}
+            <Text color="gray">{"│"}</Text>
+          </Box>
+        ))}
+        {/* ── bottom border ── */}
+        <Box flexDirection="row" paddingLeft={1}>
+          <Text color="gray">{"╰"}</Text>
+          <Text color="gray">{"─".repeat(Math.max(0, w - 4))}</Text>
+          <Text color="gray">{"╯"}</Text>
         </Box>
       </Box>
     );
@@ -424,11 +426,27 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
         break;
 
       case "text": {
-        const isError = cl.text.includes("✗") || cl.text.includes("Failed") || cl.text.includes("Error:");
+        // ── error/warn/success prefix colouring ──────────────────────────────
+        const trimmed = cl.text.trim();
+        const isSuccess  = trimmed.startsWith("✓") || trimmed.startsWith("✅");
+        const isWarn     = trimmed.startsWith("⚠") || trimmed.startsWith("⚠️");
+        const isFail     = trimmed.startsWith("✗");
+        const isRateErr  = trimmed.startsWith("[Gemini]") || trimmed.startsWith("[Anthropic]") || trimmed.startsWith("[OpenAI]");
+        // Indent the rate-error continuation lines (quota/retry lines)
+        const isErrDetail = trimmed.startsWith("Quota:") || trimmed.startsWith("Retry in:");
+
+        let textColor: string | undefined;
+        if (isSuccess)        textColor = "green";
+        else if (isWarn)      textColor = "yellow";
+        else if (isFail || isRateErr) textColor = "red";
+        else if (isErrDetail) textColor = "yellow";
+
         elements.push(
-          <Box key={key++} width={w} flexWrap="wrap" marginBottom={0}>
-            {isError ? (
-              <Text color="red" bold>
+          <Box key={key++} width={w} flexWrap="wrap" marginBottom={0}
+            paddingLeft={isErrDetail ? 2 : 0}
+          >
+            {textColor ? (
+              <Text color={textColor as any} bold={isFail || isRateErr}>
                 <InlineText line={cl.text} />
               </Text>
             ) : (

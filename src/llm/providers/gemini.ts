@@ -3,6 +3,70 @@ import type { LLMProvider, Message, ToolDefinition, ToolCall } from "./base.js";
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const MAX_TOOL_ITERATIONS = 8;
 
+// ---------------------------------------------------------------------------
+// Format API error responses into a clean, readable message instead of
+// dumping raw JSON into the terminal.
+// ---------------------------------------------------------------------------
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function formatGeminiError(status: number, bodyText: string): string {
+  try {
+    const json = JSON.parse(bodyText);
+    const err = json.error;
+    if (!err) throw new Error("no error field");
+
+    // Extract retry delay from RetryInfo detail
+    let retryStr = "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const retryInfo = (err.details ?? []).find((d: any) =>
+      (d["@type"] ?? "").includes("RetryInfo")
+    );
+    if (retryInfo?.retryDelay) {
+      const raw = String(retryInfo.retryDelay);
+      const secs = parseFloat(raw);
+      if (!isNaN(secs)) {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        retryStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+      }
+    }
+
+    // Extract quota info from QuotaFailure detail
+    let quotaLine = "";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const quotaFailure = (err.details ?? []).find((d: any) =>
+      (d["@type"] ?? "").includes("QuotaFailure")
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const violation = quotaFailure?.violations?.[0] as any | undefined;
+    if (violation) {
+      const limit = violation.quotaValue ? ` (limit: ${violation.quotaValue}/day)` : "";
+      quotaLine = `Quota: ${violation.quotaId ?? "unknown"}${limit}`;
+    }
+
+    // Trim the verbose message down to the first useful sentence
+    const rawMsg: string = err.message ?? err.status ?? "Unknown error";
+    const coreMsg = rawMsg
+      .split(/\nFor more information/)[0]!
+      .split(/\nTo monitor/)[0]!
+      .trim()
+      // Pull out just the "Quota exceeded for..." line if buried in a longer message
+      .replace(/^You exceeded[^*\n]*\n?(\* Quota exceeded[^\n]*)[\s\S]*/m, "$1")
+      .trim();
+
+    const lines = [
+      `[Gemini] ${status} ${err.status ?? "ERROR"} — ${coreMsg}`,
+      quotaLine ? `  ${quotaLine}` : "",
+      retryStr   ? `  Retry in: ${retryStr}` : "",
+    ].filter(Boolean);
+
+    return lines.join("\n");
+  } catch {
+    // Fallback: first 160 chars so it at least fits on screen
+    const preview = bodyText.slice(0, 160).replace(/\n/g, " ");
+    return `[Gemini Provider] Request failed (${status}): ${preview}${bodyText.length > 160 ? "…" : ""}`;
+  }
+}
+
 // Retry on 429 with exponential backoff: 5s → 10s → 20s (max 2 retries)
 async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 2): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -50,12 +114,7 @@ export class GeminiProvider implements LLMProvider {
 
     if (!response.ok) {
       const text = await response.text();
-      let status = "ERROR";
-      try {
-        const json = JSON.parse(text);
-        if (json.error?.status) status = json.error.status;
-      } catch { /* ignore */ }
-      throw new Error(`[Gemini Provider] Request failed (${response.status} ${status}): ${text}`);
+      throw new Error(formatGeminiError(response.status, text));
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,7 +182,7 @@ export class GeminiProvider implements LLMProvider {
 
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`[Gemini Provider] Request failed (${response.status}): ${text}`);
+        throw new Error(formatGeminiError(response.status, text));
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

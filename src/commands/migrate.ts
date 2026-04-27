@@ -581,8 +581,22 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
     }
 
     const { repoSlug } = await import("../migration/runLayout.js");
+    const { writeDashboardFromRunDir } = await import("../migration/webDashboard.js");
     const slug = repoSlug(repoUrl);
     const firstComponent = result.migrationOrder[0] ?? result.components[0]?.component.name ?? "—";
+
+    // Auto-open dashboard in browser if we have a report path
+    let dashboardPath: string | null = result.reportPath ?? null;
+    if (!dashboardPath) {
+      try {
+        const runDir = join(migrationDir, slug);
+        const dash = await writeDashboardFromRunDir(runDir);
+        dashboardPath = dash.dashboardPath;
+      } catch { /* best-effort */ }
+    }
+    if (dashboardPath) {
+      try { await openInDefaultBrowser(dashboardPath); } catch { /* best-effort */ }
+    }
 
     const summary = [
       `## ✓ Analysis Complete`,
@@ -606,10 +620,9 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
 
     summary.push(
       ``,
-      `**Open the dashboard:**`,
-      `\`\`\``,
-      `/migrate open ${slug} --dashboard`,
-      `\`\`\``,
+      dashboardPath
+        ? `✓ **Dashboard opened in browser** — \`${dashboardPath}\``
+        : `**Open the dashboard:** \`/migrate open ${slug} --dashboard\``,
       ``,
       `**Key files to review:**`,
       `- \`README.md\` — start here, trust posture overview`,

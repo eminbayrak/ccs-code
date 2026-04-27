@@ -432,6 +432,102 @@
     .sb-todo { background: rgba(255,255,255,0.04); color: var(--text-3); border: 1px solid var(--border); }
     [data-theme="light"] .sb-todo { background: rgba(0,0,0,0.04); }
 
+    /* ─── Terminal Screenshot ─── */
+    .term-screen {
+      background: #0c0c0c;
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 32px 0;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+    }
+    [data-theme="light"] .term-screen {
+      background: #1a1a2e;
+      border-color: rgba(255,255,255,0.1);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+    }
+    .term-bar {
+      background: #161616;
+      padding: 11px 16px;
+      display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    [data-theme="light"] .term-bar { background: #242438; border-bottom-color: rgba(255,255,255,0.08); }
+    .term-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .term-dot.r { background: #ff5f57; }
+    .term-dot.y { background: #febc2e; }
+    .term-dot.g { background: #28c840; }
+    .term-title {
+      font-size: 12px; color: #555; font-family: var(--mono);
+      margin: 0 auto; letter-spacing: 0.01em;
+    }
+    [data-theme="light"] .term-title { color: #888; }
+    .term-body {
+      padding: 22px 28px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.75;
+    }
+    .t-dim   { color: #444; }
+    .t-mute  { color: #555; }
+    .t-white { color: #d8d8d8; }
+    .t-bold  { color: #f0f0f0; font-weight: 600; }
+    .t-green { color: #4ade80; }
+    .t-green2{ color: #34d399; }
+    .t-blue  { color: #5b9cf6; }
+    .t-purple{ color: #a78bfa; }
+    .t-yellow{ color: #fbbf24; }
+    .t-orange{ color: #fb923c; }
+    .t-cyan  { color: #22d3ee; }
+    .t-red   { color: #f87171; }
+    .t-pink  { color: #f472b6; }
+    .t-hr    { color: #2a2a2a; }
+    [data-theme="light"] .t-hr { color: #3a3a55; }
+    .t-prompt::before { content: "❯ "; color: #5b9cf6; }
+    .t-logo  { color: #a78bfa; font-weight: 700; letter-spacing: -0.03em; }
+    .t-indent{ display: inline-block; width: 24px; }
+    .t-badge {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      padding: 1px 6px; border-radius: 4px; vertical-align: middle;
+      margin-left: 6px;
+    }
+    .t-badge-green { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.25); }
+    .t-badge-blue  { background: rgba(91,156,246,0.15); color: #5b9cf6; border: 1px solid rgba(91,156,246,0.25); }
+    .t-badge-dim   { background: rgba(255,255,255,0.05); color: #666; border: 1px solid rgba(255,255,255,0.08); }
+    .term-divider  { border: none; border-top: 1px solid #222; margin: 10px 0; }
+    [data-theme="light"] .term-divider { border-color: #2d2d4a; }
+    .term-caption {
+      font-size: 12px; color: var(--text-3); text-align: center;
+      margin-top: -20px; margin-bottom: 32px;
+      font-style: italic;
+    }
+
+    /* ─── Splash hero ─── */
+    .hero-visual {
+      margin: 32px 0 8px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: linear-gradient(135deg, rgba(91,156,246,0.06) 0%, rgba(167,139,250,0.06) 100%);
+      border: 1px solid var(--border-med);
+      padding: 28px 32px;
+      display: flex; gap: 40px; align-items: stretch;
+    }
+    .hv-left { flex: 1; min-width: 0; }
+    .hv-right {
+      width: 320px; flex-shrink: 0;
+      background: var(--bg-card); border-radius: 8px;
+      border: 1px solid var(--border); padding: 18px 20px;
+      font-family: var(--mono); font-size: 12px; line-height: 1.8;
+    }
+    .hv-right-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-3); margin-bottom: 10px;
+    }
+    .hv-step { display: flex; gap: 10px; margin-bottom: 4px; }
+    .hv-num { color: var(--accent); font-weight: 700; width: 16px; flex-shrink: 0; }
+    .hv-desc { color: var(--text-2); }
+    .hv-desc strong { color: var(--text-1); }
+
     /* ─── Misc ─── */
     .divider { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
     .footer {
@@ -524,6 +620,35 @@
       </div>
     </div>
 
+    <!-- ── Terminal welcome mockup ── -->
+    <div class="term-screen">
+      <div class="term-bar">
+        <div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div>
+        <div class="term-title">ccs-code — terminal</div>
+      </div>
+      <div class="term-body">
+        <div style="display:flex;gap:40px">
+          <div style="flex:1;border-right:1px solid #222;padding-right:32px">
+            <div class="t-logo" style="font-size:22px;letter-spacing:-0.04em;margin-bottom:4px">CCS</div>
+            <div class="t-mute" style="font-size:11px;margin-bottom:16px">code clarity system</div>
+            <div class="t-white">AI-powered knowledge platform</div>
+            <div class="t-mute" style="margin-top:4px;font-size:11px">v2.0 · gemini provider</div>
+          </div>
+          <div style="flex:2">
+            <div class="t-mute" style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px">Pipeline steps</div>
+            <div style="margin-bottom:5px"><span class="t-blue">1.</span> <span class="t-purple">/migrate rewrite</span> <span class="t-mute">— analyze a legacy codebase</span></div>
+            <div style="margin-bottom:5px"><span class="t-blue">2.</span> <span class="t-purple">/migrate open --dashboard</span> <span class="t-mute">— open the report</span></div>
+            <div style="margin-bottom:5px"><span class="t-blue">3.</span> <span class="t-green">/vault init</span> <span class="t-mute">— create knowledge vault</span></div>
+            <div style="margin-bottom:5px"><span class="t-blue">4.</span> <span class="t-green">/harvest</span> <span class="t-mute">+ </span><span class="t-green">/sync</span> <span class="t-mute">— pull sources</span></div>
+            <div style="margin-bottom:5px"><span class="t-blue">5.</span> <span class="t-green">/enrich</span> <span class="t-mute">— AI summaries + [[wikilinks]]</span></div>
+            <div style="margin-bottom:5px"><span class="t-blue">6.</span> <span class="t-green">/graph</span> <span class="t-mute">— open knowledge graph</span></div>
+            <div style="margin-top:14px;font-size:11px;color:#444">Type <span style="color:#5b9cf6">?</span> for full command list</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="term-caption">CCS Code welcome screen — wide terminal (≥95 columns) shows two-column layout</p>
+
     <!-- ══ TWO FEATURES ══ -->
     <h2 id="two-features">Two Independent Features</h2>
     <p>CCS Code is not a single tool — it is two tools sharing the same CLI. You can use Migration Intelligence without ever touching the vault, and vice versa. Each has its own commands, its own pipeline, and its own output folder.</p>
@@ -585,6 +710,79 @@
 <span class="c-cmd">/graph</span>                               <span class="c-comment"># open interactive knowledge graph</span>
 <span class="c-cmd">/ask</span> <span class="c-str">"what did I work on last week?"</span></pre>
     </div>
+
+    <!-- ── Cost estimate + completion mockup ── -->
+    <h3 style="margin-top:32px">What running it looks like</h3>
+    <p>CCS shows a cost estimate before spending any tokens. Add <code>--yes</code> to skip the gate and proceed immediately.</p>
+
+    <div class="term-screen">
+      <div class="term-bar">
+        <div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div>
+        <div class="term-title">ccs-code — /migrate rewrite</div>
+      </div>
+      <div class="term-body">
+        <div class="t-prompt t-white">/migrate rewrite --repo https://github.com/org/legacy-app --to python</div>
+        <div style="height:10px"></div>
+        <div class="t-mute">  Loaded 1 modernization context doc(s).</div>
+        <div class="t-mute">  Fetching file tree from github.com/org/legacy-app...</div>
+        <div class="t-mute">  Found 431 files in repo.</div>
+        <div class="t-mute">  Detecting source framework...</div>
+        <div class="t-white">  Detected: <span class="t-yellow">ASP.NET Core</span> → <span class="t-green">FastAPI</span></div>
+        <div class="t-mute">  Discovering components...</div>
+        <div class="t-white">  Found <span class="t-yellow">12</span> components (excluding tests).</div>
+        <div style="height:10px"></div>
+        <hr class="term-divider">
+        <div class="t-white" style="margin:6px 0">  Cost Estimate</div>
+        <div class="t-hr">  ─────────────────────────────────────</div>
+        <div class="t-mute">  Provider: gemini</div>
+        <div class="t-mute">  Services to analyze:     <span class="t-white">12</span></div>
+        <div class="t-mute">  Files per service (avg): <span class="t-white">4</span></div>
+        <div class="t-mute">  Avg file size (chars):   <span class="t-white">3,200</span></div>
+        <div style="height:6px"></div>
+        <div class="t-mute">  Flash (Lite) — 3,200 input tokens  → <span class="t-green">$0.0003</span></div>
+        <div class="t-mute">  Pro (Deep)   — 25,000 input tokens  → <span class="t-yellow">$0.0750</span></div>
+        <div style="height:6px"></div>
+        <div class="t-white">  Total estimated cost: <span class="t-yellow">$0.0753</span></div>
+        <div class="t-hr">  ─────────────────────────────────────</div>
+        <div style="height:8px"></div>
+        <div class="t-blue">  Add <span class="t-white">--yes</span> to proceed:</div>
+        <div class="t-mute">    /migrate rewrite --repo https://github.com/org/legacy-app --to python <span class="t-white">--yes</span></div>
+      </div>
+    </div>
+    <p class="term-caption">Cost gate — no tokens spent until you add <code>--yes</code></p>
+
+    <div class="term-screen">
+      <div class="term-bar">
+        <div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div>
+        <div class="term-title">ccs-code — analysis complete</div>
+      </div>
+      <div class="term-body">
+        <div class="t-prompt t-white">/migrate rewrite --repo https://github.com/org/legacy-app --to python --yes</div>
+        <div style="height:10px"></div>
+        <div class="t-mute">  Loaded 1 modernization context doc(s).</div>
+        <div class="t-mute">  Fetching file tree...</div>
+        <div class="t-mute">  Detecting source framework...</div>
+        <div class="t-mute">  Discovering components...</div>
+        <div class="t-mute">  Cost Estimate · Total: $0.0753 · Auto-confirmed (--yes).</div>
+        <div class="t-mute">  Analyzing <span class="t-white">AuthController</span> <span class="t-mute">[1/12]</span></div>
+        <div class="t-mute">  Analyzing <span class="t-white">UserService</span> <span class="t-mute">[2/12]</span></div>
+        <div class="t-mute">  <span class="t-dim">...</span></div>
+        <div class="t-mute">  Analyzing <span class="t-white">ReportController</span> <span class="t-mute">[12/12]</span></div>
+        <div class="t-mute">  Running verification pass...</div>
+        <div class="t-mute">  Generating dashboard + system graph...</div>
+        <div style="height:8px"></div>
+        <div class="t-green">  ✓ Analysis Complete</div>
+        <div style="height:8px"></div>
+        <div class="t-mute">  Source     <span class="t-white">ASP.NET Core (C#)</span></div>
+        <div class="t-mute">  Target     <span class="t-white">FastAPI (Python)</span></div>
+        <div class="t-mute">  Components <span class="t-yellow">12</span></div>
+        <div class="t-mute">  Start with <span class="t-white">UserRepository</span></div>
+        <div style="height:8px"></div>
+        <div class="t-green2">  ✓ Dashboard opened in browser</div>
+        <div class="t-mute" style="margin-left:4px">    ~/.ccs/migration/legacy-app/dashboard.html</div>
+      </div>
+    </div>
+    <p class="term-caption">After <code>--yes</code> — dashboard opens automatically when analysis completes</p>
 
     <hr class="divider">
 
@@ -777,6 +975,74 @@
       </div>
     </div>
 
+    <!-- ── Dashboard mockup ── -->
+    <h3 style="margin-top:8px">The generated dashboard</h3>
+    <p>Every run produces a self-contained <code>dashboard.html</code> that opens automatically. Here's what it shows:</p>
+    <div class="term-screen" style="font-family:var(--font)">
+      <div class="term-bar">
+        <div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div>
+        <div class="term-title">dashboard.html — legacy-app migration</div>
+      </div>
+      <div style="padding:20px 24px;background:#0d0d0d">
+        <!-- Fake dashboard header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+          <div style="font-size:13px;font-weight:700;color:#f0f0f0;font-family:var(--mono)">legacy-app → FastAPI</div>
+          <div style="display:flex;gap:8px">
+            <span style="font-size:11px;background:rgba(74,222,128,0.1);color:#4ade80;border:1px solid rgba(74,222,128,0.2);padding:2px 8px;border-radius:4px;font-family:var(--mono)">✓ 8 trusted</span>
+            <span style="font-size:11px;background:rgba(251,191,36,0.1);color:#fbbf24;border:1px solid rgba(251,191,36,0.2);padding:2px 8px;border-radius:4px;font-family:var(--mono)">⚠ 3 review</span>
+            <span style="font-size:11px;background:rgba(248,113,113,0.1);color:#f87171;border:1px solid rgba(248,113,113,0.2);padding:2px 8px;border-radius:4px;font-family:var(--mono)">✗ 1 blocked</span>
+          </div>
+        </div>
+        <!-- KPI strip -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
+          <div style="background:#141414;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Components</div>
+            <div style="font-size:22px;font-weight:700;color:#f0f0f0;font-family:var(--mono)">12</div>
+          </div>
+          <div style="background:#141414;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Coverage</div>
+            <div style="font-size:22px;font-weight:700;color:#4ade80;font-family:var(--mono)">91%</div>
+          </div>
+          <div style="background:#141414;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Trust level</div>
+            <div style="font-size:22px;font-weight:700;color:#5b9cf6;font-family:var(--mono)">High</div>
+          </div>
+          <div style="background:#141414;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Start with</div>
+            <div style="font-size:13px;font-weight:700;color:#a78bfa;font-family:var(--mono)">UserRepo</div>
+          </div>
+        </div>
+        <!-- Component rows -->
+        <div style="background:#141414;border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden">
+          <div style="padding:8px 14px;background:#1a1a1a;display:grid;grid-template-columns:1fr 80px 80px 100px;gap:8px;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:.06em">
+            <div>Component</div><div>Complexity</div><div>Confidence</div><div>Status</div>
+          </div>
+          <div style="padding:10px 14px;display:grid;grid-template-columns:1fr 80px 80px 100px;gap:8px;font-size:12px;border-top:1px solid rgba(255,255,255,0.04)">
+            <div style="color:#d8d8d8;font-family:var(--mono)">UserRepository</div>
+            <div style="color:#4ade80">Low</div>
+            <div style="color:#4ade80">High</div>
+            <div><span style="background:rgba(74,222,128,0.1);color:#4ade80;padding:1px 7px;border-radius:3px;font-size:11px">trusted</span></div>
+          </div>
+          <div style="padding:10px 14px;display:grid;grid-template-columns:1fr 80px 80px 100px;gap:8px;font-size:12px;border-top:1px solid rgba(255,255,255,0.04)">
+            <div style="color:#d8d8d8;font-family:var(--mono)">AuthController</div>
+            <div style="color:#fbbf24">Medium</div>
+            <div style="color:#fbbf24">Medium</div>
+            <div><span style="background:rgba(251,191,36,0.1);color:#fbbf24;padding:1px 7px;border-radius:3px;font-size:11px">review</span></div>
+          </div>
+          <div style="padding:10px 14px;display:grid;grid-template-columns:1fr 80px 80px 100px;gap:8px;font-size:12px;border-top:1px solid rgba(255,255,255,0.04)">
+            <div style="color:#d8d8d8;font-family:var(--mono)">ReportController</div>
+            <div style="color:#f87171">High</div>
+            <div style="color:#f87171">Low</div>
+            <div><span style="background:rgba(248,113,113,0.1);color:#f87171;padding:1px 7px;border-radius:3px;font-size:11px">blocked</span></div>
+          </div>
+          <div style="padding:8px 14px;display:grid;grid-template-columns:1fr 80px 80px 100px;gap:8px;font-size:11px;border-top:1px solid rgba(255,255,255,0.04);color:#444">
+            <div>+ 9 more components</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="term-caption">Generated <code>dashboard.html</code> — opens automatically in the browser after analysis</p>
+
     <!-- ══ MIGRATE COMMANDS ══ -->
     <h2 id="migrate-cmd">/migrate Commands</h2>
     <p>Type <code>/m</code> in the terminal UI to see all migrate subcommands with autocomplete.</p>
@@ -942,6 +1208,49 @@
         </div>
       </div>
     </div>
+
+    <!-- ── /harvest + /ask mockup ── -->
+    <div class="term-screen">
+      <div class="term-bar">
+        <div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div>
+        <div class="term-title">ccs-code — vault pipeline</div>
+      </div>
+      <div class="term-body">
+        <div class="t-prompt t-white">/harvest</div>
+        <div style="height:6px"></div>
+        <div class="t-green">  Harvest Complete! 💎</div>
+        <div class="t-mute">  Gathered <span class="t-white">117</span> total memories:</div>
+        <div class="t-mute">    › Claude Code: <span class="t-white">4</span></div>
+        <div class="t-mute">    › VS Code Copilot: <span class="t-white">11</span></div>
+        <div class="t-mute">    › Cursor: <span class="t-white">97</span></div>
+        <div class="t-mute">    › Antigravity: <span class="t-white">5</span></div>
+        <div style="height:6px"></div>
+        <div class="t-mute">  Added 117 new memory files to <span class="t-white">raw/memories/</span></div>
+        <div class="t-blue">  Run /ingest to integrate them into your wiki!</div>
+        <hr class="term-divider" style="margin:14px 0">
+        <div class="t-prompt t-white">/ingest</div>
+        <div style="height:6px"></div>
+        <div class="t-green">  ✓ Created 23 new wiki page(s):</div>
+        <div class="t-mute">    + wiki/conversations/auth-refactor-session.md</div>
+        <div class="t-mute">    + wiki/conversations/fastapi-migration-notes.md</div>
+        <div class="t-mute">    + wiki/concepts/auth-svc.md</div>
+        <div class="t-mute">    <span class="t-dim">... 20 more</span></div>
+        <div class="t-mute">  ↻ Merged new content into <span class="t-white">4</span> existing page(s)</div>
+        <hr class="term-divider" style="margin:14px 0">
+        <div class="t-prompt t-white">/ask what auth patterns did I use last quarter?</div>
+        <div style="height:6px"></div>
+        <div class="t-mute">  Searching wiki… found <span class="t-white">4</span> relevant page(s)</div>
+        <div style="height:8px"></div>
+        <div class="t-white">  In Q4 you used two auth patterns: JWT bearer tokens in <span class="t-blue">[[auth-svc]]</span> and</div>
+        <div class="t-white">  session cookies in <span class="t-blue">[[user-service-rewrite]]</span>. The JWT approach references</div>
+        <div class="t-white">  <span class="t-blue">[[notification-svc]]</span> for email verification callbacks.</div>
+        <div style="height:8px"></div>
+        <div class="t-mute">  Sources</div>
+        <div class="t-mute">  · <span class="t-blue">auth-svc</span> · jwt · bearer-token · middleware</div>
+        <div class="t-mute">  · <span class="t-blue">user-service-rewrite</span> · session · cookies · auth</div>
+      </div>
+    </div>
+    <p class="term-caption">Harvesting IDE histories and querying your knowledge vault with <code>/ask</code></p>
 
     <!-- ══ VAULT STRUCTURE ══ -->
     <h2 id="vault-structure">Vault Structure</h2>

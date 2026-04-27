@@ -94,7 +94,5 @@ export function formatCostPreview(estimate: CostEstimate): string {
     `─────────────────────────────────────`,
     estimate.breakdown,
     `─────────────────────────────────────`,
-    ``,
-    `Continue? [y/n]`,
   ].join("\n");
 }
