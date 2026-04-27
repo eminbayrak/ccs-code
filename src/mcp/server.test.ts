@@ -15,6 +15,7 @@ async function makeRewriteFixture(): Promise<{ root: string; rewriteDir: string 
   tempDirs.push(root);
   const rewriteDir = join(root, "migration", "rewrite");
   await mkdir(join(rewriteDir, "context"), { recursive: true });
+  await mkdir(join(rewriteDir, "reverse-engineering"), { recursive: true });
 
   await writeFile(join(rewriteDir, "migration-contract.json"), JSON.stringify({
     schemaVersion: "1.0",
@@ -51,6 +52,8 @@ async function makeRewriteFixture(): Promise<{ root: string; rewriteDir: string 
       },
     ],
   }), "utf-8");
+  await writeFile(join(rewriteDir, "README.md"), "Routes inbound files and rejects unsupported files.", "utf-8");
+  await writeFile(join(rewriteDir, "reverse-engineering", "code-intelligence.md"), "# Code Intelligence\n\nvalidateFile calls routeFile.", "utf-8");
 
   return { root, rewriteDir };
 }
@@ -168,6 +171,8 @@ describe("handleRequest", () => {
     expect(names).toContain("ccs_get_system_graph");
     expect(names).toContain("ccs_get_business_logic");
     expect(names).toContain("ccs_get_dependency_impact");
+    expect(names).toContain("ccs_get_code_intelligence");
+    expect(names).toContain("ccs_search_artifacts");
     expect(names).toContain("ccs_get_verification_report");
   });
 
@@ -226,6 +231,29 @@ describe("handleRequest", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text.toLowerCase()).toContain("componentname");
+  });
+
+  test("tools/call exposes code intelligence and artifact search", async () => {
+    const { rewriteDir } = await makeRewriteFixture();
+
+    const codeIntel = await handleRequest({
+      jsonrpc: "2.0",
+      id: 61,
+      method: "tools/call",
+      params: { name: "ccs_get_code_intelligence", arguments: { migrationDir: rewriteDir } },
+    } as JsonRpcRequest) as { isError: boolean; content: Array<{ text: string }> };
+    expect(codeIntel.isError).toBe(false);
+    expect(codeIntel.content[0]!.text).toContain("Code Intelligence");
+
+    const search = await handleRequest({
+      jsonrpc: "2.0",
+      id: 62,
+      method: "tools/call",
+      params: { name: "ccs_search_artifacts", arguments: { migrationDir: rewriteDir, query: "unsupported files" } },
+    } as JsonRpcRequest) as { isError: boolean; content: Array<{ text: string }> };
+    expect(search.isError).toBe(false);
+    const payload = JSON.parse(search.content[0]!.text);
+    expect(payload.results.length).toBeGreaterThan(0);
   });
 
   test("prompts/get builds a migrate_ready_component prompt referencing CCS tools", async () => {

@@ -11,15 +11,19 @@ type Props = {
   items: SuggestionItem[];
   selectedIndex: number;
   mode: "file" | "command";
+  terminalWidth?: number;
 };
 
-export function SuggestionList({ items, selectedIndex, mode }: Props) {
+export function SuggestionList({ items, selectedIndex, mode, terminalWidth }: Props) {
   if (items.length === 0) return null;
 
   const header = mode === "file" ? "@ files" : "/ commands";
   const start = selectedIndex >= 14 ? selectedIndex - 13 : 0;
   const visibleItems = items.slice(start, start + 14);
   const hiddenCount = Math.max(0, items.length - visibleItems.length);
+  const screenWidth = terminalWidth ?? process.stdout.columns ?? 120;
+  const popupWidth = Math.max(48, Math.min(screenWidth - 4, 110));
+  const contentWidth = Math.max(34, popupWidth - 6);
 
   return (
     <Box
@@ -30,11 +34,14 @@ export function SuggestionList({ items, selectedIndex, mode }: Props) {
       marginX={1}
       marginTop={0}
       marginBottom={0}
+      width={popupWidth}
     >
       {/* Header */}
       <Box marginBottom={0} justifyContent="space-between">
         <Text color="#8ab4f8" bold>{header}</Text>
-        <Text color="#7f8798">↑↓ navigate · Enter select · Esc cancel</Text>
+        {screenWidth >= 76 && (
+          <Text color="#7f8798">↑↓ navigate · Enter select · Esc cancel</Text>
+        )}
       </Box>
 
       {/* Items */}
@@ -42,26 +49,29 @@ export function SuggestionList({ items, selectedIndex, mode }: Props) {
         const absoluteIndex = start + i;
         const isSelected = absoluteIndex === selectedIndex;
         return (
-          <Box key={item.id} flexDirection="row">
-            {/* Selection indicator */}
-            <Box width={2}>
-              <Text color="cyan">{isSelected ? "❯" : " "}</Text>
+          <Box
+            key={item.id}
+            flexDirection="column"
+            paddingY={0}
+          >
+            <Box flexDirection="row" width={contentWidth + 2}>
+              <Box width={2}>
+                <Text color={isSelected ? "#7dd3fc" : "#46506a"}>{isSelected ? "❯" : " "}</Text>
+              </Box>
+              <Box width={contentWidth}>
+                <Text
+                  bold={isSelected}
+                  color={isSelected ? "#8ab4f8" : "#d8def4"}
+                  wrap="wrap"
+                >
+                  {item.label}
+                </Text>
+              </Box>
             </Box>
 
-            {/* Label */}
-            <Box flexGrow={1}>
-              <Text
-                bold={isSelected}
-                color={isSelected ? "#8ab4f8" : "#d8def4"}
-              >
-                {item.label}
-              </Text>
-            </Box>
-
-            {/* Optional description */}
             {item.description && (
-              <Box marginLeft={2}>
-                <Text color="#8b92ac">{item.description}</Text>
+              <Box marginLeft={2} width={contentWidth}>
+                <Text color="#8b92ac" wrap="wrap">{item.description}</Text>
               </Box>
             )}
           </Box>

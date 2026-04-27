@@ -1,6 +1,7 @@
 import {
   getArchitectureBaseline,
   getBusinessLogic,
+  getCodeIntelligence,
   getComponentContext,
   getDependencyRiskReport,
   getDependencyImpact,
@@ -11,6 +12,7 @@ import {
   getValidationContract,
   getVerificationReport,
   listReadyComponents,
+  searchArtifacts,
 } from "./artifactReader.js";
 
 type JsonRpcId = string | number | null;
@@ -139,14 +141,40 @@ const tools = [
   },
   {
     name: "ccs_get_dependency_impact",
-    description: "Analyze graph impact for one component: dependencies, dependents, source files, target roles, and retest scope.",
+    description: "Analyze graph impact for one component: dependencies, dependents, transitive impact, source files, symbols, calls, target roles, and retest scope.",
     inputSchema: {
       type: "object",
       properties: {
         migrationDir: { type: "string", description: "Optional path to migration/rewrite or migration output directory." },
         nodeName: { type: "string", description: "Component or graph node name, for example FileRouter." },
+        depth: { type: "number", description: "Optional traversal depth for transitive dependency/dependent impact. Defaults to 3, max 6." },
       },
       required: ["nodeName"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ccs_get_code_intelligence",
+    description: "Read the lightweight symbol and call-map artifact generated from source files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        migrationDir: { type: "string", description: "Optional path to migration/rewrite or migration output directory." },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "ccs_search_artifacts",
+    description: "Search CCS markdown and JSON artifacts for business terms, components, rules, risks, packages, or architecture concepts.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        migrationDir: { type: "string", description: "Optional path to migration/rewrite or migration output directory." },
+        query: { type: "string", description: "Search query, for example refund validation or jwt auth." },
+        limit: { type: "number", description: "Maximum number of search results. Defaults to 8." },
+      },
+      required: ["query"],
       additionalProperties: false,
     },
   },
@@ -248,7 +276,16 @@ async function callTool(params: ToolCallParams): Promise<object> {
     case "ccs_get_dependency_impact": {
       const nodeName = asString(args["nodeName"]);
       if (!nodeName) throw new Error("nodeName is required.");
-      return textResult(await getDependencyImpact(migrationDir, nodeName));
+      const depth = typeof args["depth"] === "number" ? args["depth"] : undefined;
+      return textResult(await getDependencyImpact(migrationDir, nodeName, depth));
+    }
+    case "ccs_get_code_intelligence":
+      return textResult(await getCodeIntelligence(migrationDir));
+    case "ccs_search_artifacts": {
+      const query = asString(args["query"]);
+      if (!query) throw new Error("query is required.");
+      const limit = typeof args["limit"] === "number" ? args["limit"] : undefined;
+      return textResult(await searchArtifacts(migrationDir, query, limit));
     }
     case "ccs_get_verification_report": {
       const componentName = asString(args["componentName"]);
@@ -281,7 +318,7 @@ function promptMessages(params: PromptGetParams): object {
             type: "text",
             text: [
               `Use CCS MCP tools to inspect ${componentName}.${migrationHint}`,
-              "First call ccs_get_preflight_readiness, ccs_get_architecture_baseline, ccs_get_business_logic, ccs_get_dependency_impact, ccs_get_validation_contract, ccs_get_verification_report (for this component), ccs_get_dependency_risk_report, ccs_get_test_scaffolds (for this component), and ccs_get_component_context.",
+              "First call ccs_get_preflight_readiness, ccs_get_architecture_baseline, ccs_get_business_logic, ccs_get_dependency_impact, ccs_get_code_intelligence, ccs_get_validation_contract, ccs_get_verification_report (for this component), ccs_get_dependency_risk_report, ccs_get_test_scaffolds (for this component), and ccs_get_component_context.",
               "Only implement if implementationStatus is `ready`, the verification trustVerdict is `ready`, and humanQuestions is empty.",
               "If implementationStatus is `needs_review`, stop and report the verification reasons instead of writing code.",
               "Preserve observed business rules and validate against acceptanceCriteria.",

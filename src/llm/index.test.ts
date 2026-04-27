@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createProvider, loadConfig } from "./index.js";
+import { createProvider, createVerifierProvider, loadConfig } from "./index.js";
 import { validateSetup } from "../commands/migrate.js";
 
 const originalCwd = process.cwd();
@@ -62,5 +62,18 @@ describe("LLM provider configuration", () => {
     const issues = await validateSetup(false);
 
     expect(issues).toEqual([]);
+  });
+
+  test("creates an independent verifier provider when configured", async () => {
+    await makeProjectConfig({
+      provider: "openai",
+      model: "gpt-main",
+      verifier_provider: "anthropic",
+      verifier_model_flash: "claude-verifier",
+    });
+
+    const provider = await createVerifierProvider("flash");
+
+    expect(provider.name).toBe("Anthropic");
   });
 });

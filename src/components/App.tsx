@@ -48,9 +48,11 @@ import { handleHarvestCommand } from "../commands/harvest";
 import { handleMigrateCommand } from "../commands/migrate";
 import {
   routeIntent,
+  routeToolIntent,
   decisionToSlashCommand,
   formatRouterAck,
   formatRouterClarification,
+  formatToolIntentAck,
   isSupportedTargetLanguage,
   normaliseLang,
   type RouterDecision,
@@ -961,7 +963,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         const setupOutput = [
           "## Wire Codex or Claude Code to CCS",
           "",
-          "CCS exposes a local MCP server that lets your coding agent read migration artifacts (ready work, verification, business logic, system graph, dependency impact) directly. Start it with:",
+          "CCS exposes a local MCP server that lets your coding agent read migration artifacts (ready work, verification, business logic, system graph, code intelligence, dependency impact, and search) directly. Start it with:",
           "",
           "```",
           "ccs-code mcp",
@@ -1003,9 +1005,32 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           "- `ccs_get_validation_contract` — gates, acceptance criteria, validation scenarios",
           "- `ccs_get_architecture_baseline` — target landing-zone profile",
           "- `ccs_get_business_logic` — reverse-engineered rules and contracts",
-          "- `ccs_get_system_graph` — components, files, packages, target roles, edges",
-          "- `ccs_get_dependency_impact` — what a change touches and what to retest",
+          "- `ccs_get_system_graph` — components, files, symbols, calls, packages, target roles, edges",
+          "- `ccs_get_code_intelligence` — lightweight symbol and call-map artifact",
+          "- `ccs_get_dependency_impact` — dependencies, transitive impact, calls, and retest scope",
+          "- `ccs_search_artifacts` — search CCS markdown/JSON reports by business or code term",
           "- `ccs_get_preflight_readiness` — readiness gates before implementation",
+          "- `ccs_get_dependency_risk_report` — package inventory, security-sensitive packages, optional advisory hits",
+          "- `ccs_get_test_scaffolds` — parity-test starting points generated from validation scenarios",
+          "",
+          "### Optional enterprise knobs",
+          "",
+          "Use a different verifier model/provider to reduce shared blind spots between the analyzer and trust gate:",
+          "",
+          "```json",
+          "{",
+          "  \"provider\": \"codex_cli\",",
+          "  \"model\": \"default\",",
+          "  \"verifier_provider\": \"anthropic\",",
+          "  \"verifier_model_flash\": \"claude-haiku-4-5-20251001\"",
+          "}",
+          "```",
+          "",
+          "Enable OSV package advisory lookup only when network policy allows it:",
+          "",
+          "```",
+          "CCS_ENABLE_ADVISORY_LOOKUP=true",
+          "```",
           "",
           "### Recommended workflow",
           "",
@@ -1159,6 +1184,23 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           ),
         ]);
         setInput("");
+        return;
+      }
+
+      // ----- Fresh natural-language input: try to detect utility intents -----
+      // These are the "Codex/Claude-style" convenience routes around a run:
+      // open the latest dashboard, show status, connect MCP, open help, etc.
+      // Run these before migration detection so "open dashboard for <repo URL>"
+      // is not mistaken for "migrate <repo URL>".
+      const toolDecision = routeToolIntent(trimmed);
+      if (toolDecision) {
+        setMessages((prev) => [
+          ...prev,
+          createUIMessage("user", trimmed),
+          createUIMessage("assistant", formatToolIntentAck(toolDecision)),
+        ]);
+        setInput("");
+        executeSlashCommand(toolDecision.command);
         return;
       }
 
@@ -1556,6 +1598,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             items={suggestions}
             selectedIndex={selectedIdx}
             mode={suggestionMode}
+            terminalWidth={terminalWidth}
           />
         )}
 

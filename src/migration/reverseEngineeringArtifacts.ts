@@ -2,10 +2,16 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
 import { evidenceSourceLabel } from "./evidence.js";
+import {
+  buildCodeIntelligenceArtifact,
+  writeCodeIntelligenceArtifacts,
+  type CodeIntelligenceArtifact,
+} from "./codeIntelligence.js";
 
 export type SystemGraphNodeType =
   | "component"
   | "source_file"
+  | "symbol"
   | "target_role"
   | "source_package"
   | "target_package";
@@ -13,6 +19,8 @@ export type SystemGraphNodeType =
 export type SystemGraphEdgeType =
   | "depends_on"
   | "defined_in"
+  | "declares_symbol"
+  | "calls"
   | "recommended_role"
   | "uses_source_package"
   | "needs_target_package";
@@ -42,6 +50,8 @@ export type SystemGraphArtifact = {
     sourceFiles: number;
     dependencyEdges: number;
     packages: number;
+    symbols?: number;
+    callEdges?: number;
   };
   migrationOrder: string[];
   nodes: SystemGraphNode[];
@@ -123,6 +133,7 @@ export function buildSystemGraphArtifact(input: {
   frameworkInfo: FrameworkInfo;
   analyses: ComponentAnalysis[];
   migrationOrder: string[];
+  codeIntelligence?: CodeIntelligenceArtifact;
 }): SystemGraphArtifact {
   const nodes = new Map<string, SystemGraphNode>();
   const edges: SystemGraphEdge[] = [];
@@ -221,6 +232,44 @@ export function buildSystemGraphArtifact(input: {
     }
   }
 
+  if (input.codeIntelligence) {
+    const componentByName = new Map(input.analyses.map((analysis) => [analysis.component.name, analysis]));
+    for (const symbol of input.codeIntelligence.symbols.slice(0, 600)) {
+      addNode(nodes, {
+        id: symbol.id,
+        label: symbol.name,
+        type: "symbol",
+        metadata: {
+          kind: symbol.kind,
+          file: symbol.file,
+          lineStart: symbol.lineStart,
+          lineEnd: symbol.lineEnd,
+          component: symbol.component,
+        },
+      });
+      if (symbol.component && componentByName.has(symbol.component)) {
+        edges.push({
+          source: nodeId("component", symbol.component),
+          target: symbol.id,
+          type: "declares_symbol",
+          label: "declares",
+          evidence: `${symbol.file}:L${symbol.lineStart}`,
+        });
+      }
+    }
+    const knownSymbolIds = new Set(input.codeIntelligence.symbols.slice(0, 600).map((symbol) => symbol.id));
+    for (const call of input.codeIntelligence.calls.slice(0, 1200)) {
+      if (!call.targetSymbolId || !knownSymbolIds.has(call.sourceSymbolId) || !knownSymbolIds.has(call.targetSymbolId)) continue;
+      edges.push({
+        source: call.sourceSymbolId,
+        target: call.targetSymbolId,
+        type: "calls",
+        label: "calls",
+        evidence: `${call.file}:L${call.line}`,
+      });
+    }
+  }
+
   const sourceFiles = sortedUnique(input.analyses.flatMap((analysis) => analysis.component.filePaths));
   const packages = sortedUnique(input.analyses.flatMap((analysis) => [
     ...analysis.externalDependencies,
@@ -237,6 +286,8 @@ export function buildSystemGraphArtifact(input: {
       sourceFiles: sourceFiles.length,
       dependencyEdges: edges.filter((edge) => edge.type === "depends_on").length,
       packages: packages.length,
+      symbols: input.codeIntelligence?.stats.symbols,
+      callEdges: input.codeIntelligence?.stats.resolvedCalls,
     },
     migrationOrder: input.migrationOrder,
     nodes: [...nodes.values()].sort((a, b) => a.id.localeCompare(b.id)),
@@ -328,6 +379,7 @@ export function buildReverseEngineeringDetails(input: {
   analyses: ComponentAnalysis[];
   migrationOrder: string[];
   graph: SystemGraphArtifact;
+  codeIntelligence?: CodeIntelligenceArtifact;
 }): string {
   const reviewQueue = input.analyses.filter((analysis) =>
     analysis.targetRole === "human_review" ||
@@ -371,6 +423,8 @@ This artifact captures the legacy system understanding CCS extracted before impl
 ## Generated Companion Artifacts
 
 - \`business-logic.json\` — machine-readable business rules, contracts, validation scenarios, and target disposition
+- \`code-intelligence.json\` — lightweight symbol and call map for impact analysis
+- \`code-intelligence.md\` — human-readable summary of symbols and resolved calls
 - \`../system-graph.json\` — machine-readable component/file/package/target graph
 - \`../system-graph.mmd\` — Mermaid view of component dependencies and target roles
 
@@ -382,6 +436,8 @@ This artifact captures the legacy system understanding CCS extracted before impl
 | Source files | ${input.graph.stats.sourceFiles} |
 | Dependency edges | ${input.graph.stats.dependencyEdges} |
 | Packages | ${input.graph.stats.packages} |
+| Symbols | ${input.graph.stats.symbols ?? 0} |
+| Resolved call edges | ${input.graph.stats.callEdges ?? 0} |
 
 ## Component Capability Map
 
@@ -412,6 +468,7 @@ ${reviewQueue.length > 0
 ## Agent Use
 
 - Use \`business-logic.json\` for exact rules/contracts.
+- Use \`code-intelligence.json\` for symbol-level call evidence where available.
 - Use \`system-graph.json\` for dependency impact analysis.
 - Use \`system-graph.mmd\` when a human needs a quick architecture view.
 - Do not implement a component whose target role or integration boundary is unresolved.
@@ -465,18 +522,27 @@ export async function writeReverseEngineeringArtifacts(input: {
   frameworkInfo: FrameworkInfo;
   analyses: ComponentAnalysis[];
   migrationOrder: string[];
+  sourceFiles?: Array<{ path: string; content: string }>;
 }): Promise<ReverseEngineeringWriteResult> {
   await fs.mkdir(input.reverseEngineeringDir, { recursive: true });
 
-  const graph = buildSystemGraphArtifact(input);
+  const codeIntelligence = buildCodeIntelligenceArtifact({
+    repoUrl: input.repoUrl,
+    generatedAt: input.generatedAt,
+    frameworkInfo: input.frameworkInfo,
+    analyses: input.analyses,
+    sourceFiles: input.sourceFiles ?? [],
+  });
+  const graph = buildSystemGraphArtifact({ ...input, codeIntelligence });
   const businessLogic = buildBusinessLogicArtifact(input);
-  const details = buildReverseEngineeringDetails({ ...input, graph });
+  const details = buildReverseEngineeringDetails({ ...input, graph, codeIntelligence });
   const mermaid = buildSystemGraphMermaid(graph);
 
   const businessLogicPath = join(input.reverseEngineeringDir, "business-logic.json");
   const detailsPath = join(input.reverseEngineeringDir, "reverse-engineering-details.md");
 
   await fs.writeFile(businessLogicPath, `${JSON.stringify(businessLogic, null, 2)}\n`, "utf-8");
+  await writeCodeIntelligenceArtifacts(input.reverseEngineeringDir, codeIntelligence);
   await fs.writeFile(detailsPath, details, "utf-8");
   await fs.writeFile(input.systemGraphJsonPath, `${JSON.stringify(graph, null, 2)}\n`, "utf-8");
   await fs.writeFile(input.systemGraphMermaidPath, mermaid, "utf-8");

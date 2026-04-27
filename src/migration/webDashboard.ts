@@ -67,6 +67,7 @@ type DashboardData = {
     dependencyRiskReport: string;
     testScaffoldsIndex: string;
     reverseEngineeringDetails: string;
+    codeIntelligenceDetails: string;
     systemGraphMermaid: string;
   };
   components: ComponentEntry[];
@@ -124,6 +125,7 @@ async function gatherData(input: DashboardInput): Promise<DashboardData> {
     reverseEngineeringDetails:  await readOptionalText(
       join(layout.reverseEngineeringDir, "reverse-engineering-details.md")
     ),
+    codeIntelligenceDetails:    await readOptionalText(join(layout.reverseEngineeringDir, "code-intelligence.md")),
     systemGraphMermaid:         await readOptionalText(layout.systemGraphMermaidPath),
   };
 
@@ -1209,7 +1211,7 @@ function renderMethodology() {
         <div><strong>Reverse engineering</strong><p>CCS extracts business rules, data contracts, dependencies, package usage, target-role candidates, and validation scenarios. This is where raw code begins turning into a modernization brief.</p></div>
       </div>
       <div class="method-step">
-        <div><strong>System graph construction</strong><p>Components, source files, packages, and recommended target roles are represented as nodes and edges. Dependency edges drive implementation order and support one-hop impact queries for agents.</p></div>
+        <div><strong>System graph construction</strong><p>Components, source files, symbols, calls, packages, and recommended target roles are represented as nodes and edges. Dependency and call edges drive implementation order, blast-radius review, and MCP impact queries for agents.</p></div>
       </div>
       <div class="method-step">
         <div><strong>Architecture disposition</strong><p>The analyzer maps each legacy component to a target role such as API endpoint, integration adapter, common library, workflow, or human-review item. The decision is grounded in code evidence plus the supplied modernization context.</p></div>
@@ -1255,7 +1257,7 @@ function renderMethodology() {
         </tr>
         <tr>
           <td>Lightweight graph today</td>
-          <td><p>The graph supports visualization, migration ordering, and one-hop impact. Deep call-chain traversal, clustering, transitive blast radius, and graph-database queries are the next maturity layer.</p></td>
+          <td><p>The graph supports visualization, migration ordering, transitive component impact, and lightweight symbol/call evidence. Compiler-grade parsing, clustering, and graph-database query language support are the next maturity layer.</p></td>
         </tr>
         <tr>
           <td>Human review where it matters</td>
@@ -1402,17 +1404,18 @@ function renderGraph() {
           <li><strong>component</strong> — a logical unit (controller, service, repository, model, middleware…) that CCS analyzed and produced a context doc for</li>
           <li><strong>source file</strong> — a file that defines one of those components</li>
           <li><strong>source package</strong> — a third-party dep used by the legacy code (npm, pip, NuGet…)</li>
+          <li><strong>symbol</strong> — a detected function, method, class, handler, or interface from the lightweight static map</li>
           <li><strong>target role</strong> — the recommended landing zone for a component (azure_function, aks_service, common_library, human_review…)</li>
           <li><strong>target package</strong> — a dep the rewrite will need</li>
         </ul>
-        <p><strong>Edges</strong> are the relationships between them: <code>depends_on</code>, <code>defined_in</code>, <code>recommended_role</code>, <code>uses_source_package</code>, <code>needs_target_package</code>.</p>
+        <p><strong>Edges</strong> are the relationships between them: <code>depends_on</code>, <code>defined_in</code>, <code>declares_symbol</code>, <code>calls</code>, <code>recommended_role</code>, <code>uses_source_package</code>, <code>needs_target_package</code>.</p>
         <p><strong>Where it is actually used today</strong>:</p>
         <ul>
           <li>Humans review it before approving a migration order — easier than reading every component doc.</li>
-          <li>Codex / Claude Code call <code>ccs_get_dependency_impact(componentName)</code> through MCP — that does a one-hop graph query and returns "components to implement before this one" + "components to retest after changing this one." That <em>is</em> a graph query for the agent. Just one hop, not BFS/DFS at depth.</li>
+          <li>Codex / Claude Code call <code>ccs_get_dependency_impact(componentName)</code> through MCP — that returns direct dependencies, transitive impact, source files, symbols, calls, and retest scope.</li>
           <li>The migration order is computed via topological sort over the <code>depends_on</code> edges.</li>
         </ul>
-        <p><strong>What it is not (yet)</strong>: not a Neo4j-style queryable graph DB, not a memory layer the agent reads on every prompt, not an index for RAG. It is a planning aid plus a one-hop impact tool. Expanding it into deeper queries (full transitive impact, blast radius, cluster detection) is a future feature, not what it does today.</p>
+        <p><strong>What it is not (yet)</strong>: not a Neo4j-style queryable graph DB and not a vector-memory layer. It is a static planning graph plus MCP impact/search tools. The current symbol map is lightweight and dependency-free; compiler-grade parsing is the next maturity layer.</p>
       </div>
     </details>
 
@@ -1425,6 +1428,7 @@ function renderGraph() {
         <div class="graph-toolbar" id="graph-toolbar">
           <span class="chip active" data-filter="all">All <span>\${nodeCount}</span></span>
           <span class="chip" data-filter="component">Components</span>
+          <span class="chip" data-filter="symbol">Symbols</span>
           <span class="chip" data-filter="source_file">Source files</span>
           <span class="chip" data-filter="target_role">Target roles</span>
           <span class="chip" data-filter="source_package">Source packages</span>
@@ -1433,6 +1437,7 @@ function renderGraph() {
         <h3>Legend</h3>
         <div class="graph-legend">
           <span style="--dot:#67e8f9;">component</span>
+          <span style="--dot:#38bdf8;">symbol</span>
           <span style="--dot:#94a3b8;">source file</span>
           <span style="--dot:#4ade80;">target role</span>
           <span style="--dot:#c084fc;">source package</span>
@@ -1460,7 +1465,7 @@ function renderGraph() {
       <aside class="graph-panel" id="graph-detail"></aside>
     </div>
     <div class="graph-note">
-      <strong>How to read this:</strong> use the canvas for quick architecture review, then click a component node to see its trust gate, verified-claim count, dependencies, and link to the component report. Agents use the same graph data through MCP for one-hop dependency impact, but this is not yet a deep graph database or vector memory layer.
+      <strong>How to read this:</strong> use the canvas for quick architecture review, then click a component node to see its trust gate, verified-claim count, dependencies, symbols, calls, and link to the component report. Agents use the same graph data through MCP for dependency impact and artifact search, but this is not a vector memory layer.
     </div>
     <h2>Mermaid diagram</h2>
     <div class="mermaid-render" id="mermaid-render"></div>
@@ -1501,6 +1506,8 @@ function renderReverse() {
     <h1>Reverse Engineering</h1>
     <h2>Details</h2>
     <div class="card markdown">\${renderMarkdown(data.docs.reverseEngineeringDetails || '_(empty)_')}</div>
+    <h2>Code intelligence</h2>
+    <div class="card markdown">\${renderMarkdown(data.docs.codeIntelligenceDetails || '_(no code-intelligence.md generated)_')}</div>
     <h2>business-logic.json</h2>
     \${jsonNote('Reverse-engineered business rules.', 'This JSON is meant for agents and reviewers. It captures extracted rules, contracts, and evidence in a format that is easier to query than markdown.')}
     \${bl}
@@ -1546,6 +1553,7 @@ function renderRaw() {
 // ----- Graph (Sigma-style canvas, no external library) ----------------------
 const NODE_COLORS = {
   component:        '#67e8f9',
+  symbol:           '#38bdf8',
   source_file:      '#94a3b8',
   target_role:      '#4ade80',
   source_package:   '#c084fc',
@@ -1599,7 +1607,7 @@ function visibleGraph(filter, search) {
 }
 
 function layoutCanvasGraph(nodes, edges) {
-  const typeOrder = ['component', 'source_file', 'target_role', 'source_package', 'target_package'];
+  const typeOrder = ['component', 'symbol', 'source_file', 'target_role', 'source_package', 'target_package'];
   const typeAngle = new Map(typeOrder.map((type, i) => [type, (-Math.PI / 2) + i * ((Math.PI * 2) / typeOrder.length)]));
   const degree = new Map();
   for (const e of edges) {
@@ -2402,6 +2410,7 @@ export async function writeDashboardFromRunDir(runDir: string): Promise<Dashboar
       dependencyRiskReport:       await readOptionalText(join(runDir, "dependency-risk-report.md")),
       testScaffoldsIndex:         await readOptionalText(join(runDir, "test-scaffolds", "README.md")),
       reverseEngineeringDetails:  await readOptionalText(join(runDir, "reverse-engineering", "reverse-engineering-details.md")),
+      codeIntelligenceDetails:    await readOptionalText(join(runDir, "reverse-engineering", "code-intelligence.md")),
       systemGraphMermaid:         await readOptionalText(join(runDir, "system-graph.mmd")),
     },
     components,

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildDependencyRiskReport,
+  enrichDependencyRiskWithOsv,
   formatDependencyRiskMarkdown,
   isSecurityManifest,
   parseDependenciesFromManifests,
@@ -87,5 +88,26 @@ describe("dependency risk", () => {
     const markdown = formatDependencyRiskMarkdown(report);
     expect(markdown).toContain("Dependency Risk Report");
     expect(markdown).toContain("bcryptjs");
+  });
+
+  test("optionally enriches exact dependency versions with OSV advisory matches", async () => {
+    const report = buildDependencyRiskReport({
+      manifestFiles: [{
+        path: "package.json",
+        content: JSON.stringify({ dependencies: { express: "4.18.1" } }),
+      }],
+      analyses: [analysis],
+      frameworkInfo,
+      generatedAt: "2026-04-26T00:00:00.000Z",
+    });
+    const fetchImpl = (async () => new Response(JSON.stringify({
+      results: [{ vulns: [{ id: "GHSA-test" }] }],
+    }), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+
+    const enriched = await enrichDependencyRiskWithOsv(report, { enabled: true, fetchImpl });
+
+    expect(enriched.advisoryLookup?.enabled).toBe(true);
+    expect(enriched.advisoryLookup?.matched).toBe(1);
+    expect(enriched.findings.some((finding) => finding.category === "advisory" && finding.packageName === "express")).toBe(true);
   });
 });

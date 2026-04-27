@@ -291,6 +291,22 @@ export async function getDependencyRiskReport(migrationDir?: string): Promise<st
   }, null, 2);
 }
 
+export async function getCodeIntelligence(migrationDir?: string): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const markdownPath = safePath(rewriteDir, "reverse-engineering", "code-intelligence.md");
+  if (await exists(markdownPath)) {
+    return fs.readFile(markdownPath, "utf-8");
+  }
+  const jsonPath = safePath(rewriteDir, "reverse-engineering", "code-intelligence.json");
+  if (await exists(jsonPath)) {
+    return fs.readFile(jsonPath, "utf-8");
+  }
+  return JSON.stringify({
+    rewriteDir,
+    note: "No code-intelligence artifact was found. Re-run /migrate rewrite to generate symbol and call-map data.",
+  }, null, 2);
+}
+
 export async function getTestScaffolds(
   migrationDir: string | undefined,
   componentName?: string,
@@ -478,6 +494,7 @@ export async function getBusinessLogic(migrationDir?: string): Promise<string> {
 export async function getDependencyImpact(
   migrationDir: string | undefined,
   nodeName: string,
+  depth = 3,
 ): Promise<string> {
   const graph = JSON.parse(await getSystemGraph(migrationDir)) as {
     rewriteDir?: string;
@@ -504,27 +521,79 @@ export async function getDependencyImpact(
     throw new Error(`Graph node "${nodeName}" was not found. Available components: ${names}`);
   }
 
+  const maxDepth = Math.max(1, Math.min(6, Math.floor(depth || 3)));
+  const labelOf = (id: string | undefined) => nodes.find((candidate) => candidate.id === id)?.label ?? id;
+  const componentIdForSymbol = (symbolId: string | undefined): string | undefined => {
+    if (!symbolId) return undefined;
+    return edges.find((edge) => edge.target === symbolId && edge.type === "declares_symbol")?.source;
+  };
+  const walk = (startIds: string[], direction: "out" | "in", edgeType: string) => {
+    const seen = new Set<string>();
+    const queue = startIds.map((id) => ({ id, distance: 0 }));
+    const result: Array<{ id: string; label?: string; distance: number }> = [];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current.distance >= maxDepth) continue;
+      const nextEdges = edges.filter((edge) =>
+        edge.type === edgeType &&
+        (direction === "out" ? edge.source === current.id : edge.target === current.id)
+      );
+      for (const edge of nextEdges) {
+        const nextId = direction === "out" ? edge.target : edge.source;
+        if (!nextId || seen.has(nextId)) continue;
+        seen.add(nextId);
+        const item = { id: nextId, label: labelOf(nextId), distance: current.distance + 1 };
+        result.push(item);
+        queue.push(item);
+      }
+    }
+    return result;
+  };
+
   const directDependencies = edges
     .filter((edge) => edge.source === node.id && edge.type === "depends_on")
-    .map((edge) => nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target);
+    .map((edge) => labelOf(edge.target));
   const dependents = edges
     .filter((edge) => edge.target === node.id && edge.type === "depends_on")
-    .map((edge) => nodes.find((candidate) => candidate.id === edge.source)?.label ?? edge.source);
+    .map((edge) => labelOf(edge.source));
   const sourceFiles = edges
     .filter((edge) => edge.source === node.id && edge.type === "defined_in")
-    .map((edge) => nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target);
+    .map((edge) => labelOf(edge.target));
   const targetRoles = edges
     .filter((edge) => edge.source === node.id && edge.type === "recommended_role")
     .map((edge) => ({
-      role: nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
+      role: labelOf(edge.target),
       rationale: edge.evidence ?? "",
     }));
   const packages = edges
     .filter((edge) => edge.source === node.id && /package$/.test(edge.type ?? ""))
     .map((edge) => ({
-      package: nodes.find((candidate) => candidate.id === edge.target)?.label ?? edge.target,
+      package: labelOf(edge.target),
       relationship: edge.type,
     }));
+  const declaredSymbols = edges
+    .filter((edge) => edge.source === node.id && edge.type === "declares_symbol")
+    .map((edge) => nodes.find((candidate) => candidate.id === edge.target))
+    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
+  const declaredSymbolIds = new Set(declaredSymbols.map((symbol) => symbol.id).filter(Boolean));
+  const outgoingCalls = edges
+    .filter((edge) => declaredSymbolIds.has(edge.source) && edge.type === "calls")
+    .map((edge) => ({
+      from: labelOf(edge.source),
+      to: labelOf(edge.target),
+      targetComponent: labelOf(componentIdForSymbol(edge.target)) ?? null,
+      evidence: edge.evidence ?? "",
+    }));
+  const incomingCalls = edges
+    .filter((edge) => declaredSymbolIds.has(edge.target) && edge.type === "calls")
+    .map((edge) => ({
+      from: labelOf(edge.source),
+      sourceComponent: labelOf(componentIdForSymbol(edge.source)) ?? null,
+      to: labelOf(edge.target),
+      evidence: edge.evidence ?? "",
+    }));
+  const transitiveDependencies = walk([node.id], "out", "depends_on").map((item) => item.label);
+  const transitiveDependents = walk([node.id], "in", "depends_on").map((item) => item.label);
 
   return JSON.stringify({
     rewriteDir: graph.rewriteDir,
@@ -540,9 +609,111 @@ export async function getDependencyImpact(
     sourceFiles,
     targetRoles,
     packages,
+    declaredSymbols: declaredSymbols.map((symbol) => ({
+      name: symbol.label,
+      kind: symbol.metadata?.kind,
+      file: symbol.metadata?.file,
+      lineStart: symbol.metadata?.lineStart,
+    })),
+    outgoingCalls,
+    incomingCalls,
     implementationImpact: {
       implementBeforeThis: directDependencies,
       componentsToRetestAfterChange: dependents,
+      transitiveDependencies,
+      transitiveDependents,
+      blastRadius: [...new Set([...dependents, ...transitiveDependents, ...incomingCalls.map((call) => call.sourceComponent).filter(Boolean)])],
+      depth: maxDepth,
     },
+  }, null, 2);
+}
+
+function tokenize(value: string): string[] {
+  return value.toLowerCase().match(/[a-z0-9_.$/-]+/g) ?? [];
+}
+
+function excerptFor(content: string, terms: string[], maxChars = 420): string {
+  const lower = content.toLowerCase();
+  const index = terms
+    .map((term) => lower.indexOf(term))
+    .filter((i) => i >= 0)
+    .sort((a, b) => a - b)[0] ?? 0;
+  const start = Math.max(0, index - 140);
+  const end = Math.min(content.length, start + maxChars);
+  return `${start > 0 ? "..." : ""}${content.slice(start, end).replace(/\s+/g, " ").trim()}${end < content.length ? "..." : ""}`;
+}
+
+async function artifactSearchFiles(rewriteDir: string): Promise<Array<{ path: string; content: string }>> {
+  const files = [
+    "README.md",
+    "AGENTS.md",
+    "architecture-baseline.md",
+    "preflight-readiness.md",
+    "component-disposition-matrix.md",
+    "human-questions.md",
+    "verification-summary.md",
+    "dependency-risk-report.md",
+    "migration-contract.json",
+    "system-graph.json",
+    "reverse-engineering/business-logic.json",
+    "reverse-engineering/code-intelligence.json",
+    "reverse-engineering/code-intelligence.md",
+    "reverse-engineering/reverse-engineering-details.md",
+    "test-scaffolds/README.md",
+  ];
+  const componentDir = safePath(rewriteDir, "components");
+  try {
+    for (const name of await fs.readdir(componentDir)) {
+      if (name.endsWith(".md")) files.push(`components/${name}`);
+    }
+  } catch { /* no components dir */ }
+
+  const out: Array<{ path: string; content: string }> = [];
+  for (const path of files) {
+    const fullPath = safePath(rewriteDir, path);
+    if (await exists(fullPath)) out.push({ path, content: await fs.readFile(fullPath, "utf-8") });
+  }
+  return out;
+}
+
+export async function searchArtifacts(
+  migrationDir: string | undefined,
+  query: string,
+  limit = 8,
+): Promise<string> {
+  const rewriteDir = await resolveRewriteDir(migrationDir);
+  const terms = tokenize(query).filter((term) => term.length > 1);
+  if (terms.length === 0) throw new Error("query is required.");
+  const files = await artifactSearchFiles(rewriteDir);
+  const documentFrequency = new Map<string, number>();
+  const tokenized = files.map((file) => {
+    const tokens = tokenize(`${file.path} ${file.content}`);
+    const unique = new Set(tokens);
+    for (const term of terms) if (unique.has(term)) documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1);
+    return { ...file, tokens };
+  });
+
+  const results = tokenized.map((file) => {
+    let score = 0;
+    for (const term of terms) {
+      const tf = file.tokens.filter((token) => token === term || token.includes(term)).length;
+      if (tf === 0) continue;
+      const df = documentFrequency.get(term) ?? 1;
+      const idf = Math.log((files.length + 1) / (df + 0.5));
+      score += (1 + Math.log(tf)) * Math.max(0.2, idf);
+      if (file.path.toLowerCase().includes(term)) score += 2;
+    }
+    return { path: file.path, score, excerpt: excerptFor(file.content, terms) };
+  })
+    .filter((result) => result.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, Math.min(25, Math.floor(limit || 8))));
+
+  return JSON.stringify({
+    rewriteDir,
+    query,
+    results,
+    searchedFiles: files.length,
+    note: "Lexical BM25-style artifact search over CCS markdown and JSON outputs. It is not vector search yet.",
   }, null, 2);
 }

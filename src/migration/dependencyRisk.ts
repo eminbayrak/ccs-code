@@ -12,7 +12,7 @@ export type DependencyRecord = {
 
 export type DependencyRiskFinding = {
   severity: "high" | "medium" | "low" | "info";
-  category: "lockfile" | "version_policy" | "security_sensitive" | "migration_planning" | "inventory";
+  category: "lockfile" | "version_policy" | "security_sensitive" | "migration_planning" | "inventory" | "advisory";
   packageName?: string;
   message: string;
   recommendation: string;
@@ -25,6 +25,13 @@ export type DependencyRiskReport = {
   dependencies: DependencyRecord[];
   findings: DependencyRiskFinding[];
   componentExternalDependencies: Record<string, string[]>;
+  advisoryLookup?: {
+    enabled: boolean;
+    source: "OSV";
+    queried: number;
+    matched: number;
+    error?: string;
+  };
 };
 
 export const SECURITY_MANIFEST_PATTERNS = [
@@ -252,6 +259,104 @@ export function buildDependencyRiskReport(input: {
   };
 }
 
+function osvEcosystem(dep: DependencyRecord): string | null {
+  switch (dep.ecosystem) {
+    case "npm": return "npm";
+    case "nuget": return "NuGet";
+    case "maven": return "Maven";
+    case "python": return "PyPI";
+    case "go": return "Go";
+    default: return null;
+  }
+}
+
+function exactVersion(version: string): string | null {
+  const trimmed = version.trim();
+  if (!trimmed || trimmed === "unknown" || trimmed === "unbounded") return null;
+  if (/^[~^*<>=|]/.test(trimmed)) return null;
+  if (/\s/.test(trimmed)) return null;
+  return trimmed;
+}
+
+export async function enrichDependencyRiskWithOsv(
+  report: DependencyRiskReport,
+  options: { enabled?: boolean; fetchImpl?: typeof fetch } = {},
+): Promise<DependencyRiskReport> {
+  const enabled = options.enabled ?? /^(1|true|yes)$/i.test(process.env.CCS_ENABLE_ADVISORY_LOOKUP ?? "");
+  if (!enabled) {
+    return {
+      ...report,
+      advisoryLookup: { enabled: false, source: "OSV", queried: 0, matched: 0 },
+    };
+  }
+
+  const fetcher = options.fetchImpl ?? fetch;
+  const queryDeps = report.dependencies
+    .map((dep) => ({ dep, ecosystem: osvEcosystem(dep), version: exactVersion(dep.version) }))
+    .filter((item): item is { dep: DependencyRecord; ecosystem: string; version: string } =>
+      Boolean(item.ecosystem && item.version)
+    )
+    .slice(0, 100);
+
+  if (queryDeps.length === 0) {
+    return {
+      ...report,
+      advisoryLookup: { enabled: true, source: "OSV", queried: 0, matched: 0 },
+    };
+  }
+
+  try {
+    const response = await fetcher("https://api.osv.dev/v1/querybatch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        queries: queryDeps.map((item) => ({
+          version: item.version,
+          package: { ecosystem: item.ecosystem, name: item.dep.name },
+        })),
+      }),
+    });
+    if (!response.ok) throw new Error(`OSV returned HTTP ${response.status}`);
+    const body = await response.json() as {
+      results?: Array<{ vulns?: Array<{ id?: string; modified?: string }> }>;
+    };
+    const advisoryFindings: DependencyRiskFinding[] = [];
+    for (let i = 0; i < queryDeps.length; i++) {
+      const vulns = body.results?.[i]?.vulns ?? [];
+      if (vulns.length === 0) continue;
+      const dep = queryDeps[i]!.dep;
+      advisoryFindings.push({
+        severity: "high",
+        category: "advisory",
+        packageName: dep.name,
+        message: `${dep.name}@${dep.version} matched ${vulns.length} OSV advisory id(s): ${vulns.map((v) => v.id).filter(Boolean).slice(0, 6).join(", ")}.`,
+        recommendation: "Review advisory details in your approved security workflow and select a patched target version before migration acceptance testing.",
+      });
+    }
+    return {
+      ...report,
+      findings: [...report.findings, ...advisoryFindings],
+      advisoryLookup: {
+        enabled: true,
+        source: "OSV",
+        queried: queryDeps.length,
+        matched: advisoryFindings.length,
+      },
+    };
+  } catch (error) {
+    return {
+      ...report,
+      advisoryLookup: {
+        enabled: true,
+        source: "OSV",
+        queried: queryDeps.length,
+        matched: 0,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
 function escapeTable(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
@@ -269,13 +374,15 @@ export function formatDependencyRiskMarkdown(report: DependencyRiskReport): stri
 _Generated: ${report.generatedAt}_
 _Migration: ${report.frameworkInfo.sourceFramework} (${report.frameworkInfo.sourceLanguage}) -> ${report.frameworkInfo.targetFramework} (${report.frameworkInfo.targetLanguage})_
 
-This report is deterministic. It parses dependency manifests and flags migration/security planning risks that are visible without calling an external CVE service. Treat it as an enterprise readiness input, not as a complete vulnerability scan.
+This report parses dependency manifests and flags migration/security planning risks visible from source-controlled metadata. Treat it as an enterprise readiness input, not as a complete vulnerability scan.
+${report.advisoryLookup?.enabled ? `\n\nOptional advisory lookup was enabled against OSV. Queried ${report.advisoryLookup.queried} exact package version(s), matched ${report.advisoryLookup.matched}${report.advisoryLookup.error ? `, error: ${report.advisoryLookup.error}` : ""}.` : ""}
 
 ## Summary
 
 - **Manifests parsed:** ${report.manifests.length}
 - **Dependencies inventoried:** ${report.dependencies.length}
 - **Findings:** ${report.findings.length}
+- **Advisory lookup:** ${report.advisoryLookup?.enabled ? `enabled (${report.advisoryLookup.matched} matched)` : "disabled"}
 
 ## Findings
 

@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import { basename, join, resolve } from "path";
 import { fetchDefaultBranch, fetchFileContent, fetchFileTree, parseRepoUrl } from "../connectors/github.js";
-import { createProvider, type LLMProvider, loadConfig } from "../llm/index.js";
+import { createProvider, createVerifierProvider, type LLMProvider, loadConfig } from "../llm/index.js";
 import type { GithubConfig } from "./resolver.js";
 import type { ComponentAnalysis, FrameworkInfo, RewriteResult } from "./rewriteTypes.js";
 import {
@@ -32,7 +32,12 @@ import {
 } from "./rewriteVerifier.js";
 import { buildRunLayout, type RunLayout } from "./runLayout.js";
 import { writeDashboard } from "./webDashboard.js";
-import { isSecurityManifest, buildDependencyRiskReport, writeDependencyRiskArtifacts } from "./dependencyRisk.js";
+import {
+  isSecurityManifest,
+  buildDependencyRiskReport,
+  enrichDependencyRiskWithOsv,
+  writeDependencyRiskArtifacts,
+} from "./dependencyRisk.js";
 import { writeTestScaffolds } from "./testScaffoldGenerator.js";
 
 export type RewriteTracerConfig = {
@@ -315,7 +320,7 @@ function buildReadmeDoc(input: {
       ? `First ready component: \`${nextReady}\`. Hand off the run folder to Codex or Claude Code; tell them to read \`AGENTS.md\`, \`migration-contract.json\`, and \`components/${nextReady}.md\` before writing any code.`
       : "No component is ready for coding yet. Resolve `human-questions.md` and review `verification-summary.md` first.",
     "",
-    "For MCP setup, run `/setup` in CCS. Agents call `ccs_list_ready_components`, `ccs_get_component_context`, and `ccs_get_verification_report` before implementation.",
+    "For MCP setup, run `/setup` in CCS. Agents call `ccs_list_ready_components`, `ccs_get_component_context`, `ccs_get_verification_report`, `ccs_get_dependency_impact`, and `ccs_search_artifacts` before implementation.",
     "",
     "## Workflow",
     "",
@@ -338,6 +343,7 @@ function buildReadmeDoc(input: {
     "| Parity test starting points | `test-scaffolds/` |",
     "| Per-component analysis | `components/<Name>.md` |",
     "| Reverse-engineered behavior | `reverse-engineering/` |",
+    "| Symbol/call intelligence | `reverse-engineering/code-intelligence.md`, `reverse-engineering/code-intelligence.json` |",
     "| Dependency graph | `system-graph.json`, `system-graph.mmd` |",
     "| Architecture baseline | `architecture-baseline.md` |",
     "| Open decisions | `human-questions.md` |",
@@ -358,6 +364,7 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
 
   const haiku = await createProvider("flash");
   const sonnet = await createProvider("pro");
+  const verifierProvider = await createVerifierProvider("flash");
 
   const parsed = parseRepoUrl(repoUrl);
   if (!parsed) throw new Error(`Invalid repo URL: ${repoUrl}`);
@@ -480,11 +487,13 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
   const verifications: ComponentVerification[] = [];
   const unanalyzed: string[] = [];
   const errors: string[] = [];
+  const sourceFilesByPath = new Map<string, { path: string; content: string }>();
 
   for (const component of nonTestComponents) {
     log(config, `Analyzing ${component.name} (${component.type})...`);
     try {
       const sourceFiles = await fetchFiles(owner, repo, component.filePaths, githubConfig);
+      for (const file of sourceFiles) sourceFilesByPath.set(file.path, file);
       let analysis = await analyzeComponent(
         component,
         sourceFiles,
@@ -498,13 +507,13 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
       log(config, `Verifying claims for ${component.name}...`);
       let verification: ComponentVerification;
       try {
-        verification = await verifyComponent(analysis, sourceFiles, haiku, { generatedAt });
+        verification = await verifyComponent(analysis, sourceFiles, verifierProvider, { generatedAt });
       } catch (verifyError) {
         const msg = verifyError instanceof Error ? verifyError.message : String(verifyError);
         verification = {
           component: component.name,
           generatedAt,
-          verifierModel: haiku.name,
+          verifierModel: verifierProvider.name,
           trustVerdict: "needs_review",
           trustReasons: [`Verifier crashed: ${msg}`],
           totals: { claimsChecked: 0, verified: 0, unsupported: 0, inconclusive: 0, noEvidence: 0 },
@@ -525,7 +534,7 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
             buildCorrectionGuidance(verification),
           );
           log(config, `Re-verifying revised claims for ${component.name}...`);
-          const revisedVerification = await verifyComponent(revised, sourceFiles, haiku, { generatedAt });
+          const revisedVerification = await verifyComponent(revised, sourceFiles, verifierProvider, { generatedAt });
           analysis = revised;
           verification = {
             ...revisedVerification,
@@ -599,12 +608,12 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
   }
 
   try {
-    const dependencyRiskReport = buildDependencyRiskReport({
+    const dependencyRiskReport = await enrichDependencyRiskWithOsv(buildDependencyRiskReport({
       manifestFiles: securityManifestFiles,
       analyses: analyzed,
       frameworkInfo,
       generatedAt,
-    });
+    }));
     await writeDependencyRiskArtifacts(layout, dependencyRiskReport);
     log(config, `✓ dependency risk report written (${dependencyRiskReport.dependencies.length} dependencies, ${dependencyRiskReport.findings.length} findings)`);
   } catch (e) {
@@ -629,6 +638,7 @@ export async function analyze(config: RewriteTracerConfig): Promise<RewriteResul
     frameworkInfo,
     analyses: analyzed,
     migrationOrder,
+    sourceFiles: [...sourceFilesByPath.values()],
   });
 
   await fs.writeFile(

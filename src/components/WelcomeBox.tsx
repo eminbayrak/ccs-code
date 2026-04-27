@@ -31,7 +31,7 @@ const HINTS: Array<{ command: string; desc: string }> = [
   { command: "/guide",           desc: "interactive manual" },
 ];
 
-const START_HINT = "migrate <repo url> to csharp";
+const START_HINT = 'migrate <repo url> to csharp" or "open the dashboard';
 
 function truncateMiddle(value: string, max: number): string {
   if (value.length <= max) return value;
@@ -110,7 +110,7 @@ export function WelcomeBox({ activeModel, workspacePath }: Props) {
         {/* Natural-language hint ------------------------------------------- */}
         <Box marginTop={1}>
           <Text color={MUTED}>
-            Type <Text color={ACCENT}>"{START_HINT}"</Text> to start — or describe your goal in plain words.
+            Type <Text color={ACCENT}>"{START_HINT}"</Text> — plain words work too.
           </Text>
         </Box>
       </Box>

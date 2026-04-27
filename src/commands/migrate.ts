@@ -110,29 +110,34 @@ async function resolveRunFolder(target?: string): Promise<MigrationRunFolder | n
 
 export type SetupIssue = { severity: "error" | "warn"; message: string };
 
-export async function validateSetup(requireGithub: boolean): Promise<SetupIssue[]> {
+async function validateProviderConfig(
+  provider: string | undefined,
+  codexCommand: string | undefined,
+  label = "LLM provider",
+): Promise<SetupIssue[]> {
   const issues: SetupIssue[] = [];
-  const config = await loadConfig();
-
-  // Check Provider-specific keys
-  if (config.provider === "codex_cli") {
-    issues.push(...await checkCodexCliSetup(config.codexCommand));
-  } else if (config.provider === "anthropic" && !process.env.CCS_ANTHROPIC_API_KEY) {
+  if (provider === "codex_cli") {
+    const setupIssues = await checkCodexCliSetup(codexCommand);
+    issues.push(...setupIssues.map((issue) => ({
+      ...issue,
+      message: `${label}: ${issue.message}`,
+    })));
+  } else if (provider === "anthropic" && !process.env.CCS_ANTHROPIC_API_KEY) {
     issues.push({
       severity: "error",
-      message: "CCS_ANTHROPIC_API_KEY is not set. Get a key at https://console.anthropic.com/",
+      message: `${label}: CCS_ANTHROPIC_API_KEY is not set. Get a key at https://console.anthropic.com/`,
     });
-  } else if (config.provider === "openai" && !process.env.CCS_OPENAI_API_KEY) {
+  } else if (provider === "openai" && !process.env.CCS_OPENAI_API_KEY) {
     issues.push({
       severity: "error",
-      message: "CCS_OPENAI_API_KEY is not set. Get a key at https://platform.openai.com/",
+      message: `${label}: CCS_OPENAI_API_KEY is not set. Get a key at https://platform.openai.com/`,
     });
-  } else if (config.provider === "gemini" && !process.env.CCS_GEMINI_API_KEY) {
+  } else if (provider === "gemini" && !process.env.CCS_GEMINI_API_KEY) {
     issues.push({
       severity: "error",
-      message: "CCS_GEMINI_API_KEY is not set. Get a key at https://aistudio.google.com/",
+      message: `${label}: CCS_GEMINI_API_KEY is not set. Get a key at https://aistudio.google.com/`,
     });
-  } else if (config.provider === "enterprise") {
+  } else if (provider === "enterprise") {
     const missing = [
       ["CCS_ENTERPRISE_CLIENT_ID", process.env.CCS_ENTERPRISE_CLIENT_ID],
       ["CCS_ENTERPRISE_CLIENT_SECRET", process.env.CCS_ENTERPRISE_CLIENT_SECRET],
@@ -144,9 +149,24 @@ export async function validateSetup(requireGithub: boolean): Promise<SetupIssue[
     if (missing.length > 0) {
       issues.push({
         severity: "error",
-        message: `Enterprise provider configuration is incomplete. Missing: ${missing.join(", ")}.`,
+        message: `${label}: enterprise provider configuration is incomplete. Missing: ${missing.join(", ")}.`,
       });
     }
+  }
+  return issues;
+}
+
+export async function validateSetup(requireGithub: boolean): Promise<SetupIssue[]> {
+  const issues: SetupIssue[] = [];
+  const config = await loadConfig();
+
+  issues.push(...await validateProviderConfig(config.provider, config.codexCommand, "Analyzer provider"));
+  if (config.verifier_provider) {
+    issues.push(...await validateProviderConfig(
+      config.verifier_provider,
+      config.verifier_codexCommand ?? config.codexCommand,
+      "Verifier provider",
+    ));
   }
 
   if (requireGithub) {

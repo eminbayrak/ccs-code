@@ -11,15 +11,28 @@ export type { LLMProvider };
 export type { Message, ToolDefinition, ToolCall } from "./providers/base.js";
 
 export type LLMTier = "flash" | "pro";
+export type ProviderName = "enterprise" | "openai" | "anthropic" | "gemini" | "codex_cli";
 
 export type CCSConfig = {
-  provider: "enterprise" | "openai" | "anthropic" | "gemini" | "codex_cli";
+  provider: ProviderName;
   model?: string;
   model_flash?: string;
   codexCommand?: string;
   sandbox?: CodexSandbox;
   approval?: CodexApproval;
   output_schema?: string;
+  /**
+   * Optional independent verifier model/provider. This lets teams run the
+   * analyzer with one model family and the evidence-checking verifier with
+   * another, reducing shared blind spots without changing the main provider.
+   */
+  verifier_provider?: ProviderName;
+  verifier_model?: string;
+  verifier_model_flash?: string;
+  verifier_codexCommand?: string;
+  verifier_sandbox?: CodexSandbox;
+  verifier_approval?: CodexApproval;
+  verifier_output_schema?: string;
 };
 
 const DEFAULT_CONFIG: CCSConfig = { provider: "openai" };
@@ -39,9 +52,7 @@ export async function loadConfig(): Promise<CCSConfig> {
  * tier: "flash" (faster/cheaper) or "pro" (smarter/complex).
  * Priority: config.model_flash/pro -> config.model (only for pro) -> tier default.
  */
-export async function createProvider(tier: LLMTier = "pro"): Promise<LLMProvider> {
-  const config = await loadConfig();
-
+function providerFromConfig(config: CCSConfig, tier: LLMTier = "pro"): LLMProvider {
   switch (config.provider) {
     case "codex_cli": {
       const model = (tier === "flash")
@@ -82,4 +93,23 @@ export async function createProvider(tier: LLMTier = "pro"): Promise<LLMProvider
       return new OpenAIProvider(model);
     }
   }
+}
+
+export async function createProvider(tier: LLMTier = "pro"): Promise<LLMProvider> {
+  return providerFromConfig(await loadConfig(), tier);
+}
+
+export async function createVerifierProvider(tier: LLMTier = "flash"): Promise<LLMProvider> {
+  const config = await loadConfig();
+  if (!config.verifier_provider) return providerFromConfig(config, tier);
+
+  return providerFromConfig({
+    provider: config.verifier_provider,
+    model: config.verifier_model,
+    model_flash: config.verifier_model_flash,
+    codexCommand: config.verifier_codexCommand ?? config.codexCommand,
+    sandbox: config.verifier_sandbox ?? config.sandbox,
+    approval: config.verifier_approval ?? config.approval,
+    output_schema: config.verifier_output_schema ?? config.output_schema,
+  }, tier);
 }

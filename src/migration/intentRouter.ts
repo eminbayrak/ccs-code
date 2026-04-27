@@ -32,6 +32,20 @@ export type RouterDecision = {
   confidence: "heuristic" | "llm";
 };
 
+export type ToolIntentDecision = {
+  command: string;
+  action:
+    | "open_dashboard"
+    | "regenerate_dashboard"
+    | "open_folder"
+    | "status"
+    | "setup"
+    | "guide"
+    | "clean";
+  confidence: "heuristic";
+  summary: string;
+};
+
 // ---------------------------------------------------------------------------
 // Language alias normalisation
 // ---------------------------------------------------------------------------
@@ -119,6 +133,27 @@ function isScanLike(text: string): boolean {
 function wantsNoContext(text: string): boolean {
   const lower = text.toLowerCase();
   return /\b(no context|without context|ignore context|skip context|neutral benchmark|benchmark run|public benchmark)\b/.test(lower);
+}
+
+function maybeRunTarget(text: string): string {
+  const url = extractRepoUrls(text)[0];
+  if (url) return url;
+
+  const quoted = text.match(/["'`]([^"'`]+)["'`]/)?.[1]?.trim();
+  if (quoted && !isIgnoredTargetWord(quoted)) return quoted;
+
+  const targetMatch = text.match(/\b(?:for|of|from|repo|repository|run|named|called)\s+([A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)?)/i)?.[1]?.trim();
+  if (targetMatch && !isIgnoredTargetWord(targetMatch)) return targetMatch;
+
+  return "";
+}
+
+function isIgnoredTargetWord(value: string): boolean {
+  return /^(the|this|that|it|latest|last|recent|for|of|from|dashboard|folder|report|result|results|run|repo|repository)$/i.test(value.trim());
+}
+
+function withTarget(command: string, target: string): string {
+  return target ? `${command} ${target}` : command;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +269,101 @@ export async function routeIntent(
     noContext: Boolean(llmResult.noContext) || noContext,
     confidence: "llm",
   };
+}
+
+/**
+ * Route common plain-English product actions that are adjacent to a migration
+ * run. This intentionally handles only high-confidence utility intents so a
+ * casual chat message never surprises the user with a long or destructive job.
+ */
+export function routeToolIntent(input: string): ToolIntentDecision | null {
+  const text = input.trim();
+  if (!text || text.startsWith("/")) return null;
+
+  const lower = text.toLowerCase();
+  const target = maybeRunTarget(text);
+  const targetLabel = target || "latest run";
+
+  const mentionsDashboard = /\b(dashboard|web\s*ui|html\s*view|html|graph\s*view|report\s*view)\b/.test(lower);
+  const wantsOpen = /\b(open|show|view|launch|display|bring\s+up)\b/.test(lower);
+  const wantsRegenerate = /\b(regenerate|rebuild|refresh|update|generate)\b/.test(lower);
+
+  if (mentionsDashboard && (wantsOpen || wantsRegenerate || /\bdashboard\b/.test(lower))) {
+    const openFlag = wantsOpen || /\bshow|view|launch|display|bring\s+up\b/.test(lower);
+    const base = withTarget("migrate dashboard", target);
+    return {
+      command: `${base}${openFlag ? " --open" : ""}`,
+      action: openFlag ? "open_dashboard" : "regenerate_dashboard",
+      confidence: "heuristic",
+      summary: openFlag
+        ? `Opening the dashboard for ${targetLabel}.`
+        : `Regenerating the dashboard for ${targetLabel}.`,
+    };
+  }
+
+  const mentionsFolder = /\b(folder|finder|explorer|result|results|output|outputs|files|artifacts)\b/.test(lower);
+  if (wantsOpen && mentionsFolder) {
+    return {
+      command: withTarget("migrate open", target),
+      action: "open_folder",
+      confidence: "heuristic",
+      summary: `Opening the result folder for ${targetLabel}.`,
+    };
+  }
+
+  if (/\b(status|progress|ready|ready\s+components|what\s+is\s+ready|where\s+are\s+we)\b/.test(lower)
+      && /\b(migration|migrate|components|progress|ready|run|work)\b/.test(lower)) {
+    return {
+      command: "migrate status",
+      action: "status",
+      confidence: "heuristic",
+      summary: "Checking migration status.",
+    };
+  }
+
+  if (/\b(set\s*up|setup|configure|connect|wire|register)\b/.test(lower)
+      && /\b(mcp|codex|claude|agent|agents|claude\s+code)\b/.test(lower)) {
+    return {
+      command: "setup",
+      action: "setup",
+      confidence: "heuristic",
+      summary: "Opening the Codex / Claude Code MCP setup guide.",
+    };
+  }
+
+  if (/\b(help|guide|manual|commands?|what\s+can\s+i\s+do|how\s+do\s+i\s+use|how\s+to\s+use)\b/.test(lower)) {
+    return {
+      command: "guide",
+      action: "guide",
+      confidence: "heuristic",
+      summary: "Opening the interactive guide.",
+    };
+  }
+
+  if (/\b(clean|cleanup|delete|remove|wipe)\b/.test(lower)
+      && /\b(migration|migrate|run|runs|folder|folders|result|results|output|outputs)\b/.test(lower)) {
+    const all = /\b(all|everything|every)\b/.test(lower);
+    const base = all ? "migrate clean --all" : withTarget("migrate clean", target);
+    return {
+      command: base,
+      action: "clean",
+      confidence: "heuristic",
+      summary: all
+        ? "Showing the confirmation step to clean all migration run folders."
+        : target
+          ? `Showing the confirmation step to clean ${target}.`
+          : "Listing migration run folders that can be cleaned.",
+    };
+  }
+
+  return null;
+}
+
+export function formatToolIntentAck(decision: ToolIntentDecision): string {
+  return [
+    decision.summary,
+    `_Detected from your message — running \`/${decision.command}\`._`,
+  ].join("\n");
 }
 
 function shortRepoLabel(decision: RouterDecision): string {
