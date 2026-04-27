@@ -630,6 +630,35 @@ It is useful in three ways:
 
 Important: today this is a lightweight graph, not full Neo4j-style memory. It supports useful dependency impact and visualization, but not deep BFS/DFS call-chain analysis yet.
 
+## Parser Coverage
+
+CCS uses a three-tier parser stack. No manual installs are needed — tree-sitter grammars
+are listed as \`optionalDependencies\` in \`package.json\` and are installed automatically
+by \`bun install\` / \`npm install\`. If native compilation fails on a restricted machine,
+CCS falls back to regex silently.
+
+| Language | Extensions | Method |
+|---|---|---|
+| TypeScript / JavaScript | \`.ts .tsx .js .jsx .mjs .cjs\` | TypeScript compiler AST — always available |
+| Python | \`.py\` | Tree-sitter (auto-installed) → regex fallback |
+| Java | \`.java\` | Tree-sitter (auto-installed) → regex fallback |
+| C# | \`.cs\` | Tree-sitter (auto-installed) → regex fallback |
+| Go | \`.go\` | Tree-sitter (auto-installed) → regex fallback |
+| C | \`.c .h\` | Tree-sitter (auto-installed) → regex fallback |
+| C++ | \`.cpp .cc .cxx .hpp .hh\` | Tree-sitter (auto-installed) → regex fallback |
+| Pascal / Delphi | \`.pas .dpr .inc .pp\` | Tree-sitter (auto-installed) → regex fallback |
+| VB6 / VBA | \`.bas .cls .frm .vb\` | Regex (no tree-sitter grammar exists) |
+
+Each run of \`/migrate rewrite\` or \`/migrate reverse-eng\` reports which method was
+used in \`reverse-engineering/code-intelligence.json\` under \`analysisMethod\`.
+
+If tree-sitter fails to build on your machine (restricted network, missing compiler),
+run this once to force a rebuild after installing the required toolchain:
+
+\`\`\`text
+npm rebuild tree-sitter
+\`\`\`
+
 ## MCP Setup
 
 \`\`\`text

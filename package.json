@@ -37,5 +37,15 @@
     "js-yaml": "^4.1.1",
     "react": "^19.2.4",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "tree-sitter": "^0.21.1",
+    "tree-sitter-python": "*",
+    "tree-sitter-java": "*",
+    "tree-sitter-c-sharp": "*",
+    "tree-sitter-go": "*",
+    "tree-sitter-c": "*",
+    "tree-sitter-cpp": "*",
+    "tree-sitter-pascal": "*"
   }
 }
