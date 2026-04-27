@@ -3,45 +3,28 @@ import { Box, Text } from "ink";
 import { userInfo, homedir } from "os";
 import { useTerminalSize } from "../hooks/useTerminalSize";
 
-// The full ASCII mark — kept exported for the vault setup success screen.
-export const LOGO_LARGE = [
-  " ██████╗ ██████╗███████╗",
-  "██╔════╝██╔════╝██╔════╝",
-  "██║     ██║     ███████╗",
-  "██║     ██║     ╚════██║",
-  "╚██████╗╚██████╗███████║",
-  " ╚═════╝ ╚═════╝╚══════╝",
-];
+const ACCENT = "#63b3ed"; 
+const MUTED = "#4a5568";
+const DIM = "#718096";
 
-// Small mark used here in the welcome card.
 export const LOGO_SMALL = [
   "▄▀▀ ▄▀▀ ▄▀▀",
   "█   █   ▀▀▄",
   "▀▀▘ ▀▀▘ ▀▀▀",
 ];
 
-const ACCENT = "#8ab4f8";
-const MUTED = "#8b92ac";
-
 const HINTS: Array<{ command: string; desc: string }> = [
-  { command: "/migrate rewrite", desc: "scan, reverse-engineer, verify" },
-  { command: "/migrate open",    desc: "open latest result folder" },
-  { command: "/migrate open --dashboard", desc: "open latest dashboard" },
-  { command: "/setup",           desc: "wire Codex / Claude Code via MCP" },
-  { command: "/guide",           desc: "interactive manual" },
+  { command: "/migrate",         desc: "Launch migration wizard" },
+  { command: "/migrate open",    desc: "Open latest result folder" },
+  { command: "/migrate open --dashboard", desc: "Open dashboard.html" },
+  { command: "/setup",           desc: "MCP configuration" },
+  { command: "/guide",           desc: "Interactive walkthrough" },
 ];
-
-const START_HINT = 'migrate <repo url> to csharp" or "open the dashboard';
 
 function truncateMiddle(value: string, max: number): string {
   if (value.length <= max) return value;
   const keep = Math.max(4, Math.floor((max - 1) / 2));
   return `${value.slice(0, keep)}…${value.slice(-keep)}`;
-}
-
-function truncateEnd(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, Math.max(1, max - 1))}…`;
 }
 
 type Props = {
@@ -55,64 +38,57 @@ export function WelcomeBox({ activeModel, workspacePath }: Props) {
   const model = activeModel === "Loading..." ? "…" : activeModel;
   const cwd = workspacePath.replace(homedir(), "~");
 
-  // Compact Claude/Codex-style start panel. No heavy chrome; the terminal
-  // transcript should stay the primary UI.
-  const cardWidth = Math.max(50, Math.min(columns - 4, 88));
+  const cardWidth = Math.max(50, Math.min(columns - 4, 100));
   const innerWidth = cardWidth - 4;
 
-  // Logo column reserved on the left of the header band.
-  const logoCol = LOGO_SMALL[0]?.length ?? 11;
-  const headerTextWidth = Math.max(20, innerWidth - logoCol - 3);
-
-  // Command list dims.
-  const cmdCol = 28;
-  const descCol = Math.max(12, innerWidth - cmdCol - 2);
-
-  const metaWidth = Math.max(20, innerWidth - 2);
-  const cwdRoom = Math.max(8, metaWidth - model.length - 3);
-
   return (
-    <Box paddingX={2} marginTop={1} marginBottom={1} flexDirection="column" width={cardWidth}>
-      <Box
-        flexDirection="column"
-        width={cardWidth}
+    <Box paddingX={1} marginTop={1} marginBottom={1} flexDirection="column" width={cardWidth}>
+      {/* Prompt-style Header with Logo */}
+      <Box 
+        backgroundColor="#30343d" 
+        paddingX={2} 
+        paddingY={1} 
+        flexDirection="row"
+        gap={2}
+        borderStyle="single"
+        borderLeft
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        borderColor={ACCENT}
       >
-        {/* Header: small logo on the left, identity on the right ----------- */}
-        <Box flexDirection="row">
-          <Box flexDirection="column" marginRight={2}>
-            {LOGO_SMALL.map((line, i) => (
-              <Text key={i} color={ACCENT} bold>{line}</Text>
-            ))}
-          </Box>
-          <Box flexDirection="column" width={headerTextWidth}>
-            <Text>
-              <Text bold>CCS Code</Text> <Text color={MUTED}>for</Text> <Text color={ACCENT} bold>{username}</Text>
-            </Text>
-            <Text color={MUTED}>
-              {truncateEnd("CCS Code · migration intelligence for legacy modernization", headerTextWidth)}
-            </Text>
-            <Text color={MUTED}>
-              {truncateEnd(`${model} · ${truncateMiddle(cwd, cwdRoom)}`, headerTextWidth)}
-            </Text>
-          </Box>
-        </Box>
-
-        {/* Command hints --------------------------------------------------- */}
-        <Box flexDirection="column" marginTop={1}>
-          {HINTS.map((hint) => (
-            <Box key={hint.command} flexDirection="row">
-              <Text color={ACCENT} bold>{hint.command.padEnd(cmdCol)}</Text>
-              <Text color={MUTED}>{truncateEnd(hint.desc, descCol)}</Text>
-            </Box>
+        <Box flexDirection="column">
+          {LOGO_SMALL.map((line, i) => (
+            <Text key={i} color={ACCENT} bold>{line}</Text>
           ))}
         </Box>
-
-        {/* Natural-language hint ------------------------------------------- */}
-        <Box marginTop={1}>
-          <Text color={MUTED}>
-            Type <Text color={ACCENT}>"{START_HINT}"</Text> — plain words work too.
-          </Text>
+        <Box flexDirection="column" justifyContent="center">
+          <Box flexDirection="row" gap={1}>
+            <Text color={ACCENT} bold>CCS Code</Text>
+            <Text color={DIM}>&middot;</Text>
+            <Text color="#e2e8f0">{username}</Text>
+            <Text color={DIM}>&middot;</Text>
+            <Text color={DIM}>{truncateMiddle(cwd, 30)}</Text>
+          </Box>
         </Box>
+      </Box>
+
+      {/* Compact Hints List */}
+      <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+        <Text color={DIM}>Available commands:</Text>
+        {HINTS.map((hint, i) => (
+          <Box key={i} flexDirection="row" gap={2} marginBottom={0}>
+            <Text color={ACCENT} bold>{hint.command.padEnd(20)}</Text>
+            <Text color={DIM}>{hint.desc}</Text>
+          </Box>
+        ))}
+      </Box>
+
+      {/* Status Bar style line */}
+      <Box marginTop={1} paddingLeft={2}>
+        <Text color={DIM}>
+          Active model: <Text color="#cbd5e1">{model}</Text> &middot; Type <Text color={ACCENT}>"?"</Text> for shortcuts
+        </Text>
       </Box>
     </Box>
   );

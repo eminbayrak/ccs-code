@@ -301,20 +301,40 @@ async function handleScan(args: string[], onProgress?: (msg: string) => void): P
       ].join("\n");
     }
 
+    // ── Zero SOAP services found — auto-fallback to general code analysis ──
+    if (result.analyzed.length === 0 && result.unresolved.length === 0) {
+      onProgress?.("No SOAP services detected. Switching to general code analysis...");
+      const rewriteArgs = [
+        "--repo", repoUrl,
+        "--to", lang,
+        ...(org ? ["--org", org] : []),
+        ...(autoConfirm ? ["--yes"] : []),
+      ];
+      const rewriteResult = await handleRewrite(rewriteArgs, onProgress);
+      return [
+        "ℹ No SOAP/WCF services detected in this repo.",
+        "",
+        "Switched to **general code analysis** mode, which works with any architecture.",
+        "",
+        rewriteResult,
+      ].join("\n");
+    }
+
     const summary = [
       `## ✓ Scan Complete`,
       "",
-      `**Results:**`,
-      `- **Services analyzed:** ${result.analyzed.length}`,
-      `- **Unresolved:** ${result.unresolved.length}`,
-      `- **Errors:**     ${result.errors.length}`,
+      `| Metric | Count |`,
+      `|---|---|`,
+      `| Services analyzed | ${result.analyzed.length} |`,
+      `| Unresolved | ${result.unresolved.length} |`,
+      `| Errors | ${result.errors.length} |`,
     ];
 
     if (result.indexPath) {
       summary.push(``, `**System index:** \`${result.indexPath}\``);
     }
     if (result.scanReportPath) {
-      summary.push(`**Scan report:** \`${result.scanReportPath}\``);
+      summary.push(``, `**Scan report:** \`${result.scanReportPath}\``);
     }
     if (result.unresolved.length > 0) {
       summary.push(``, `⚠ **Unresolved:** ${result.unresolved.join(", ")}`);
@@ -560,64 +580,44 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       ].join("\n");
     }
 
+    const { repoSlug } = await import("../migration/runLayout.js");
+    const slug = repoSlug(repoUrl);
+    const firstComponent = result.migrationOrder[0] ?? result.components[0]?.component.name ?? "—";
+
     const summary = [
-      `## ✓ Rewrite KB Complete`,
+      `## ✓ Analysis Complete`,
       "",
-      `**Framework:** ${result.frameworkInfo.sourceFramework} (${result.frameworkInfo.sourceLanguage}) → ${result.frameworkInfo.targetFramework} (${result.frameworkInfo.targetLanguage})`,
-      `**Components analyzed:** ${result.components.length}`,
-      `**Migration order:** ${result.migrationOrder.join(" → ")}`,
+      `| | |`,
+      `|---|---|`,
+      `| **Source** | ${result.frameworkInfo.sourceFramework} (${result.frameworkInfo.sourceLanguage}) |`,
+      `| **Target** | ${result.frameworkInfo.targetFramework} (${result.frameworkInfo.targetLanguage}) |`,
+      `| **Components** | ${result.components.length} |`,
+      `| **Start with** | \`${firstComponent}\` |`,
+      `| **Output** | \`${slug}/\` |`,
     ];
 
     if (result.unanalyzed.length > 0) {
-      summary.push(``, `⚠ **Failed:** ${result.unanalyzed.join(", ")}`);
+      summary.push(``, `⚠ **Could not analyze:** ${result.unanalyzed.join(", ")}`);
     }
 
-    const { repoSlug } = await import("../migration/runLayout.js");
-    const slug = repoSlug(repoUrl);
+    if (result.migrationOrder.length > 1) {
+      summary.push(``, `**Migration order:** ${result.migrationOrder.slice(0, 6).join(" → ")}${result.migrationOrder.length > 6 ? ` +${result.migrationOrder.length - 6} more` : ""}`);
+    }
+
     summary.push(
       ``,
-      `**Output folder:** \`${slug}/\` (under your migration root)`,
-      ``,
-      `### Open quickly`,
-      `- Open dashboard: \`/migrate open ${slug} --dashboard\``,
-      `- Open result folder: \`/migrate open ${slug}\``,
-      ``,
-      `### Open these first`,
-      `- \`README.md\` — guided walkthrough, trust posture, table of contents`,
-      `- \`dashboard.html\` — static web UI with graph, markdown, and JSON views`,
-      `- \`verification-summary.md\` — trust gate (which components are ready)`,
-      `- \`test-scaffolds/README.md\` — parity test starting points for coding agents`,
-      `- \`dependency-risk-report.md\` — package inventory and migration/security planning notes`,
-      `- \`human-questions.md\` — open architecture decisions`,
-      `- \`migration-contract.json\` — machine-readable contract for Codex / Claude / MCP`,
-      ``,
-      `### Folder map`,
+      `**Open the dashboard:**`,
       `\`\`\``,
-      `${slug}/`,
-      `  README.md                       ← start here`,
-      `  dashboard.html                  ← static web UI`,
-      `  AGENTS.md                       ← agent entry point`,
-      `  migration-contract.json`,
-      `  architecture-baseline.md`,
-      `  preflight-readiness.md`,
-      `  component-disposition-matrix.md`,
-      `  human-questions.md`,
-      `  verification-summary.md`,
-      `  dependency-risk-report.md / .json`,
-      `  system-graph.json / .mmd`,
-      `  components/<Name>.md            ← per-component context + verification`,
-      `  test-scaffolds/                 ← parity test starting points`,
-      `  reverse-engineering/`,
-      `  architecture-context/           ← copies of your --context docs`,
-      `  claude-commands/`,
-      `  logs/report.md`,
+      `/migrate open ${slug} --dashboard`,
       `\`\`\``,
       ``,
-      `### Next steps`,
-      `1. Open \`README.md\` and skim the trust posture.`,
-      `2. Resolve anything in \`human-questions.md\`.`,
-      `3. Hand the run folder to Codex or Claude Code via MCP — run \`/setup\` for wiring.`,
-      `4. Implement only \`ready\` components; first up: \`${result.migrationOrder[0] ?? "<first>"}\`.`,
+      `**Key files to review:**`,
+      `- \`README.md\` — start here, trust posture overview`,
+      `- \`verification-summary.md\` — which components are ready to implement`,
+      `- \`human-questions.md\` — open decisions that need your input`,
+      `- \`migration-contract.json\` — machine-readable contract for AI agents`,
+      ``,
+      `Run \`/migrate status\` for a component-by-component view.`,
     );
 
     return summary.join("\n");

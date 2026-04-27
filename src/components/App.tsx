@@ -3,12 +3,13 @@ import { Text, Box, useApp, useInput, Static } from "ink";
 import TextInput from "ink-text-input";
 import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
+import { homedir } from "os";
 import { join, resolve } from "path";
 import { useTerminalSize } from "../hooks/useTerminalSize";
 import { usePaste } from "../hooks/usePaste";
 import { StatusBar } from "./StatusBar";
 import { HelpMenu } from "./HelpMenu";
-import { WelcomeBox, LOGO_LARGE, LOGO_SMALL } from "./WelcomeBox";
+import { WelcomeBox } from "./WelcomeBox";
 import { MarkdownText } from "./MarkdownText";
 import { SuggestionList, type SuggestionItem } from "./SuggestionList";
 import {
@@ -80,6 +81,7 @@ function createUIMessage(role: UIMessage["role"], content: string): UIMessage {
 type ToolExecution = {
   id: string;
   name: string;
+  details?: string;
   isComplete: boolean;
 };
 
@@ -313,18 +315,112 @@ function taskStatusIcon(status: string): string {
   return "⎿";
 }
 
-function formatAgentTasks(runs: ReturnType<typeof listAgentRuns>): string {
-  if (runs.length === 0) return "No agent tasks yet.";
+import { ToolBlock } from "./ToolBlock";
 
-  return [
-    `### Agent tasks (${runs.length})`,
-    "",
-    ...runs.flatMap((r) => {
-      const status = `${taskStatusIcon(r.status)} ${r.status}`;
-      const firstLine = `- **${r.agentType}** \`${r.id}\` - ${status}`;
-      return r.error ? [firstLine, `  - Error: ${r.error}`] : [firstLine];
-    }),
-  ].join("\n");
+// ... (keep other imports)
+
+function ThinkingBlock({ startTime }: { startTime: number }) {
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  const [frame, setFrame] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const frameTimer = setInterval(() => setFrame(f => (f + 1) % frames.length), 80);
+    const elapsedTimer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, 100);
+    return () => {
+      clearInterval(frameTimer);
+      clearInterval(elapsedTimer);
+    };
+  }, [startTime]);
+
+  return (
+    <Box flexDirection="row" justifyContent="space-between" paddingX={1} marginTop={1}>
+      <Box gap={1}>
+        <Text color="#63b3ed" bold>{frames[frame]} Thinking...</Text>
+        <Text color="#718096">(esc to cancel, {elapsed}s)</Text>
+      </Box>
+      <Text color="#718096">Tip: Use /migrate open --dashboard to see visual reports</Text>
+    </Box>
+  );
+}
+
+function MainFooter({ 
+  workspacePath, 
+  activeModel, 
+  permissionMode,
+  columns,
+  skillsCount,
+  instructionsCount,
+  vaultPath
+}: { 
+  workspacePath: string; 
+  activeModel: string; 
+  permissionMode: string;
+  columns: number;
+  skillsCount: number;
+  instructionsCount: number;
+  vaultPath: string | null;
+}) {
+  const [branch, setBranch] = useState("...");
+  
+  useEffect(() => {
+    // Attempt to get real branch
+    import("child_process").then(({ exec }) => {
+      exec("git rev-parse --abbrev-ref HEAD", (err, stdout) => {
+        if (!err && stdout) setBranch(stdout.trim());
+      });
+    });
+  }, []);
+
+  const cwd = workspacePath.replace(homedir(), "~");
+  const vaultDisplay = vaultPath ? vaultPath.replace(homedir(), "~") : "no active vault";
+  
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Box 
+        flexDirection="row" 
+        justifyContent="space-between" 
+        paddingX={1} 
+        paddingY={0}
+        borderStyle="single"
+        borderTop
+        borderBottom={false}
+        borderLeft={false}
+        borderRight={false}
+        borderColor="#2d3748"
+      >
+        <Text color="#63b3ed">mode <Text color="#ffffff">{permissionMode}</Text></Text>
+        <Text color="#718096">{skillsCount} skills &middot; {instructionsCount} instructions &middot; 1 MCP server</Text>
+      </Box>
+      
+      <Box flexDirection="row" width={columns} paddingX={1} marginTop={1}>
+        <Box flexDirection="column" width="30%">
+          <Text color="#718096">workspace</Text>
+          <Text color="#ffffff" wrap="truncate-end">{cwd}</Text>
+        </Box>
+        <Box flexDirection="column" width="25%">
+          <Text color="#718096">active vault</Text>
+          <Text color={vaultPath ? "#ffffff" : "#f56565"} wrap="truncate-end">{vaultDisplay}</Text>
+        </Box>
+        <Box flexDirection="column" width="15%">
+          <Text color="#718096">branch</Text>
+          <Text color="#ffffff" wrap="truncate-end">{branch}</Text>
+        </Box>
+        <Box flexDirection="column" width="15%">
+          <Text color="#718096">permission</Text>
+          <Text color={permissionMode === "permissive" ? "#48bb78" : "#f56565"}>
+            {permissionMode === "default" ? "default" : permissionMode}
+          </Text>
+        </Box>
+        <Box flexDirection="column" width="15%" alignItems="flex-end">
+          <Text color="#718096">/model</Text>
+          <Text color="#ffffff">{activeModel}</Text>
+        </Box>
+      </Box>
+    </Box>
+  );
 }
 
 const DONE_VERBS = ["Completed", "Finished", "Done", "Processed", "Ready"];
@@ -389,6 +485,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
   // Injected files (path → content)
   const injectedFilesRef = useRef<Map<string, string>>(new Map());
+  const pastedBlocksRef = useRef<Map<string, string>>(new Map());
 
   // ---------------------------------------------------------------------------
   // Paste handling — intercepts bracketed paste before Ink's key parser sees it
@@ -401,7 +498,14 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     useCallback((text: string) => {
       const target = activeInputRef.current;
       if (target === "main") {
-        setInput((prev) => prev + text);
+        const lines = text.split("\n").length;
+        if (lines > 1) {
+          const token = `[Pasted Text: ${lines} lines]`;
+          pastedBlocksRef.current.set(token, text);
+          setInput((prev) => prev + token);
+        } else {
+          setInput((prev) => prev + text);
+        }
         setInputKey((k) => k + 1);
       } else if (target === "setup") {
         setSetupInput((prev) => prev + text);
@@ -664,40 +768,34 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       }
       case "sync": {
         setIsProcessing(true);
-        setActiveTools([{ id: "sync", name: "Syncing sources", isComplete: false }]);
-        setOperationLogs(["Syncing sources"]);
+        setActiveTools([{ id: "sync", name: "Source Syncer", details: "Syncing sources...", isComplete: false }]);
         processingStartRef.current = Date.now();
         handleSyncCommand(args, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
-          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
-          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
       }
       case "ingest": {
         setIsProcessing(true);
-        setActiveTools([{ id: "ingest", name: "Processing raw files", isComplete: false }]);
-        setOperationLogs(["Scanning raw inbox", "Processing raw files"]);
+        setActiveTools([{ id: "ingest", name: "Ingestor", details: "Processing raw files...", isComplete: false }]);
         processingStartRef.current = Date.now();
         handleIngestCommand(args, process.cwd()).then((output) => {
           const elapsed = formatElapsed(Date.now() - processingStartRef.current);
           setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
           setIsProcessing(false);
           setActiveTools([]);
-          setOperationLogs([]);
           setCompletionLabel(`${nextDoneVerb()} for ${elapsed}`);
         }).catch(err => {
           setIsProcessing(false);
           setActiveTools([]);
-          setOperationLogs([]);
           setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${err.message}`)]);
         });
         break;
@@ -865,7 +963,16 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
       }
       case "tasks": {
         const runs = listAgentRuns();
-        setMessages((prev) => [...prev, createUIMessage("assistant", formatAgentTasks(runs))]);
+        const taskLines = runs.length === 0
+          ? "No agent runs found."
+          : [
+              "## Agent Runs",
+              "",
+              "| ID | Type | Status | Started |",
+              "|---|---|---|---|",
+              ...runs.map((r) => `| \`${r.id.slice(0, 8)}\` | ${r.agentType} | ${r.status} | ${new Date(r.startedAt).toLocaleTimeString()} |`),
+            ].join("\n");
+        setMessages((prev) => [...prev, createUIMessage("assistant", taskLines)]);
         break;
       }
       case "mode": {
@@ -900,43 +1007,31 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           setIsMigrateWizard(true);
           setMigrateWizardStep(0);
           setMigrateWizardData({ repo: "", lang: "csharp" });
-          setMessages((prev) => [...prev, createUIMessage("assistant", "### 🚀 Migration Wizard\n\nI'll help you set up a migration scan. (Press `Esc` to cancel)\n\nFirst, enter the **repository URL** you want to scan:")]);
+          setMessages((prev) => [...prev, createUIMessage("assistant", "## 🚀 Migration Wizard  `Esc` to cancel\n\n**Step 1 of 3** — Repository URL\n\nPaste the GitHub URL of the repo you want to analyze:")]);
+
           break;
         }
 
         const toolNameMap: Record<string, string> = {
-          scan:    "Scanning repository",
-          rewrite: "Analyzing codebase",
-          status:  "Fetching status",
-          context: "Loading context",
-          verify:  "Verifying service",
-          done:    "Finalizing service",
-          rescan:  "Preparing rescan",
-          plugin:  "Loading plugins",
+          scan:    "Migration Scanner",
+          rewrite: "Code Analyzer",
+          status:  "Status Reporter",
+          context: "Context Builder",
+          verify:  "Claim Verifier",
+          done:    "Finalizer",
+          rescan:  "Scanner",
+          plugin:  "Plugin Loader",
         };
 
-        const startMsgMap: Record<string, string> = {
-          scan:    "Starting migration scan",
-          rewrite: "Starting verified migration analysis",
-          status:  "Loading migration status...",
-          context: "Loading context doc...",
-          verify:  "Processing verification...",
-          done:    "Marking service as done...",
-          rescan:  "Preparing rescan instructions...",
-          plugin:  "Listing installed plugins...",
-        };
-
-        const startMsg = startMsgMap[subcommand] ?? `Running /migrate ${subcommand}...`;
-        const toolName = toolNameMap[subcommand] ?? `Executing migrate ${subcommand}`;
+        const toolName = toolNameMap[subcommand] || "Migration Tool";
 
         setIsProcessing(true);
-        setActiveTools([{ id: "migrate-task", name: toolName, isComplete: false }]);
-        setMigrateLogs([startMsg]);
+        setActiveTools([{ id: "migrate-task", name: toolName, details: "Initializing...", isComplete: false }]);
+        setMigrateLogs([]);
         processingStartRef.current = Date.now();
 
         handleMigrateCommand(args, process.cwd(), (msg) => {
-          setMigrateLogs((prev) => [...prev, msg]);
-          setActiveTools([{ id: "migrate-task", name: msg, isComplete: false }]);
+          setActiveTools([{ id: "migrate-task", name: toolName, details: msg, isComplete: false }]);
         })
           .then((output) => {
             const elapsed = formatElapsed(Date.now() - processingStartRef.current);
@@ -1089,31 +1184,54 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
     setMessages((prev) => [...prev, createUIMessage("user", trimmed)]);
 
     if (migrateWizardStep === 0) {
-      // Repository URL
+      // Step 1 — Repository URL
+      // Basic URL validation
+      const isUrl = /^https?:\/\//i.test(trimmed) || /^[\w.-]+\/[\w.-]+$/.test(trimmed);
+      if (!isUrl) {
+        setMessages((prev) => [
+          ...prev,
+          createUIMessage("assistant", `⚠ That doesn't look like a valid URL. Please enter a GitHub URL, e.g.\n\`https://github.com/org/repo\``),
+        ]);
+        return;
+      }
       setMigrateWizardData((prev) => ({ ...prev, repo: trimmed }));
       setMigrateWizardStep(1);
       setMessages((prev) => [
         ...prev,
-        createUIMessage("assistant", "Target language? (e.g., `csharp`, `typescript`, `python`. Default: `csharp`)"),
+        createUIMessage(
+          "assistant",
+          "**Step 2 of 3** — Target language\n\nWhat language or framework are you migrating **to**?\n\nExamples: `csharp`, `typescript`, `python`, `java`, `go`\nOr describe it: `.net entity framework`, `spring boot`, `fastapi`\n\nPress Enter to use the default: `csharp`",
+        ),
       ]);
     } else if (migrateWizardStep === 1) {
-      // Language
-      const lang = trimmed.toLowerCase() || "csharp";
-      setMigrateWizardData((prev) => ({ ...prev, lang }));
+      // Step 2 — Language (accept free-form, normalise via alias map)
+      const raw = trimmed || "csharp";
+      const normalised = normaliseLang(raw);
+      setMigrateWizardData((prev) => ({ ...prev, lang: normalised }));
       setMigrateWizardStep(2);
+      const displayLang = normalised !== raw.toLowerCase().trim() ? `${normalised} (from "${raw}")` : normalised;
       setMessages((prev) => [
         ...prev,
-        createUIMessage("assistant", `Ready to scan **${migrateWizardData.repo}** for **${lang}** migration.\n\nProceed? (y/n)`),
+        createUIMessage(
+          "assistant",
+          `**Step 3 of 3** — Confirm\n\n| | |\n|---|---|\n| **Repo** | \`${migrateWizardData.repo}\` |\n| **Target** | \`${displayLang}\` |\n| **Mode** | Full code analysis + migration contract |\n\nType \`y\` to start · \`n\` to cancel`,
+        ),
       ]);
     } else if (migrateWizardStep === 2) {
-      // Confirmation
-      if (trimmed.toLowerCase() === "y" || trimmed.toLowerCase() === "yes") {
+      // Step 3 — Confirmation
+      const confirm = trimmed.toLowerCase();
+      if (confirm === "y" || confirm === "yes") {
         setIsMigrateWizard(false);
-        const cmd = `migrate scan --repo ${migrateWizardData.repo} --lang ${migrateWizardData.lang} --yes`;
+        // Use `migrate rewrite` (general analysis) not `migrate scan` (SOAP-only)
+        const cmd = `migrate rewrite --repo ${migrateWizardData.repo} --to ${migrateWizardData.lang} --yes`;
+        setMessages((prev) => [
+          ...prev,
+          createUIMessage("assistant", `Starting analysis of \`${migrateWizardData.repo}\`...\n\nThis clones the repo, maps the architecture, and generates a migration contract. May take 1–3 minutes.`),
+        ]);
         executeSlashCommand(cmd);
       } else {
         setIsMigrateWizard(false);
-        setMessages((prev) => [...prev, createUIMessage("assistant", "Migration scan cancelled.")]);
+        setMessages((prev) => [...prev, createUIMessage("assistant", "Migration wizard cancelled. Run `/migrate` to start again.")]);
       }
     }
   };
@@ -1239,16 +1357,31 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         return;
       }
 
-      // Build the final message: inline content from injected @files
+      // Build the final message: inline content from injected @files and pasted blocks
       let finalContent = trimmed;
+      
+      // 1. Expand pasted blocks [Pasted Text: N lines]
+      const pastedBlocks = pastedBlocksRef.current;
+      for (const [token, content] of pastedBlocks.entries()) {
+        if (finalContent.includes(token)) {
+          finalContent = finalContent.replace(token, `\n\n[Pasted Content]\n\`\`\`\n${content}\n\`\`\``);
+        }
+      }
+      pastedBlocks.clear();
+
+      // 2. Expand @file blocks
       const injected = injectedFilesRef.current;
       if (injected.size > 0) {
         const fileBlocks = Array.from(injected.entries())
-          .map(([path, content]) =>
-            `\n\n[File: ${path}]\n\`\`\`\n${content.slice(0, 8000)}\n\`\`\``,
-          )
+          .map(([path, content]) => {
+            // Only include if the file tag is still in the input
+            if (trimmed.includes(`@${path}`)) {
+              return `\n\n[File: ${path}]\n\`\`\`\n${content.slice(0, 8000)}\n\`\`\``;
+            }
+            return "";
+          })
           .join("");
-        finalContent = trimmed + fileBlocks;
+        finalContent = finalContent + fileBlocks;
         injected.clear();
       }
 
@@ -1406,7 +1539,6 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
   if (isSetupMode) {
     const boxWidth = Math.max(42, terminalWidth - 4);
-    const showLargeLogo = boxWidth >= 40;
 
     if (setupStep === "success") {
       return (
@@ -1474,13 +1606,6 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         marginX={2}
         marginTop={1}
       >
-        {/* Logo */}
-        <Box flexDirection="column" alignItems="center" marginBottom={1}>
-          {(showLargeLogo ? LOGO_LARGE : LOGO_SMALL).map((line, i) => (
-            <Text key={i} color="cyan">{line}</Text>
-          ))}
-        </Box>
-
         <Box marginBottom={1} alignItems="center" flexDirection="column">
           <Text bold color="cyan">Welcome to CCS Code!</Text>
           <Text dimColor>Your AI-powered knowledge base</Text>
@@ -1538,13 +1663,30 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           />
         )}
 
-        {/* Active Operations (Scan, Ingest, etc.) */}
-        {(isProcessing || migrateLogs.length > 0 || operationLogs.length > 0) && (
+        {/* Tool Result Cards */}
+        {activeTools.map((tool) => {
+          const name = tool.name;
+          const details = tool.details || (tool.isComplete ? "Success" : "Processing...");
+          
+          return (
+            <ToolBlock
+              key={tool.id}
+              name={name}
+              status={tool.isComplete ? "Done" : "Working"}
+              details={details}
+              isComplete={tool.isComplete}
+              width={terminalWidth - 4}
+            />
+          );
+        })}
+
+        {/* Migration scan live log (fallback for legacy or deep logs) */}
+        {!isProcessing && migrateLogs.length > 0 && (
           <Box flexDirection="column" marginTop={1} paddingLeft={1}>
             <ScanProgressLog
-              logs={migrateLogs.length > 0 ? migrateLogs : operationLogs}
+              logs={migrateLogs}
               isExpanded={areLogsExpanded}
-              showSpinnerForLast={isProcessing}
+              showSpinnerForLast={false}
               modelLabel={activeModel}
               width={terminalWidth - 4}
             />
@@ -1554,6 +1696,8 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
       {/* Input Area */}
       <Box flexDirection="column" marginTop={1}>
+        {isProcessing && <ThinkingBlock startTime={processingStartRef.current} />}
+
         <Box
           flexDirection="row"
           gap={1}
@@ -1561,6 +1705,7 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           paddingY={1}
           width={terminalWidth}
           backgroundColor="#30343d"
+          marginTop={1}
         >
           <Text bold color="#aeb7d6">›</Text>
           <Box flexGrow={1}>
@@ -1577,26 +1722,23 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
             {input === "" && (
               <Box position="absolute" marginLeft={1}>
                 {isProcessing ? (
-                  <Text dimColor>
-                    <Text color="yellow" bold>ESC</Text> to cancel processing...
-                  </Text>
+                  <Box gap={1}>
+                    <Text color="#718096">Type your message or @path/to/file</Text>
+                  </Box>
                 ) : (
                   <Text dimColor>
                     {isMigrateWizard
                       ? migrateWizardStep === 0
                         ? "https://github.com/org/repo"
                         : migrateWizardStep === 1
-                        ? "csharp, typescript, python..."
+                        ? "e.g. csharp, typescript, python  (Enter for default)"
                         : "y / n"
-                      : "Message CCS Code  (@file · /command · ? for help)"}
+                      : "Type your message or @path/to/file"}
                   </Text>
                 )}
               </Box>
             )}
           </Box>
-          {input !== "" && !isProcessing && (
-            <Text dimColor>ctrl+u clear</Text>
-          )}
         </Box>
 
         {/* Autocomplete */}
@@ -1609,21 +1751,16 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           />
         )}
 
-        {/* Status Bar */}
-        <Box marginBottom={0}>
-          {helpOpen ? (
-            <HelpMenu terminalWidth={terminalWidth} />
-          ) : (
-            <StatusBar
-              workspacePath={process.cwd()}
-              sandboxStatus={permissionMode}
-              activeModel={activeModel}
-              instructionsCount={instructions.length}
-              skillsCount={skills.length}
-              terminalWidth={terminalWidth}
-            />
-          )}
-        </Box>
+        {/* New Multi-column Footer */}
+        <MainFooter 
+          workspacePath={process.cwd()}
+          activeModel={activeModel}
+          permissionMode={permissionMode}
+          columns={terminalWidth}
+          skillsCount={skills.length}
+          instructionsCount={instructions.length}
+          vaultPath={vaultPath}
+        />
       </Box>
     </Box>
   );

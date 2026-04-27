@@ -51,25 +51,55 @@ export type ToolIntentDecision = {
 // ---------------------------------------------------------------------------
 
 const LANG_ALIASES: Record<string, string> = {
+  // C# / .NET variants
   "c#": "csharp", "cs": "csharp", ".net": "csharp", "dotnet": "csharp",
-  "asp.net": "csharp", "aspnet": "csharp",
+  "asp.net": "csharp", "aspnet": "csharp", "asp.net core": "csharp",
+  "aspnet core": "csharp", "aspnetcore": "csharp",
+  "entity framework": "csharp", "ef": "csharp", "ef core": "csharp",
+  "entity framework core": "csharp", "entityframework": "csharp",
+  ".net entity framework": "csharp", "dotnet ef": "csharp",
+  ".net core": "csharp", "dotnet core": "csharp",
+  "blazor": "csharp", "wpf": "csharp", "winforms": "csharp",
+  "xamarin": "csharp", "maui": "csharp",
+  // TypeScript / JS variants
   "ts": "typescript", "node": "typescript", "nodejs": "typescript",
-  "node.js": "typescript", "express": "typescript",
+  "node.js": "typescript", "express": "typescript", "nestjs": "typescript",
+  "next.js": "typescript", "nextjs": "typescript",
+  "react": "typescript", "angular": "typescript",
+  // JavaScript
   "js": "javascript", "javascript": "javascript",
+  // Python variants
   "py": "python", "fastapi": "python", "django": "python", "flask": "python",
+  "python3": "python",
+  // Java variants
   "java": "java", "spring": "java", "springboot": "java",
+  "spring boot": "java", "spring mvc": "java", "jakarta": "java",
+  "quarkus": "java", "micronaut": "java",
+  // Go
   "go": "go", "golang": "go",
-  "rb": "ruby", "rails": "ruby",
+  // Ruby
+  "rb": "ruby", "rails": "ruby", "ruby on rails": "ruby",
+  // Rust
   "rs": "rust", "rust": "rust",
-  "vb": "vb.net", "vb.net": "vb.net",
-  "php": "php",
+  // VB.NET
+  "vb": "vb.net", "vb.net": "vb.net", "visual basic": "vb.net",
+  // Other
+  "php": "php", "laravel": "php",
   "swift": "swift",
   "kt": "kotlin", "kotlin": "kotlin",
 };
 
+/**
+ * Normalise a language string — handles single words and multi-word phrases
+ * like ".net entity framework" or "spring boot".
+ */
 export function normaliseLang(raw: string): string {
-  const lower = raw.toLowerCase().trim();
-  return LANG_ALIASES[lower] ?? lower;
+  const lower = raw.toLowerCase().trim().replace(/\s+/g, " ");
+  // Exact phrase match first
+  if (LANG_ALIASES[lower]) return LANG_ALIASES[lower];
+  // Try first word as fallback
+  const first = lower.split(" ")[0] ?? lower;
+  return LANG_ALIASES[first] ?? LANG_ALIASES[lower] ?? lower;
 }
 
 /** Languages we accept as a one-word reply when asking the user to fill in
