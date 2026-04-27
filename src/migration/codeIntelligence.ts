@@ -4,9 +4,12 @@ import type { ComponentAnalysis, FrameworkInfo } from "./rewriteTypes.js";
 import {
   extractSymbolsAST,
   extractCallsAST,
+  extractImplementsEdges,
   isAstParserAvailable,
   type ASTSymbol,
+  type ImplementsEdge,
 } from "./astParser.js";
+import { extractDataAccess, type DataAccessEdge } from "./dataAccessExtractor.js";
 import {
   extractSymbolsTreeSitter,
   extractCallsTreeSitter,
@@ -73,6 +76,10 @@ export type CodeIntelligenceArtifact = {
     /** Highest complexity symbol in this component */
     maxComplexity?: number;
   }>;
+  /** Type-flow: class → interface implements edges (JS/TS AST only) */
+  implementsEdges?: ImplementsEdge[];
+  /** Data access: ORM / SQL reads and writes extracted from source files */
+  dataAccessEdges?: DataAccessEdge[];
 };
 
 // ---------------------------------------------------------------------------
@@ -383,6 +390,26 @@ export function buildCodeIntelligenceArtifact(input: {
     return detectCallsRegex(file, fileSymbols, byName);
   });
 
+  // Pass 3 — implements edges (type-flow) + data access extraction
+  const implementsEdges: ImplementsEdge[] = [];
+  const dataAccessEdges: DataAccessEdge[] = [];
+
+  for (const file of files) {
+    const ext = extension(file.path);
+    const fileSymbols = symbolsByFile.get(file.path) ?? [];
+    const component = componentForFile(file.path, input.analyses);
+    const componentId = component ? `component:${component}` : `file:${file.path}`;
+
+    // Implements edges — TypeScript AST only (has heritage clause info)
+    if (isJsTs(ext) && isAstParserAvailable()) {
+      implementsEdges.push(...extractImplementsEdges(file, fileSymbols as ASTSymbol[]));
+    }
+
+    // Data access — all languages via regex ORM + SQL patterns
+    const symbolName = fileSymbols[0]?.component ?? component ?? file.path;
+    dataAccessEdges.push(...extractDataAccess(file, symbolName, componentId));
+  }
+
   // Component-level rollup
   const components = input.analyses.map((analysis) => {
     const componentSymbols = symbols.filter((s) => s.component === analysis.component.name);
@@ -429,6 +456,8 @@ export function buildCodeIntelligenceArtifact(input: {
     symbols,
     calls,
     components,
+    ...(implementsEdges.length > 0 && { implementsEdges }),
+    ...(dataAccessEdges.length > 0 && { dataAccessEdges }),
   };
 }
 

@@ -339,3 +339,163 @@ export function extractCallsAST(
 export function isAstParserAvailable(): boolean {
   return getTypeScript() !== null;
 }
+
+// ---------------------------------------------------------------------------
+// Type-flow: heritage clause extraction (implements / extends)
+// ---------------------------------------------------------------------------
+
+export type ImplementsEdge = {
+  /** The class or symbol that implements/extends */
+  className: string;
+  classSymbolId: string;
+  classFile: string;
+  /** The interface or base class name */
+  targetName: string;
+  kind: "implements" | "extends";
+};
+
+/**
+ * Extract all `implements X` and `extends X` relationships from a TS/JS file.
+ * This is the foundation of type-flow resolution — once we know which concrete
+ * class implements an interface, we can resolve calls to interface methods.
+ */
+export function extractImplementsEdges(
+  file: { path: string; content: string },
+  fileSymbols: ASTSymbol[],
+): ImplementsEdge[] {
+  const ts = getTypeScript();
+  const sourceFile = parseFile(file);
+  if (!ts || !sourceFile) return [];
+
+  const edges: ImplementsEdge[] = [];
+  const seen = new Set<string>();
+
+  walk(sourceFile, (node) => {
+    const isClass =
+      node.kind === ts.SyntaxKind.ClassDeclaration ||
+      node.kind === ts.SyntaxKind.ClassExpression;
+    const isInterface = node.kind === ts.SyntaxKind.InterfaceDeclaration;
+    if (!isClass && !isInterface) return;
+
+    const className = textOf(sourceFile, node.name);
+    if (!className) return;
+
+    const symbol = fileSymbols.find((s) => s.name === className && s.file === file.path);
+    if (!symbol) return;
+
+    // heritageClauses covers both `implements X, Y` and `extends Z`
+    const clauses: TsNode[] = node.heritageClauses ?? [];
+    for (const clause of clauses) {
+      // clause.token: SyntaxKind.ExtendsKeyword or SyntaxKind.ImplementsKeyword
+      const kind: "extends" | "implements" =
+        clause.token === ts.SyntaxKind.ImplementsKeyword ? "implements" : "extends";
+
+      for (const type of clause.types ?? []) {
+        const targetName = textOf(sourceFile, type.expression);
+        if (!targetName || KEYWORDS.has(targetName)) continue;
+        const key = `${symbol.id}:${kind}:${targetName}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({
+          className,
+          classSymbolId: symbol.id,
+          classFile: file.path,
+          targetName,
+          kind,
+        });
+      }
+    }
+  });
+
+  return edges;
+}
+
+// ---------------------------------------------------------------------------
+// Type-flow: resolve interface call edges to concrete implementations
+// ---------------------------------------------------------------------------
+
+export type ResolvedCall = {
+  /** The original unresolved call (targetName is an interface method) */
+  original: CodeCallEdge;
+  /** Concrete symbol IDs that could handle this call */
+  implementations: string[];
+};
+
+/**
+ * Given a set of call edges and a map of interface→implementation symbol IDs,
+ * return enriched calls where unresolved interface method calls are linked to
+ * all known concrete implementations.
+ *
+ * This is a lightweight "duck-typing" resolution: any class that has a method
+ * with the same name as the called method AND implements the interface is
+ * considered a candidate.
+ */
+export function resolveCallsWithTypeFlow(
+  calls: CodeCallEdge[],
+  implementsEdges: ImplementsEdge[],
+  allSymbols: ASTSymbol[],
+): ResolvedCall[] {
+  // Build: interface name → concrete class names
+  const interfaceImpls = new Map<string, string[]>();
+  for (const edge of implementsEdges) {
+    if (edge.kind !== "implements") continue;
+    const existing = interfaceImpls.get(edge.targetName.toLowerCase()) ?? [];
+    if (!existing.includes(edge.className)) {
+      existing.push(edge.className);
+      interfaceImpls.set(edge.targetName.toLowerCase(), existing);
+    }
+  }
+
+  const byName = new Map<string, ASTSymbol[]>();
+  for (const s of allSymbols) {
+    const key = s.name.toLowerCase();
+    const bucket = byName.get(key) ?? [];
+    bucket.push(s);
+    byName.set(key, bucket);
+  }
+
+  const resolved: ResolvedCall[] = [];
+
+  for (const call of calls) {
+    // Only process calls that are still unresolved (no targetSymbolId)
+    if (call.targetSymbolId) continue;
+
+    const targetLower = call.targetName.toLowerCase();
+    const implementations: string[] = [];
+
+    // Check every interface to see if a method matches the call target
+    for (const [ifaceName, classNames] of interfaceImpls) {
+      for (const className of classNames) {
+        const methodCandidates = byName.get(targetLower) ?? [];
+        for (const method of methodCandidates) {
+          if (
+            method.name.toLowerCase() === targetLower &&
+            (method.kind === "method" || method.kind === "function") &&
+            // Method belongs to a class that implements this interface
+            allSymbols.some(
+              (s) =>
+                s.name === className &&
+                (s.kind === "class") &&
+                implementsEdges.some(
+                  (e) =>
+                    e.className === className &&
+                    e.targetName.toLowerCase() === ifaceName &&
+                    e.kind === "implements",
+                ),
+            )
+          ) {
+            if (!implementations.includes(method.id)) {
+              implementations.push(method.id);
+            }
+          }
+        }
+      }
+    }
+
+    if (implementations.length > 0) {
+      resolved.push({ original: call, implementations });
+    }
+  }
+
+  return resolved;
+}

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { GraphStore } from "../migration/graphStore.js";
 
 export type MigrationContractComponent = {
   name: string;
@@ -496,108 +497,131 @@ export async function getDependencyImpact(
   nodeName: string,
   depth = 3,
 ): Promise<string> {
-  const graph = JSON.parse(await getSystemGraph(migrationDir)) as {
+  const graphJson = JSON.parse(await getSystemGraph(migrationDir)) as {
     rewriteDir?: string;
     repoUrl?: string;
     nodes?: Array<{ id?: string; label?: string; type?: string; metadata?: Record<string, unknown> }>;
     edges?: Array<{ source?: string; target?: string; type?: string; label?: string; evidence?: string }>;
   };
 
+  // ── Load into GraphStore for indexed BFS traversal ───────────────────────
+  const store = GraphStore.fromSystemGraph(graphJson);
+
   const normalized = nodeName.toLowerCase();
-  const nodes = graph.nodes ?? [];
-  const edges = graph.edges ?? [];
-  const node = nodes.find((candidate) =>
-    candidate.id?.toLowerCase() === normalized ||
-    candidate.label?.toLowerCase() === normalized ||
-    candidate.id?.toLowerCase() === `component:${normalized}`
+  const allNodes = store.getNodes();
+  const node = allNodes.find(
+    (candidate) =>
+      candidate.id.toLowerCase() === normalized ||
+      candidate.label.toLowerCase() === normalized ||
+      candidate.id.toLowerCase() === `component:${normalized}`,
   );
 
   if (!node?.id) {
-    const names = nodes
-      .filter((candidate) => candidate.type === "component")
-      .map((candidate) => candidate.label ?? candidate.id)
+    const names = store.getNodes("component")
+      .map((n) => n.label)
       .filter(Boolean)
       .join(", ") || "none";
     throw new Error(`Graph node "${nodeName}" was not found. Available components: ${names}`);
   }
 
   const maxDepth = Math.max(1, Math.min(6, Math.floor(depth || 3)));
-  const labelOf = (id: string | undefined) => nodes.find((candidate) => candidate.id === id)?.label ?? id;
-  const componentIdForSymbol = (symbolId: string | undefined): string | undefined => {
-    if (!symbolId) return undefined;
-    return edges.find((edge) => edge.target === symbolId && edge.type === "declares_symbol")?.source;
-  };
-  const walk = (startIds: string[], direction: "out" | "in", edgeType: string) => {
-    const seen = new Set<string>();
-    const queue = startIds.map((id) => ({ id, distance: 0 }));
-    const result: Array<{ id: string; label?: string; distance: number }> = [];
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (current.distance >= maxDepth) continue;
-      const nextEdges = edges.filter((edge) =>
-        edge.type === edgeType &&
-        (direction === "out" ? edge.source === current.id : edge.target === current.id)
-      );
-      for (const edge of nextEdges) {
-        const nextId = direction === "out" ? edge.target : edge.source;
-        if (!nextId || seen.has(nextId)) continue;
-        seen.add(nextId);
-        const item = { id: nextId, label: labelOf(nextId), distance: current.distance + 1 };
-        result.push(item);
-        queue.push(item);
-      }
-    }
-    return result;
+
+  // ── Direct relationships via indexed edge lookup (O(1) per hop) ───────────
+  const directDependencies = store.getEdges({ source: node.id, type: "depends_on" })
+    .map((e) => store.getNode(e.target)?.label ?? e.target);
+
+  const dependents = store.getEdges({ target: node.id, type: "depends_on" })
+    .map((e) => store.getNode(e.source)?.label ?? e.source);
+
+  const sourceFiles = store.getEdges({ source: node.id, type: "defined_in" })
+    .map((e) => store.getNode(e.target)?.label ?? e.target);
+
+  const targetRoles = store.getEdges({ source: node.id, type: "recommended_role" })
+    .map((e) => ({
+      role: store.getNode(e.target)?.label ?? e.target,
+      rationale: e.evidence ?? "",
+    }));
+
+  const packages = store.getEdges({ source: node.id })
+    .filter((e) => /package$/.test(e.type))
+    .map((e) => ({
+      package: store.getNode(e.target)?.label ?? e.target,
+      relationship: e.type,
+    }));
+
+  const declaredSymbols = store.getEdges({ source: node.id, type: "declares_symbol" })
+    .map((e) => store.getNode(e.target))
+    .filter((n): n is NonNullable<typeof n> => Boolean(n));
+
+  const declaredSymbolIds = new Set(declaredSymbols.map((s) => s.id));
+
+  const componentIdForSymbol = (symbolId: string): string | undefined =>
+    store.getEdges({ target: symbolId, type: "declares_symbol" })[0]?.source;
+
+  const outgoingCalls = declaredSymbols.flatMap((sym) =>
+    store.getEdges({ source: sym.id, type: "calls" }).map((e) => ({
+      from: sym.label,
+      to: store.getNode(e.target)?.label ?? e.target,
+      targetComponent: store.getNode(componentIdForSymbol(e.target) ?? "")?.label ?? null,
+      evidence: e.evidence ?? "",
+    }))
+  );
+
+  const incomingCalls = declaredSymbols.flatMap((sym) =>
+    store.getEdges({ target: sym.id, type: "calls" }).map((e) => ({
+      from: store.getNode(e.source)?.label ?? e.source,
+      sourceComponent: store.getNode(componentIdForSymbol(e.source) ?? "")?.label ?? null,
+      to: sym.label,
+      evidence: e.evidence ?? "",
+    }))
+  );
+
+  // ── Multi-hop BFS traversal via GraphStore ─────────────────────────────────
+  const transitiveDependencies = store.bfs([node.id], "out", ["depends_on"], maxDepth)
+    .map((item) => item.label);
+
+  const transitiveDependents = store.bfs([node.id], "in", ["depends_on"], maxDepth)
+    .map((item) => item.label);
+
+  // ── Transitive call impact (symbols that would break if this changes) ──────
+  const transitiveCallDependents = store.bfs(
+    [...declaredSymbolIds],
+    "in",
+    ["calls"],
+    Math.min(maxDepth, 4),
+  ).map((item) => ({
+    symbol: item.label,
+    component: store.getNode(componentIdForSymbol(item.id) ?? "")?.label ?? null,
+    distance: item.distance,
+  }));
+
+  // ── Data access (reads/writes tables) ─────────────────────────────────────
+  const dataAccess = store.dataAccess(node.id);
+  const dataAccessSummary = {
+    readsFromTables: dataAccess.reads.map((n) => n.label),
+    writesToTables: dataAccess.writes.map((n) => n.label),
+    rawQueryCount: dataAccess.queries.length,
+    note: dataAccess.reads.length + dataAccess.writes.length + dataAccess.queries.length === 0
+      ? "No data access edges found. Run /migrate with data-access extraction to populate this."
+      : undefined,
   };
 
-  const directDependencies = edges
-    .filter((edge) => edge.source === node.id && edge.type === "depends_on")
-    .map((edge) => labelOf(edge.target));
-  const dependents = edges
-    .filter((edge) => edge.target === node.id && edge.type === "depends_on")
-    .map((edge) => labelOf(edge.source));
-  const sourceFiles = edges
-    .filter((edge) => edge.source === node.id && edge.type === "defined_in")
-    .map((edge) => labelOf(edge.target));
-  const targetRoles = edges
-    .filter((edge) => edge.source === node.id && edge.type === "recommended_role")
-    .map((edge) => ({
-      role: labelOf(edge.target),
-      rationale: edge.evidence ?? "",
-    }));
-  const packages = edges
-    .filter((edge) => edge.source === node.id && /package$/.test(edge.type ?? ""))
-    .map((edge) => ({
-      package: labelOf(edge.target),
-      relationship: edge.type,
-    }));
-  const declaredSymbols = edges
-    .filter((edge) => edge.source === node.id && edge.type === "declares_symbol")
-    .map((edge) => nodes.find((candidate) => candidate.id === edge.target))
-    .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
-  const declaredSymbolIds = new Set(declaredSymbols.map((symbol) => symbol.id).filter(Boolean));
-  const outgoingCalls = edges
-    .filter((edge) => declaredSymbolIds.has(edge.source) && edge.type === "calls")
-    .map((edge) => ({
-      from: labelOf(edge.source),
-      to: labelOf(edge.target),
-      targetComponent: labelOf(componentIdForSymbol(edge.target)) ?? null,
-      evidence: edge.evidence ?? "",
-    }));
-  const incomingCalls = edges
-    .filter((edge) => declaredSymbolIds.has(edge.target) && edge.type === "calls")
-    .map((edge) => ({
-      from: labelOf(edge.source),
-      sourceComponent: labelOf(componentIdForSymbol(edge.source)) ?? null,
-      to: labelOf(edge.target),
-      evidence: edge.evidence ?? "",
-    }));
-  const transitiveDependencies = walk([node.id], "out", "depends_on").map((item) => item.label);
-  const transitiveDependents = walk([node.id], "in", "depends_on").map((item) => item.label);
+  // ── Interface implementations (type-flow) ─────────────────────────────────
+  const implementations = declaredSymbols
+    .filter((s) => s.type === "interface")
+    .flatMap((iface) =>
+      store.implementations(iface.id).map((impl) => ({
+        interface: iface.label,
+        implementedBy: impl.label,
+        file: impl.metadata?.file,
+      }))
+    );
+
+  store.close();
 
   return JSON.stringify({
-    rewriteDir: graph.rewriteDir,
-    repoUrl: graph.repoUrl,
+    rewriteDir: graphJson.rewriteDir,
+    repoUrl: graphJson.repoUrl,
     node: {
       id: node.id,
       label: node.label,
@@ -617,13 +641,23 @@ export async function getDependencyImpact(
     })),
     outgoingCalls,
     incomingCalls,
+    dataAccess: dataAccessSummary,
+    typeFlow: implementations.length > 0 ? implementations : undefined,
     implementationImpact: {
       implementBeforeThis: directDependencies,
       componentsToRetestAfterChange: dependents,
       transitiveDependencies,
       transitiveDependents,
-      blastRadius: [...new Set([...dependents, ...transitiveDependents, ...incomingCalls.map((call) => call.sourceComponent).filter(Boolean)])],
+      transitiveCallDependents: transitiveCallDependents.slice(0, 30),
+      blastRadius: [
+        ...new Set([
+          ...dependents,
+          ...transitiveDependents,
+          ...incomingCalls.map((call) => call.sourceComponent).filter(Boolean),
+        ]),
+      ],
       depth: maxDepth,
+      graphBackend: "GraphStore (SQLite indexed BFS)",
     },
   }, null, 2);
 }
