@@ -26,12 +26,89 @@ export type TreeSitterSymbol = CodeSymbol & {
 };
 
 type GrammarSpec = {
-  id: "python" | "java" | "csharp" | "go";
+  id: "python" | "java" | "csharp" | "go" | "c" | "cpp" | "pascal";
   packageName: string;
   languageExport?: string;
   symbolTypes: Partial<Record<string, CodeSymbolKind>>;
   callTypes: Set<string>;
+  /** Optional per-language name extractor for non-standard AST layouts (e.g. C/C++ declarators) */
+  extractName?: (node: TSNode) => string;
 };
+
+// ---------------------------------------------------------------------------
+// C / C++ name extraction
+//
+// In C/C++ the function name is buried inside a declarator chain:
+//   function_definition
+//     declarator: function_declarator        ← or pointer_declarator wrapping it
+//       declarator: identifier               ← the actual name
+//
+// We unwrap pointer_declarator / reference_declarator layers until we reach
+// a function_declarator, then take its inner declarator as the name node.
+// ---------------------------------------------------------------------------
+
+function unwrapDeclarator(node: TSNode): TSNode | null {
+  if (!node) return null;
+  // Pointer/reference wrappers — drill into their declarator field
+  if (node.type === "pointer_declarator" || node.type === "reference_declarator") {
+    const inner = node.childForFieldName?.("declarator");
+    return inner ? unwrapDeclarator(inner) : null;
+  }
+  return node;
+}
+
+function cExtractName(node: TSNode): string {
+  // For class/struct/enum/namespace, the name is the first type_identifier or identifier child
+  if (
+    node.type === "class_specifier" ||
+    node.type === "struct_specifier" ||
+    node.type === "enum_specifier" ||
+    node.type === "union_specifier" ||
+    node.type === "namespace_definition"
+  ) {
+    const nameChild =
+      node.childForFieldName?.("name") ??
+      (Array.isArray(node.namedChildren)
+        ? node.namedChildren.find((c: TSNode) =>
+            c.type === "type_identifier" || c.type === "identifier"
+          )
+        : null);
+    return typeof nameChild?.text === "string" ? nameChild.text : "";
+  }
+
+  // For function_definition and template_declaration, unwrap to the identifier
+  const rawDecl =
+    node.childForFieldName?.("declarator") ??
+    // template_declaration wraps the actual function — recurse into it
+    (node.type === "template_declaration"
+      ? node.namedChildren?.find((c: TSNode) => c.type === "function_definition")
+      : null);
+
+  if (!rawDecl) return "";
+
+  const decl = unwrapDeclarator(rawDecl);
+  if (!decl) return "";
+
+  // function_declarator: its inner declarator is the function name (identifier or
+  // qualified_identifier for C++ methods like Foo::bar)
+  if (decl.type === "function_declarator") {
+    const nameDecl = decl.childForFieldName?.("declarator");
+    if (!nameDecl) return "";
+    // qualified_identifier: keep just the last segment (the method name)
+    if (nameDecl.type === "qualified_identifier") {
+      const scope = nameDecl.childForFieldName?.("name");
+      return typeof scope?.text === "string" ? scope.text : (typeof nameDecl.text === "string" ? nameDecl.text.split("::").pop() ?? "" : "");
+    }
+    // destructor_name like ~Foo
+    if (nameDecl.type === "destructor_name") {
+      return typeof nameDecl.text === "string" ? nameDecl.text : "";
+    }
+    return typeof nameDecl.text === "string" ? nameDecl.text : "";
+  }
+
+  // Fallback: first identifier-like child
+  return typeof decl.text === "string" ? decl.text : "";
+}
 
 const GRAMMARS: Record<string, GrammarSpec> = {
   py: {
@@ -79,6 +156,59 @@ const GRAMMARS: Record<string, GrammarSpec> = {
       type_declaration: "class",
     },
     callTypes: new Set(["call_expression"]),
+  },
+
+  // C — .c and .h files
+  // Function names live inside a nested declarator chain, not a "name" field,
+  // so we provide a custom extractor that drills into the declarator tree.
+  c: {
+    id: "c",
+    packageName: "tree-sitter-c",
+    symbolTypes: {
+      function_definition: "function",
+      struct_specifier: "class",
+      enum_specifier: "class",
+      union_specifier: "class",
+    },
+    callTypes: new Set(["call_expression"]),
+    extractName: cExtractName,
+  },
+
+  // C++ — shares function_definition layout with C but adds class/namespace nodes
+  cpp: {
+    id: "cpp",
+    packageName: "tree-sitter-cpp",
+    symbolTypes: {
+      function_definition: "function",
+      class_specifier: "class",
+      struct_specifier: "class",
+      enum_specifier: "class",
+      namespace_definition: "class",
+      template_declaration: "function", // templates resolved to outermost kind below
+    },
+    callTypes: new Set(["call_expression"]),
+    extractName: cExtractName,
+  },
+
+  // Pascal / Delphi — .pas, .dpr, .inc
+  pas: {
+    id: "pascal",
+    packageName: "tree-sitter-pascal",
+    symbolTypes: {
+      function_declaration: "function",
+      procedure_declaration: "function",
+      function_definition: "function",
+      procedure_definition: "function",
+      class_type: "class",
+      class_declaration: "class",
+      object_type: "class",
+      interface_type: "interface",
+      interface_declaration: "interface",
+      method_definition: "method",
+      constructor_declaration: "method",
+      destructor_declaration: "method",
+    },
+    callTypes: new Set(["procedure_call", "function_call", "call_expression"]),
   },
 };
 
@@ -140,8 +270,27 @@ function loadLanguage(spec: GrammarSpec): TSLanguage | null {
   }
 }
 
+// Extension aliases — maps additional extensions to their canonical grammar key
+const EXTENSION_ALIASES: Record<string, string> = {
+  // C header files — treat as C (C++ headers fall through to cpp below)
+  h: "c",
+  // C++ source and header variants
+  cc: "cpp",
+  cxx: "cpp",
+  cpp: "cpp",
+  hpp: "cpp",
+  hh: "cpp",
+  // Pascal / Delphi variants
+  pas: "pas",
+  dpr: "pas",    // Delphi project file
+  inc: "pas",    // Pascal include file
+  pp: "pas",     // Free Pascal
+};
+
 export function treeSitterSpecForPath(path: string): GrammarSpec | null {
-  return GRAMMARS[extension(path)] ?? null;
+  const ext = extension(path);
+  const key = EXTENSION_ALIASES[ext] ?? ext;
+  return GRAMMARS[key] ?? null;
 }
 
 export function isTreeSitterAvailableForPath(path: string): boolean {
@@ -235,6 +384,7 @@ function goTypeName(node: TSNode): string {
 }
 
 function methodName(node: TSNode, spec: GrammarSpec): string {
+  if (spec.extractName) return spec.extractName(node);
   if (spec.id === "go" && node.type === "type_declaration") return goTypeName(node);
   return nameOf(node);
 }
@@ -313,6 +463,17 @@ function callName(node: TSNode, spec: GrammarSpec): string {
   }
 
   if (spec.id === "python" && node.type === "call") {
+    return lastIdentifier(text(childrenOf(node)[0] ?? node));
+  }
+
+  // C and C++: call_expression has a "function" field with the callee
+  if ((spec.id === "c" || spec.id === "cpp") && node.type === "call_expression") {
+    const fn = node.childForFieldName?.("function");
+    if (fn) return lastIdentifier(text(fn));
+  }
+
+  // Pascal: procedure_call and function_call — name is the first identifier
+  if (spec.id === "pascal") {
     return lastIdentifier(text(childrenOf(node)[0] ?? node));
   }
 

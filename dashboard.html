@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CCS Migration Analysis Dashboard</title>
+<style>
+:root {
+  --bg: #f8fafc;
+  --bg-elev: #ffffff;
+  --bg-sidebar: #1e293b;
+  --bg-card: #ffffff;
+  --fg: #0f172a;
+  --fg-muted: #475569;
+  --fg-dim: #94a3b8;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --accent: #3b82f6;
+  --accent-bg: #eff6ff;
+  --ready: #22c55e;
+  --ready-bg: #f0fdf4;
+  --needs: #f59e0b;
+  --needs-bg: #fffbeb;
+  --blocked: #ef4444;
+  --blocked-bg: #fef2f2;
+  --code-bg: #f1f5f9;
+  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --bg-elev: #1e293b;
+  --bg-sidebar: #0f172a;
+  --bg-card: #1e293b;
+  --fg: #f8fafc;
+  --fg-muted: #94a3b8;
+  --fg-dim: #64748b;
+  --border: #334155;
+  --accent: #60a5fa;
+  --accent-bg: #1e3a8a;
+  --ready: #4ade80;
+  --ready-bg: #064e3b;
+  --needs: #fbbf24;
+  --needs-bg: #78350f;
+  --blocked: #f87171;
+  --blocked-bg: #7f1d1d;
+  --code-bg: #020617;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+
+/* Sidebar */
+.sidebar { background: var(--bg-sidebar); color: #f8fafc; display: flex; flex-direction: column; }
+.sidebar-header { padding: 24px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+.nav { flex: 1; padding: 20px 12px; }
+.nav-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 8px; color: #cbd5e1; text-decoration: none; font-size: 14px; margin-bottom: 4px; }
+.nav-item:hover { background: rgba(255,255,255,0.05); color: white; }
+.nav-item.active { background: var(--accent); color: white; font-weight: 600; }
+
+/* Main Content */
+.main { overflow-y: auto; padding: 40px; height: 100vh; }
+.header { margin-bottom: 32px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 32px; }
+.stat-card { background: var(--bg-card); padding: 24px; border-radius: 12px; border: 1px solid var(--border); box-shadow: var(--shadow); }
+.stat-val { font-size: 32px; font-weight: 700; }
+.stat-label { font-size: 13px; color: var(--fg-muted); text-transform: uppercase; }
+
+/* Split Viewer */
+.split-viewer { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; height: 600px; }
+.viewer-pane { overflow-y: auto; padding: 24px; background: var(--bg-elev); }
+.viewer-pane.json { background: var(--code-bg); color: #cbd5e1; border-left: 1px solid var(--border); }
+
+/* Graph Explorer */
+.graph-workspace { display: grid; grid-template-columns: 1fr 300px; height: 500px; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+canvas { background: var(--bg); cursor: grab; }
+
+.hidden { display: none; }
+.verdict { padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.verdict.ready { background: var(--ready-bg); color: var(--ready); }
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-header"><h1>CCS Migration</h1></div>
+    <nav class="nav">
+      <a href="#overview" class="nav-item active" onclick="showRoute('overview')">Overview</a>
+      <a href="#graph" class="nav-item" onclick="showRoute('graph')">Graph Explorer</a>
+      <a href="#reports" class="nav-item" onclick="showRoute('reports')">Reports</a>
+    </nav>
+    <div style="padding: 16px; border-top: 1px solid rgba(255,255,255,0.1);">
+      <button onclick="toggleTheme()" style="background:none; border:1px solid #fff3; color:white; padding:4px 8px; border-radius:4px; cursor:pointer;">Toggle Theme</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="route-overview" class="route">
+      <div class="header">
+        <h2>Migration Overview</h2>
+        <p>System-wide health and component status summary.</p>
+      </div>
+      <div class="stats">
+        <div class="stat-card" style="border-left: 4px solid var(--ready);">
+          <div class="stat-val" style="color:var(--ready)">12</div>
+          <div class="stat-label">Ready for Migration</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid var(--needs);">
+          <div class="stat-val" style="color:var(--needs)">4</div>
+          <div class="stat-label">Needs Architecture Review</div>
+        </div>
+        <div class="stat-card" style="border-left: 4px solid var(--blocked);">
+          <div class="stat-val" style="color:var(--blocked)">1</div>
+          <div class="stat-label">Blocked by Dependencies</div>
+        </div>
+      </div>
+      
+      <div class="card" style="padding: 24px; background: var(--bg-elev);">
+        <h3>Migration Strategy</h3>
+        <p>The current analysis suggests a <strong>Parallel Phasing</strong> approach, starting with low-complexity leaf nodes (Logger, Utilities) before moving to core business logic (AuthService).</p>
+      </div>
+    </div>
+
+    <div id="route-graph" class="route hidden">
+      <div class="header"><h2>Graph Explorer</h2></div>
+      <div class="graph-workspace">
+        <canvas id="graph-canvas"></canvas>
+        <aside style="padding:20px; border-left:1px solid var(--border);">
+          <h3>Details</h3>
+          <div id="graph-details">Select a node</div>
+        </aside>
+      </div>
+    </div>
+
+    <div id="route-reports" class="route hidden">
+      <div class="header"><h2>Component Reports</h2></div>
+      <div style="display: grid; grid-template-columns: 240px 1fr; gap: 20px; height: 600px;">
+        <div class="card" style="overflow-y: auto; padding: 12px; background: var(--bg-elev);">
+          <div id="report-nav-list"></div>
+        </div>
+        <div class="split-viewer">
+          <div class="viewer-pane" id="md-viewer"><h3>Report</h3><p>Select a component.</p></div>
+          <div class="viewer-pane json" id="json-viewer"><pre id="json-pre">{}</pre></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const components = [
+  { name: 'AuthService', status: 'ready', complexity: 'Low', claims: 12, doc: '# AuthService\n\nValidates users using JWT tokens. Matches existing security baseline.' },
+  { name: 'DataMapper', status: 'needs_review', complexity: 'High', claims: 5, doc: '# DataMapper\n\nComplex mapping logic for legacy SOAP payloads. Requires manual review of XML schemas.' },
+  { name: 'Logger', status: 'ready', complexity: 'Low', claims: 8, doc: '# Logger\n\nStandard logging utility. To be replaced with cloud-native structured logging.' }
+];
+
+function populateReportNav() {
+  const list = document.getElementById('report-nav-list');
+  list.innerHTML = components.map(c => `
+    <div onclick="selectComponent('${c.name}')" style="padding: 10px; cursor: pointer; border-radius: 6px; margin-bottom: 4px; border: 1px solid var(--border);" onmouseover="this.style.background='var(--accent-bg)'" onmouseout="this.style.background='none'">
+      <strong>${c.name}</strong>
+      <div style="font-size: 11px; opacity: 0.7;">${c.status.replace('_', ' ')}</div>
+    </div>
+  `).join('');
+}
+
+function selectComponent(name) {
+  const c = components.find(x => x.name === name);
+  document.getElementById('md-viewer').innerHTML = `<h3>${c.name} Report</h3><div class="markdown">${c.doc.replace(/\n/g, '<br>')}</div>`;
+  document.getElementById('json-pre').textContent = JSON.stringify(c, null, 2);
+}
+
+function showRoute(id) {
+  document.querySelectorAll('.route').forEach(r => r.classList.add('hidden'));
+  document.getElementById('route-' + id).classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navItem = document.querySelector(`[onclick="showRoute('${id}')"]`);
+  if (navItem) navItem.classList.add('active');
+  
+  if (id === 'graph') initGraph();
+  if (id === 'reports') populateReportNav();
+}
+
+function toggleTheme() {
+  document.body.setAttribute('data-theme', document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+}
+
+function initGraph() {
+  const canvas = document.getElementById('graph-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = canvas.parentElement.clientHeight;
+  
+  const nodes = components.map((c, i) => ({ x: 100 + i*150, y: 150, label: c.name }));
+  
+  function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    nodes.forEach(n => {
+      ctx.fillStyle = '#3b82f6';
+      ctx.beginPath(); ctx.arc(n.x, n.y, 20, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = document.body.getAttribute('data-theme') === 'dark' ? 'white' : 'black';
+      ctx.fillText(n.label, n.x - 20, n.y + 35);
+    });
+  }
+  draw();
+}
+</script>
+</body>
+</html>

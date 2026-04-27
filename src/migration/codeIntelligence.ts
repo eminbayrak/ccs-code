@@ -174,6 +174,76 @@ function detectSymbolsRegex(
       continue;
     }
 
+    // -----------------------------------------------------------------------
+    // VB6 / VBA / VBScript — .bas, .cls, .frm, .vb
+    //
+    // VB6 declarations are line-oriented and always start with an access
+    // modifier or the keyword itself, making regex reliable.
+    //
+    // Patterns handled:
+    //   [Public|Private|Friend] Sub   Name(...)
+    //   [Public|Private|Friend] Function Name(...) [As Type]
+    //   [Public|Private|Friend] Property Get|Set|Let Name(...)
+    //   Private Sub Object_Event(...)   ← event handler (kind = "handler")
+    //   Attribute VB_Name = "ClassName" ← class module name (.cls files)
+    // -----------------------------------------------------------------------
+    if (["bas", "cls", "frm", "vb"].includes(ext)) {
+      const ACCESS = /^(?:(?:Public|Private|Friend|Static)\s+)*/i;
+      const subMatch    = trimmed.match(new RegExp(`${ACCESS.source}Sub\\s+([A-Za-z_][\\w]*)\\s*\\(`, "i"));
+      const fnMatch     = trimmed.match(new RegExp(`${ACCESS.source}Function\\s+([A-Za-z_][\\w]*)\\s*\\(`, "i"));
+      const propMatch   = trimmed.match(new RegExp(`${ACCESS.source}Property\\s+(?:Get|Set|Let)\\s+([A-Za-z_][\\w]*)\\s*\\(`, "i"));
+      const classAttr   = trimmed.match(/^Attribute\s+VB_Name\s*=\s*"([^"]+)"/i);
+
+      if (classAttr && ext === "cls") {
+        add(classAttr[1]!, "class", i);
+      } else if (subMatch) {
+        const name = subMatch[1]!;
+        // Event handlers follow the pattern ObjectName_EventName
+        const isEvent = /^[A-Za-z][A-Za-z0-9]*_[A-Za-z][A-Za-z0-9]*$/.test(name);
+        add(name, isEvent ? "handler" : "function", i);
+      } else if (fnMatch) {
+        add(fnMatch[1]!, "function", i);
+      } else if (propMatch) {
+        add(propMatch[1]!, "method", i);
+      }
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // C / C++ regex fallback (used when tree-sitter is not installed)
+    // Covers the most common declaration forms. Not as accurate as tree-sitter
+    // but better than the generic fallback below.
+    // -----------------------------------------------------------------------
+    if (["c", "h", "cpp", "cc", "cxx", "hpp", "hh"].includes(ext)) {
+      // Simple function definition: return_type name(  at start of line
+      const cFnMatch = trimmed.match(/^(?:[\w:*&<>\s]+\s+)?([A-Za-z_][\w:~]*)::([A-Za-z_]\w*)\s*\(/);
+      const cFreeFn  = trimmed.match(/^(?:static\s+|inline\s+|extern\s+|virtual\s+|explicit\s+)*(?:[\w:*&<>]+\s+)+([A-Za-z_]\w*)\s*\([^;)]/);
+      const cClass   = trimmed.match(/^(?:class|struct)\s+([A-Za-z_]\w*)\s*(?:[:{]|$)/);
+      if (cFnMatch)      add(cFnMatch[2]!, "method", i);  // Foo::bar(...)
+      else if (cFreeFn)  add(cFreeFn[1]!, "function", i);
+      else if (cClass)   add(cClass[1]!, "class", i);
+      continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // Pascal / Delphi regex fallback (used when tree-sitter-pascal is absent)
+    // -----------------------------------------------------------------------
+    if (["pas", "dpr", "inc", "pp"].includes(ext)) {
+      const pascalFn    = trimmed.match(/^(?:function|procedure)\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*[;(]/i);
+      const pascalClass = trimmed.match(/^(?:T[A-Za-z_]\w*)\s*=\s*class\b/i);
+      const pascalIntf  = trimmed.match(/^(?:I[A-Za-z_]\w*)\s*=\s*interface\b/i);
+      if (pascalFn)      add(pascalFn[1]!, "function", i);
+      else if (pascalClass) {
+        // "TOrderService = class" — name is before the =
+        const nameMatch = trimmed.match(/^([A-Za-z_]\w*)\s*=/);
+        if (nameMatch) add(nameMatch[1]!, "class", i);
+      } else if (pascalIntf) {
+        const nameMatch = trimmed.match(/^([A-Za-z_]\w*)\s*=/);
+        if (nameMatch) add(nameMatch[1]!, "interface", i);
+      }
+      continue;
+    }
+
     const genericFunction = trimmed.match(/^(?:function|sub|procedure)\s+([A-Za-z_]\w*)/i);
     if (genericFunction) add(genericFunction[1]!, "function", i);
   }
