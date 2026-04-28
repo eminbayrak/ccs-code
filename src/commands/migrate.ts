@@ -279,27 +279,11 @@ async function handleScan(args: string[], onProgress?: (msg: string) => void): P
       },
       onCostPreview: async (preview) => {
         logs.push(preview);
-        if (autoConfirm) {
-          logs.push("Auto-confirmed (--yes flag).");
-          return true;
-        }
-        // Cannot do interactive stdin prompts inside the Ink UI.
-        // Show the estimate and ask the user to re-run with --yes.
-        return false;
+        onProgress?.(preview);
+        return true; // Always proceed — cost is shown as a progress step, no gate
       },
     });
 
-    // If scan was aborted by cost preview, result will have empty arrays
-    if (!result.analyzed.length && !result.unresolved.length && !result.errors.length && !result.scanReportPath) {
-      return [
-        "### Cost Estimate",
-        "",
-        ...logs,
-        "",
-        "Add `--yes` to proceed with the scan:",
-        `  /migrate scan --repo ${repoUrl} --lang ${lang}${org ? ` --org ${org}` : ""} --yes`,
-      ].join("\n");
-    }
 
     // ── Zero SOAP services found — auto-fallback to general code analysis ──
     if (result.analyzed.length === 0 && result.unresolved.length === 0) {
@@ -562,23 +546,12 @@ async function handleRewrite(args: string[], onProgress?: (msg: string) => void)
       },
       onCostPreview: async (preview) => {
         logs.push(preview);
-        if (autoConfirm) { logs.push("Auto-confirmed (--yes)."); return true; }
-        return false;
+        onProgress?.(preview);
+        return true; // Always proceed — cost is shown as a progress step, no gate
       },
     });
 
-    // Cost-preview abort
-    if (!result.indexPath && !result.reportPath && result.components.length === 0 && result.errors.length === 0) {
-      const contextReplay = noContext ? " --no-context" : contextPaths.map((path) => ` --context ${path}`).join("");
-      return [
-        "### Cost Estimate",
-        "",
-        ...logs,
-        "",
-        `Add \`--yes\` to proceed:`,
-        `  /migrate rewrite --repo ${repoUrl} --to ${targetLanguage}${contextReplay} --yes`,
-      ].join("\n");
-    }
+
 
     const { repoSlug } = await import("../migration/runLayout.js");
     const { writeDashboardFromRunDir } = await import("../migration/webDashboard.js");
@@ -720,22 +693,11 @@ async function handleReverseEng(args: string[], onProgress?: (msg: string) => vo
       },
       onCostPreview: async (preview) => {
         logs.push(preview);
-        if (autoConfirm) { logs.push("Auto-confirmed (--yes)."); return true; }
-        return false;
+        onProgress?.(preview);
+        return true; // Always proceed — cost is shown as a progress step, no gate
       },
     });
 
-    if (!result.indexPath && !result.reportPath && result.components.length === 0 && result.errors.length === 0) {
-      const contextReplay = noContext ? " --no-context" : contextPaths.map((path) => ` --context ${path}`).join("");
-      return [
-        "### Cost Estimate",
-        "",
-        ...logs,
-        "",
-        `Add \`--yes\` to proceed:`,
-        `  /migrate reverse-eng --repo ${repoUrl} --to ${targetLanguage}${contextReplay} --yes`,
-      ].join("\n");
-    }
 
     const { repoSlug } = await import("../migration/runLayout.js");
     const slug = repoSlug(repoUrl);
@@ -1184,6 +1146,155 @@ async function handleOpen(args: string[]): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// /migrate report [<slug>] [--all] [--open]
+//
+// No args      → list every migration run with posture summary + dashboard path
+// <slug>       → regenerate dashboard.html for that run and open in browser
+// --all        → regenerate every run's dashboard (no browser open)
+// --open       → open in browser after generating (default when slug given)
+// ---------------------------------------------------------------------------
+
+async function handleReport(
+  args: string[],
+  onProgress?: (msg: string) => void,
+): Promise<string> {
+  const { writeDashboardFromRunDir } = await import("../migration/webDashboard.js");
+
+  const openFlag  = args.includes("--open") || args.includes("-o");
+  const allFlag   = args.includes("--all")  || args.includes("-a");
+  const target    = args.find((a) => !a.startsWith("-"));
+
+  const migrationDir = await getMigrationDir();
+  const runs = await listRunFolders(migrationDir);
+
+  // ── No runs at all ────────────────────────────────────────────────────────
+  if (runs.length === 0) {
+    return [
+      "### No migration reports found",
+      "",
+      `Looked in: \`${migrationDir}\``,
+      "",
+      "Run `/migrate rewrite --repo <url> --to <lang> --yes` to generate a report.",
+    ].join("\n");
+  }
+
+  // ── List mode (no target, no --all) ───────────────────────────────────────
+  if (!target && !allFlag) {
+    const lines: string[] = [
+      "## Migration Reports",
+      "",
+      `Found **${runs.length}** run(s) under \`${migrationDir}\``,
+      "",
+      "| Run | Components | Posture | Dashboard |",
+      "|---|---|---|---|",
+    ];
+
+    for (const run of runs) {
+      let components = "—";
+      let posture    = "—";
+      let dashUrl    = `\`${join(run.path, "dashboard.html")}\``;
+
+      try {
+        const raw = await fs.readFile(join(run.path, "migration-contract.json"), "utf-8");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const contract = JSON.parse(raw) as any;
+        const comps = contract.components ?? [];
+        const ready       = comps.filter((c: any) => c.implementationStatus === "ready").length;
+        const needsReview = comps.filter((c: any) => c.implementationStatus === "needs_review").length;
+        const blocked     = comps.filter((c: any) => c.implementationStatus === "blocked").length;
+        components = String(comps.length);
+        const parts: string[] = [];
+        if (ready       > 0) parts.push(`${ready} ready`);
+        if (needsReview > 0) parts.push(`${needsReview} review`);
+        if (blocked     > 0) parts.push(`${blocked} blocked`);
+        posture = parts.join(" · ") || "unknown";
+      } catch { /* contract missing or unreadable — show partial info */ }
+
+      // Check if dashboard.html already exists
+      let hasDash = false;
+      try { await fs.access(join(run.path, "dashboard.html")); hasDash = true; } catch { /* */ }
+      if (!hasDash) dashUrl = "_not generated_";
+
+      lines.push(`| \`${run.name}\` | ${components} | ${posture} | ${dashUrl} |`);
+    }
+
+    lines.push(
+      "",
+      "**Open a specific dashboard:**",
+      "```",
+      `/migrate report <run-name>`,
+      "```",
+      "",
+      "**Regenerate all dashboards:**",
+      "```",
+      `/migrate report --all`,
+      "```",
+    );
+
+    return lines.join("\n");
+  }
+
+  // ── --all mode — regenerate every run ────────────────────────────────────
+  if (allFlag) {
+    const results: string[] = [`## Regenerating ${runs.length} dashboard(s)`, ""];
+    for (const run of runs) {
+      try {
+        onProgress?.(`Rebuilding dashboard for ${run.name}…`);
+        const { dashboardPath } = await writeDashboardFromRunDir(run.path);
+        results.push(`✓ \`${run.name}\` → \`${dashboardPath}\``);
+      } catch (e) {
+        results.push(`✗ \`${run.name}\` — ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    results.push("", "Open any run with `/migrate report <run-name>`.");
+    return results.join("\n");
+  }
+
+  // ── Single run mode — regenerate and open ────────────────────────────────
+  const { repoSlug } = await import("../migration/runLayout.js");
+  const slug = repoSlug(target!);
+  const run  = runs.find((r) =>
+    r.name === target || r.name === slug || r.path.endsWith(target!) || r.path.endsWith(slug)
+  ) ?? (await resolveRunFolder(target));
+
+  if (!run) {
+    const available = runs.map((r) => `\`${r.name}\``).join(", ");
+    return [
+      `### No run found for \`${target}\``,
+      "",
+      `Available runs: ${available || "none"}`,
+      "",
+      "Run `/migrate report` (no args) to list all.",
+    ].join("\n");
+  }
+
+  onProgress?.(`Rebuilding dashboard for ${run.name}…`);
+  let dashboardPath: string;
+  try {
+    ({ dashboardPath } = await writeDashboardFromRunDir(run.path));
+  } catch (e) {
+    return `### Dashboard generation failed\n\n${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // Open in browser (default behaviour when a specific run is named)
+  const shouldOpen = !args.includes("--no-open");
+  if (shouldOpen) {
+    try { await openInDefaultBrowser(dashboardPath); } catch { /* best-effort */ }
+  }
+
+  return [
+    "## ✓ Dashboard Ready",
+    "",
+    `**Run:** \`${run.name}\``,
+    `**File:** \`${dashboardPath}\``,
+    "",
+    shouldOpen
+      ? "Opened in your default browser."
+      : `Open manually: \`file://${dashboardPath}\``,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Main command handler — exported for App.tsx
 // ---------------------------------------------------------------------------
 
@@ -1208,6 +1319,10 @@ export async function handleMigrateCommand(
     case "plugin":  return handlePlugin(rest);
     case "db":      return handleDb(rest, onProgress);
     case "clean":   return handleClean(rest);
+    case "report":
+    case "reports":
+    case "html":
+      return handleReport(rest, onProgress);
     case "dashboard":
     case "ui":
       return handleDashboard(rest);
@@ -1249,11 +1364,12 @@ export async function handleMigrateCommand(
         "",
         "| Action | Command |",
         "| --- | --- |",
-        "| Analyze a repo | `/migrate rewrite --repo <url> --to csharp --context <file> --yes` |",
-        "| Open latest dashboard | `/migrate open --dashboard` |",
+        "| Analyze a repo | `/migrate rewrite --repo <url> --to <lang> --yes` |",
+        "| List all reports | `/migrate report` |",
+        "| Open a specific report | `/migrate report <run-name>` |",
+        "| Regenerate all dashboards | `/migrate report --all` |",
         "| Open latest folder | `/migrate open` |",
         "| Clean old runs | `/migrate clean` |",
-        "| Agent setup | `/setup` |",
         "",
         "### Plain English also works",
         "",
@@ -1261,7 +1377,7 @@ export async function handleMigrateCommand(
         "",
         "### More commands",
         "",
-        "`/migrate reverse-eng` · `/migrate status` · `/migrate verify` · `/migrate db` · `/migrate plugin list`",
+        "`/migrate report` · `/migrate reverse-eng` · `/migrate status` · `/migrate verify` · `/migrate db` · `/migrate plugin list`",
         "",
         "Run `/guide` for the full walkthrough.",
       ].join("\n");

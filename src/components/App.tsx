@@ -343,10 +343,12 @@ function ThinkingBlock({ startTime }: { startTime: number }) {
   const [tipIdx] = useState(() => Math.floor(Math.random() * TIPS.length));
 
   useEffect(() => {
-    const frameTimer  = setInterval(() => setFrame(f => (f + 1) % frames.length), 80);
+    // 120ms frames = 8fps — smooth enough, far fewer Ink redraws than 80ms
+    const frameTimer   = setInterval(() => setFrame(f => (f + 1) % frames.length), 120);
+    // 1s elapsed — no need to track sub-second changes
     const elapsedTimer = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startTime) / 1000));
-    }, 100);
+    }, 1000);
     return () => { clearInterval(frameTimer); clearInterval(elapsedTimer); };
   }, [startTime]);
 
@@ -1191,6 +1193,9 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
         const toolName = toolNameMap[subcommand] || "Migration Tool";
         const toolDesc = toolDescMap[subcommand] || "Executing migration operation";
 
+        // Collect all progress lines so they can be committed to Static on completion
+        const progressLines: string[] = [];
+
         setIsProcessing(true);
         setActiveTools([{ id: "migrate-task", name: toolName, description: toolDesc, details: "Initializing workflow...", isComplete: false }]);
         setMigrateLogs([]);
@@ -1198,12 +1203,18 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
 
         handleMigrateCommand(args, process.cwd(), (msg) => {
           if (cancelledRef.current) return;
+          progressLines.push(msg);
           setActiveTools([{ id: "migrate-task", name: toolName, description: toolDesc, details: msg, isComplete: false }]);
         })
           .then((output) => {
             if (cancelledRef.current) return;
             const elapsed = formatElapsed(Date.now() - processingStartRef.current);
-            setMessages((prev) => [...prev, createUIMessage("assistant", output)]);
+            // Build a single Static message: progress log (collapsed) + final output
+            // The progress log header is collapsed-looking but fully readable on scroll-up
+            const progressSection = progressLines.length > 0
+              ? `\`\`\`log\n${progressLines.join("\n")}\n\`\`\`\n\n`
+              : "";
+            setMessages((prev) => [...prev, createUIMessage("assistant", progressSection + output)]);
             setIsProcessing(false);
             setActiveTools([]);
             setMigrateLogs([]);
@@ -1212,7 +1223,10 @@ export function App({ initialPrompt }: { initialPrompt?: string; }) {
           .catch((err: unknown) => {
             if (cancelledRef.current) return;
             const msg = err instanceof Error ? err.message : String(err);
-            setMessages((prev) => [...prev, createUIMessage("assistant", `Error: ${msg}`)]);
+            const progressSection = progressLines.length > 0
+              ? `\`\`\`log\n${progressLines.join("\n")}\n\`\`\`\n\n`
+              : "";
+            setMessages((prev) => [...prev, createUIMessage("assistant", `${progressSection}Error: ${msg}`)]);
             setIsProcessing(false);
             setActiveTools([]);
             setMigrateLogs([]);

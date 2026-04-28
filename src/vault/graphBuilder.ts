@@ -153,23 +153,58 @@ export async function buildGraphData(wikiDir: string): Promise<{ nodes: Node[]; 
 }
 
 // ---------------------------------------------------------------------------
-// Generate self-contained HTML — Obsidian-style graph
+// Type icons — rendered inside each node circle
+// ---------------------------------------------------------------------------
+const GROUP_ICONS: Record<string, string> = {
+  code:         "</> ",
+  concept:      "★",
+  conversation: "◎",
+  data:         "≡",
+  ai:           "AI",
+  planning:     "☰",
+  devops:       "⚙",
+  learning:     "⊙",
+  writing:      "✏",
+  design:       "◇",
+  memory:       "◈",
+  unknown:      "⬡",
+};
+
+function makeNodeSvg(group: string, count: number): string {
+  const c = GROUP_COLORS[group] ?? GROUP_COLORS["unknown"]!;
+  const icon = GROUP_ICONS[group] ?? "⬡";
+  const fontSize = icon.length > 2 ? 12 : 18;
+  const badge = count > 0
+    ? `<circle cx="50" cy="14" r="11" fill="${c.fill}"/><text x="50" y="19" text-anchor="middle" font-size="11" fill="white" font-family="system-ui,sans-serif" font-weight="700">${count > 99 ? "99+" : count}</text>`
+    : "";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="white" stroke="${c.fill}" stroke-width="3.5"/><text x="32" y="39" text-anchor="middle" font-size="${fontSize}" fill="${c.fill}" font-family="-apple-system,system-ui,sans-serif" font-weight="600">${icon}</text>${badge}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Generate self-contained HTML — clean circle-icon graph
 // ---------------------------------------------------------------------------
 
 export async function generateGraphHtml(wikiDir: string, outputPath: string): Promise<{ nodeCount: number; edgeCount: number }> {
   const { nodes, edges } = await buildGraphData(wikiDir);
 
-  // Serialize color map for JS
-  const colorMapJs = Object.entries(GROUP_COLORS)
-    .map(([k, v]) => `"${k}": ${JSON.stringify(v)}`)
-    .join(",\n    ");
-
-  // Connection count per node for sizing
+  // Connection count per node for sizing + badges
   const connCount: Record<string, number> = {};
   for (const e of edges) {
     connCount[e.from] = (connCount[e.from] ?? 0) + 1;
     connCount[e.to]   = (connCount[e.to]   ?? 0) + 1;
   }
+
+  // Pre-bake SVG images (computed server-side so JS doesn't need to regenerate)
+  const nodesWithImages = nodes.map(n => ({
+    ...n,
+    image: makeNodeSvg(n.group, connCount[n.id] ?? 0),
+  }));
+
+  // Serialize color map for JS hover/filter logic
+  const colorMapJs = Object.entries(GROUP_COLORS)
+    .map(([k, v]) => `"${k}": ${JSON.stringify(v)}`)
+    .join(",\n    ");
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -181,8 +216,8 @@ export async function generateGraphHtml(wikiDir: string, outputPath: string): Pr
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 100%; height: 100%; overflow: hidden; }
   body {
-    background: #0a0a0f;
-    color: #e2e8f0;
+    background: #f0f4f8;
+    color: #1a202c;
     font-family: -apple-system, 'Segoe UI', sans-serif;
   }
   #graph { width: 100vw; height: 100vh; }
@@ -193,118 +228,109 @@ export async function generateGraphHtml(wikiDir: string, outputPath: string): Pr
     z-index: 20;
   }
   #search {
-    background: rgba(15,15,25,0.92);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.95);
+    border: 1px solid rgba(0,0,0,0.12);
     border-radius: 24px;
     padding: 8px 18px;
-    color: #e2e8f0;
+    color: #1a202c;
     font-size: 13px;
     width: 260px;
     outline: none;
     backdrop-filter: blur(12px);
     font-family: inherit;
   }
-  #search::placeholder { color: rgba(255,255,255,0.3); }
-  #search:focus { border-color: rgba(255,255,255,0.28); }
+  #search::placeholder { color: rgba(0,0,0,0.3); }
+  #search:focus { border-color: rgba(0,0,0,0.25); box-shadow: 0 0 0 3px rgba(0,0,0,0.06); }
 
   /* ── Legend ── */
   #legend {
     position: fixed; top: 16px; left: 16px; z-index: 20;
-    background: rgba(10,10,20,0.82);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.92);
+    border: 1px solid rgba(0,0,0,0.08);
     border-radius: 10px;
     padding: 12px 14px;
     backdrop-filter: blur(12px);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
   }
   #legend-title {
-    font-size: 10px; letter-spacing: 2px; color: rgba(255,255,255,0.3);
+    font-size: 10px; letter-spacing: 2px; color: rgba(0,0,0,0.35);
     text-transform: uppercase; margin-bottom: 8px;
   }
   .leg { display: flex; align-items: center; gap: 8px; margin: 5px 0; cursor: pointer; }
   .leg-dot {
-    width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
-    box-shadow: 0 0 6px var(--glow);
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    border: 2px solid var(--fill);
+    background: white;
   }
-  .leg-label { font-size: 12px; color: rgba(255,255,255,0.55); transition: color 0.15s; }
-  .leg:hover .leg-label { color: rgba(255,255,255,0.9); }
+  .leg-label { font-size: 12px; color: rgba(0,0,0,0.55); transition: color 0.15s; }
+  .leg:hover .leg-label { color: rgba(0,0,0,0.9); }
 
   /* ── Stats ── */
   #stats {
     position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: rgba(10,10,20,0.72);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.88);
+    border: 1px solid rgba(0,0,0,0.07);
     border-radius: 20px;
     padding: 5px 16px;
     font-size: 11px;
-    color: rgba(255,255,255,0.3);
+    color: rgba(0,0,0,0.4);
     letter-spacing: 1px;
     backdrop-filter: blur(8px);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.06);
   }
 
   /* ── Info panel ── */
   #info {
     position: fixed; top: 16px; right: 16px; z-index: 20;
-    background: rgba(10,10,20,0.92);
-    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.97);
+    border: 1px solid rgba(0,0,0,0.1);
     border-radius: 12px;
     padding: 16px 18px;
-    max-width: 260px;
+    max-width: 270px;
     display: none;
-    backdrop-filter: blur(16px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
   }
   #info-group-dot {
-    width: 10px; height: 10px; border-radius: 50%;
+    width: 12px; height: 12px; border-radius: 50%;
     display: inline-block; margin-right: 8px; flex-shrink: 0;
+    border: 2.5px solid currentColor; background: white;
   }
   #info-header { display: flex; align-items: center; margin-bottom: 10px; }
-  #info-title { font-size: 14px; font-weight: 600; color: #f1f5f9; line-height: 1.3; }
-  #info-body { font-size: 12px; color: rgba(255,255,255,0.45); line-height: 1.6; margin-bottom: 10px; }
+  #info-title { font-size: 14px; font-weight: 600; color: #1a202c; line-height: 1.3; }
+  #info-body { font-size: 12px; color: rgba(0,0,0,0.5); line-height: 1.6; margin-bottom: 10px; }
   #info-tags { display: flex; flex-wrap: wrap; gap: 4px; }
   .itag {
     font-size: 10px; border-radius: 4px;
     padding: 2px 7px; border: 1px solid;
-    opacity: 0.75;
+    opacity: 0.8;
   }
   #info-connections {
     margin-top: 10px;
-    font-size: 11px; color: rgba(255,255,255,0.25);
-    padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.06);
+    font-size: 11px; color: rgba(0,0,0,0.3);
+    padding: 10px 0; border-top: 1px solid rgba(0,0,0,0.07);
   }
-  #info-actions {
-    margin-top: 8px;
-    display: flex;
-    gap: 8px;
-  }
+  #info-actions { margin-top: 8px; display: flex; gap: 8px; }
   .action-btn {
-    flex: 1;
-    text-align: center;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.1);
+    flex: 1; text-align: center;
+    background: rgba(0,0,0,0.04);
+    border: 1px solid rgba(0,0,0,0.1);
     border-radius: 6px;
-    color: #f1f5f9;
-    padding: 6px;
-    font-size: 11px;
-    text-decoration: none;
-    transition: all 0.2s;
+    color: #2d3748;
+    padding: 6px; font-size: 11px;
+    text-decoration: none; transition: all 0.2s;
   }
-  .action-btn:hover {
-    background: rgba(255,255,255,0.1);
-    border-color: rgba(255,255,255,0.2);
-  }
+  .action-btn:hover { background: rgba(0,0,0,0.08); border-color: rgba(0,0,0,0.2); }
   .action-btn.primary {
-    background: rgba(124, 92, 252, 0.2);
-    border-color: rgba(124, 92, 252, 0.4);
-    color: #a78bfa;
+    background: rgba(124, 92, 252, 0.08);
+    border-color: rgba(124, 92, 252, 0.3);
+    color: #6d4cad;
   }
-  .action-btn.primary:hover {
-    background: rgba(124, 92, 252, 0.3);
-    border-color: rgba(124, 92, 252, 0.6);
-  }
+  .action-btn.primary:hover { background: rgba(124, 92, 252, 0.15); }
 
   /* ── Controls hint ── */
   #hint {
     position: fixed; bottom: 16px; right: 16px;
-    font-size: 11px; color: rgba(255,255,255,0.18);
+    font-size: 11px; color: rgba(0,0,0,0.25);
     line-height: 1.8; text-align: right;
   }
 </style>
@@ -321,7 +347,7 @@ export async function generateGraphHtml(wikiDir: string, outputPath: string): Pr
   <div id="legend-title">Groups</div>
   ${Object.entries(GROUP_COLORS).map(([k, v]) => `
   <div class="leg" data-group="${k}" onclick="filterGroup('${k}')">
-    <div class="leg-dot" style="background:${v.fill};--glow:${v.glow}"></div>
+    <div class="leg-dot" style="border-color:${v.fill};--fill:${v.fill}"></div>
     <span class="leg-label">${k}</span>
   </div>`).join("")}
 </div>
@@ -352,7 +378,7 @@ const COLORS = {
   ${colorMapJs}
 };
 
-const rawNodes = ${JSON.stringify(nodes)};
+const rawNodes = ${JSON.stringify(nodesWithImages)};
 const rawEdges = ${JSON.stringify(edges)};
 const connCount = ${JSON.stringify(connCount)};
 
@@ -370,36 +396,38 @@ function hexToRgba(hex, alpha) {
 const nodesDs = new vis.DataSet(rawNodes.map(n => {
   const c = getColor(n.group);
   const conn = connCount[n.id] ?? 0;
-  const size = 7 + Math.min(22, conn * 2.5);
+  const size = 28 + Math.min(14, conn * 2);
   return {
     id: n.id,
-    label: n.label.length > 22 ? n.label.slice(0, 20) + "…" : n.label,
+    label: n.label.length > 24 ? n.label.slice(0, 22) + "…" : n.label,
     fullLabel: n.label,
     title: undefined,
     group: n.group,
     keywords: n.keywords,
     summary: n.title,
     connections: conn,
+    shape: "circularImage",
+    image: n.image,
+    size,
+    borderWidth: 0,
+    borderWidthSelected: 0,
     color: {
-      background: c.fill,
-      border: hexToRgba(c.fill, 0.4),
-      highlight: { background: "#ffffff", border: c.fill },
-      hover:      { background: "#ffffff", border: c.fill },
+      background: "white",
+      border: c.fill,
+      highlight: { background: "white", border: c.fill },
+      hover:      { background: "white", border: c.fill },
     },
     shadow: {
       enabled: true,
-      color: hexToRgba(c.glow, 0.55),
-      x: 0, y: 0, size: size + 6,
+      color: hexToRgba(c.glow, 0.25),
+      x: 0, y: 0, size: 12,
     },
     font: {
-      color: "rgba(255,255,255,0.72)",
+      color: "#2d3748",
       size: 11,
       face: "-apple-system, 'Segoe UI', sans-serif",
-      strokeWidth: 3,
-      strokeColor: "rgba(0,0,0,0.7)",
+      strokeWidth: 0,
     },
-    shape: "dot",
-    size,
   };
 }));
 
@@ -407,11 +435,14 @@ const edgesDs = new vis.DataSet(rawEdges.map(e => ({
   from: e.from,
   to: e.to,
   keyword: e.label,
-  color: { color: "rgba(255,255,255,0.06)", highlight: "rgba(255,255,255,0.5)", hover: "rgba(255,255,255,0.35)" },
-  width: 1,
-  hoverWidth: 2,
-  selectionWidth: 2,
-  smooth: { type: "continuous", roundness: 0.2 },
+  dashes: true,
+  color: { color: "rgba(100,116,139,0.35)", highlight: "rgba(100,116,139,0.8)", hover: "rgba(100,116,139,0.6)" },
+  width: 1.5,
+  hoverWidth: 2.5,
+  selectionWidth: 2.5,
+  smooth: { type: "curvedCCW", roundness: 0.15 },
+  font: { size: 9, color: "rgba(100,116,139,0.6)", align: "middle", strokeWidth: 0 },
+  label: e.label ?? "",
 })));
 
 const container = document.getElementById("graph");
@@ -420,14 +451,14 @@ const network = new vis.Network(container, { nodes: nodesDs, edges: edgesDs }, {
     enabled: true,
     solver: "forceAtlas2Based",
     forceAtlas2Based: {
-      gravitationalConstant: -60,
-      centralGravity: 0.005,
-      springLength: 140,
-      springConstant: 0.06,
+      gravitationalConstant: -70,
+      centralGravity: 0.006,
+      springLength: 160,
+      springConstant: 0.05,
       damping: 0.45,
-      avoidOverlap: 0.6,
+      avoidOverlap: 0.8,
     },
-    stabilization: { enabled: true, iterations: 250, updateInterval: 20 },
+    stabilization: { enabled: true, iterations: 300, updateInterval: 25 },
   },
   interaction: {
     hover: true,
@@ -485,28 +516,21 @@ network.on("click", params => {
 network.on("hoverNode", params => {
   const nid = params.node;
   const connected = network.getConnectedNodes(nid);
-  const allIds = rawNodes.map(n => n.id);
-  const updates = allIds.map(id => {
-    const n = rawNodes.find(x => x.id === id);
+  const updates = rawNodes.map(n => {
     const c = getColor(n.group);
-    const conn = connCount[id] ?? 0;
-    const size = 7 + Math.min(22, conn * 2.5);
-    const isConnected = connected.includes(id) || id === nid;
+    const conn = connCount[n.id] ?? 0;
+    const size = 28 + Math.min(14, conn * 2);
+    const isConnected = connected.includes(n.id) || n.id === nid;
     return {
-      id,
-      color: {
-        background: isConnected ? c.fill : hexToRgba(c.fill, 0.18),
-        border: isConnected ? hexToRgba(c.fill, 0.6) : "transparent",
-        highlight: { background: "#ffffff", border: c.fill },
-        hover:      { background: "#ffffff", border: c.fill },
-      },
+      id: n.id,
+      opacity: isConnected ? 1 : 0.25,
       shadow: {
         enabled: true,
-        color: id === nid ? hexToRgba(c.glow, 0.8) : hexToRgba(c.glow, isConnected ? 0.45 : 0.1),
+        color: n.id === nid ? hexToRgba(c.glow, 0.55) : hexToRgba(c.glow, isConnected ? 0.3 : 0.05),
         x: 0, y: 0,
-        size: id === nid ? size + 14 : size + 5,
+        size: n.id === nid ? 20 : 12,
       },
-      font: { color: isConnected ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.18)" },
+      font: { color: isConnected ? "#1a202c" : "rgba(0,0,0,0.2)" },
     };
   });
   nodesDs.update(updates);
@@ -514,8 +538,8 @@ network.on("hoverNode", params => {
     id: e.from + "__" + e.to,
     from: e.from, to: e.to,
     color: {
-      color: (e.from === nid || e.to === nid) ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.03)",
-      highlight: "rgba(255,255,255,0.6)",
+      color: (e.from === nid || e.to === nid) ? "rgba(100,116,139,0.75)" : "rgba(100,116,139,0.08)",
+      highlight: "rgba(100,116,139,0.9)",
     },
     width: (e.from === nid || e.to === nid) ? 2 : 1,
   })));
@@ -524,26 +548,19 @@ network.on("hoverNode", params => {
 network.on("blurNode", () => {
   const updates = rawNodes.map(n => {
     const c = getColor(n.group);
-    const conn = connCount[n.id] ?? 0;
-    const size = 7 + Math.min(22, conn * 2.5);
     return {
       id: n.id,
-      color: {
-        background: c.fill,
-        border: hexToRgba(c.fill, 0.4),
-        highlight: { background: "#ffffff", border: c.fill },
-        hover:      { background: "#ffffff", border: c.fill },
-      },
-      shadow: { enabled: true, color: hexToRgba(c.glow, 0.55), x: 0, y: 0, size: size + 6 },
-      font: { color: "rgba(255,255,255,0.72)" },
+      opacity: 1,
+      shadow: { enabled: true, color: hexToRgba(c.glow, 0.25), x: 0, y: 0, size: 12 },
+      font: { color: "#2d3748" },
     };
   });
   nodesDs.update(updates);
   edgesDs.update(rawEdges.map(e => ({
     id: e.from + "__" + e.to,
     from: e.from, to: e.to,
-    color: { color: "rgba(255,255,255,0.06)", highlight: "rgba(255,255,255,0.5)" },
-    width: 1,
+    color: { color: "rgba(100,116,139,0.35)", highlight: "rgba(100,116,139,0.8)" },
+    width: 1.5,
   })));
 });
 
@@ -561,19 +578,12 @@ searchEl.addEventListener("input", () => {
   const matchedIds = new Set(matched.map(n => n.id));
   nodesDs.update(rawNodes.map(n => {
     const c = getColor(n.group);
-    const conn = connCount[n.id] ?? 0;
-    const size = 7 + Math.min(22, conn * 2.5);
     const hit = matchedIds.has(n.id);
     return {
       id: n.id,
-      color: {
-        background: hit ? c.fill : hexToRgba(c.fill, 0.15),
-        border: hit ? hexToRgba(c.fill, 0.7) : "transparent",
-        highlight: { background: "#ffffff", border: c.fill },
-        hover:      { background: "#ffffff", border: c.fill },
-      },
-      shadow: { enabled: true, color: hexToRgba(c.glow, hit ? 0.75 : 0.08), x: 0, y: 0, size: hit ? size + 12 : size },
-      font: { color: hit ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.15)" },
+      opacity: hit ? 1 : 0.2,
+      shadow: { enabled: true, color: hexToRgba(c.glow, hit ? 0.5 : 0.05), x: 0, y: 0, size: hit ? 18 : 8 },
+      font: { color: hit ? "#1a202c" : "rgba(0,0,0,0.2)" },
     };
   }));
   if (matched.length === 1) {
@@ -594,19 +604,12 @@ function filterGroup(group) {
   const inGroup = new Set(rawNodes.filter(n => n.group === group).map(n => n.id));
   nodesDs.update(rawNodes.map(n => {
     const c = getColor(n.group);
-    const conn = connCount[n.id] ?? 0;
-    const size = 7 + Math.min(22, conn * 2.5);
     const hit = inGroup.has(n.id);
     return {
       id: n.id,
-      color: {
-        background: hit ? c.fill : hexToRgba(c.fill, 0.12),
-        border: hit ? hexToRgba(c.fill, 0.6) : "transparent",
-        highlight: { background: "#ffffff", border: c.fill },
-        hover:      { background: "#ffffff", border: c.fill },
-      },
-      shadow: { enabled: true, color: hexToRgba(c.glow, hit ? 0.65 : 0.06), x: 0, y: 0, size: hit ? size + 10 : size },
-      font: { color: hit ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.12)" },
+      opacity: hit ? 1 : 0.18,
+      shadow: { enabled: true, color: hexToRgba(c.glow, hit ? 0.45 : 0.04), x: 0, y: 0, size: hit ? 16 : 8 },
+      font: { color: hit ? "#1a202c" : "rgba(0,0,0,0.2)" },
     };
   }));
 }

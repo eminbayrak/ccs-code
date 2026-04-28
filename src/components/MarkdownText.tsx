@@ -116,45 +116,68 @@ function isTableSep(line: string): boolean {
   return /^\|[\s|:\-]+\|$/.test(line.trim());
 }
 
-function renderTable(rows: string[][], startKey: number): React.ReactNode {
+/** Strip inline code ticks for visual length measurement */
+function visLen(cell: string): number {
+  return cell.replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").length;
+}
+
+/** Truncate a cell to maxChars, preserving inline code/bold markers best-effort */
+function truncCell(cell: string, max: number): string {
+  const raw = cell.replace(/`([^`]+)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1");
+  if (raw.length <= max) return cell;
+  return raw.slice(0, Math.max(0, max - 1)) + "…";
+}
+
+function renderTable(rows: string[][], startKey: number, tableWidth = 76): React.ReactNode {
   if (rows.length === 0) return null;
 
   const colCount = Math.max(...rows.map((r) => r.length));
-  const colWidths: number[] = Array(colCount).fill(0) as number[];
+  const naturalWidths: number[] = Array(colCount).fill(0) as number[];
 
   for (const row of rows) {
     for (let c = 0; c < row.length; c++) {
-      const w = (row[c] ?? "").replace(/`[^`]+`/g, (m) => m.slice(1, -1)).length;
-      colWidths[c] = Math.max(colWidths[c]!, w);
+      naturalWidths[c] = Math.max(naturalWidths[c]!, visLen(row[c] ?? ""));
     }
   }
 
+  // ── Scale column widths to fit available width ────────────────────────────
+  const GAP = 2; // chars between columns
+  const available = Math.max(40, tableWidth - 4); // 4 for outer padding
+  const totalNatural = naturalWidths.reduce((s, w) => s + w, 0) + GAP * (colCount - 1);
+
+  const colWidths: number[] = totalNatural <= available
+    ? [...naturalWidths]
+    : naturalWidths.map((w) => Math.max(3, Math.floor((w / totalNatural) * available - GAP)));
+
   const [header, ...body] = rows;
 
-  function padCell(cell: string, width: number) {
-    // Strip inline code markers for padding calculation
-    const raw = cell.replace(/`[^`]+`/g, (m) => m.slice(1, -1));
-    const pad = Math.max(0, width - raw.length);
-    return cell + " ".repeat(pad);
+  function padCell(cell: string, width: number): string {
+    const truncated = truncCell(cell, width);
+    const vl = visLen(truncated);
+    return truncated + " ".repeat(Math.max(0, width - vl));
   }
 
+  // ── Header separator line ─────────────────────────────────────────────────
+  const sepLine = colWidths.map((w) => "─".repeat(w + GAP)).join("┼").slice(0, available);
+
   return (
-    <Box flexDirection="column" marginTop={1} marginBottom={1}>
+    <Box flexDirection="column" marginTop={1} marginBottom={1} width={tableWidth}>
       {/* Header row */}
-      <Box flexDirection="row" backgroundColor="blue" paddingX={1}>
+      <Box flexDirection="row" paddingLeft={1}>
         {(header ?? []).map((cell, c) => (
-          <Text key={c} bold color="white">
-            {padCell(cell, colWidths[c]!)} {"  "}
-          </Text>
+          <Box key={c} flexDirection="row" width={colWidths[c]! + GAP}>
+            <Text bold color="blueBright">{padCell(cell, colWidths[c]!)}</Text>
+          </Box>
         ))}
       </Box>
+      {/* Separator */}
+      <Box paddingLeft={1}><Text color="gray" dimColor>{sepLine}</Text></Box>
       {/* Body rows */}
       {body.map((row, r) => (
-        <Box key={r} flexDirection="row" paddingX={1}>
+        <Box key={r} flexDirection="row" paddingLeft={1}>
           {row.map((cell, c) => (
-            <Box key={c} flexDirection="row">
-              <InlineText line={padCell(cell, colWidths[c]!)} />
-              <Text> {"  "}</Text>
+            <Box key={c} flexDirection="row" width={colWidths[c]! + GAP}>
+              <InlineText line={padCell(cell ?? "", colWidths[c]!)} />
             </Box>
           ))}
         </Box>
@@ -268,7 +291,7 @@ export function MarkdownText({ content, width }: { content: string; width?: numb
     const k = key++;
     elements.push(
       <Box key={k} flexDirection="column" paddingLeft={1} marginBottom={1} width={w}>
-        {renderTable(tableRows, k)}
+        {renderTable(tableRows, k, w - 2)}
       </Box>
     );
     tableRows = [];
