@@ -17,6 +17,7 @@ import {
   handleRewriteCommand,
   handleIndexCommand,
 } from "./commands/vault.js";
+import { listProviders, saveDefaultProvider } from "./llm/index.js";
 
 const program = new Command();
 
@@ -190,6 +191,70 @@ program
   .action(async () => {
     const { startMcpServer } = await import("./mcp/server.js");
     await startMcpServer();
+  });
+
+// ---------------------------------------------------------------------------
+// ccs-code provider
+// ---------------------------------------------------------------------------
+
+const providerCmd = program
+  .command("provider")
+  .description("Manage LLM providers — list configured providers or switch the default");
+
+providerCmd
+  .command("list")
+  .description("Show all configured providers and which one is active")
+  .action(async () => {
+    let providers;
+    try {
+      providers = await listProviders();
+    } catch (e) {
+      console.error("Could not read .ccs/config.json:", e instanceof Error ? e.message : e);
+      process.exit(1);
+    }
+
+    console.log("\n" + gradient.atlas("CCS CODE") + " — LLM Providers\n");
+
+    const maxKeyLen = Math.max(...providers.map((p) => p.key.length));
+
+    for (const p of providers) {
+      const bullet  = p.isDefault ? "●" : "○";
+      const active  = p.isDefault ? " (active)" : "";
+      const key     = p.key.padEnd(maxKeyLen);
+      const model   = p.model.padEnd(32);
+      console.log(
+        `  ${bullet}  ${key}  ${model}  ${p.envStatus}${active}`,
+      );
+    }
+
+    console.log(
+      "\nSwitch default:  ccs-code provider use <name>",
+    );
+    console.log(
+      "Edit providers:  .ccs/config.json\n",
+    );
+  });
+
+providerCmd
+  .command("use <name>")
+  .description("Set a provider as the default (e.g. ccs-code provider use claudecode)")
+  .action(async (name: string) => {
+    try {
+      await saveDefaultProvider(name);
+      console.log(
+        "\n" + gradient.atlas("CCS CODE") +
+        ` — Default provider set to: ${gradient.cristal(name)}\n`,
+      );
+      console.log(
+        "  All /enrich, /ask, and /graph commands will now use this provider.",
+      );
+      console.log(
+        "  Run  ccs-code provider list  to verify.\n",
+      );
+    } catch (e) {
+      console.error("\n✗ " + (e instanceof Error ? e.message : String(e)) + "\n");
+      process.exit(1);
+    }
   });
 
 program.parse();

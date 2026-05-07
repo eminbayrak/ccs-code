@@ -1,0 +1,38 @@
+# CCS Code — LLM provider config
+# Switch the active provider:  ccs-code provider use <name>
+# List all providers:          ccs-code provider list
+
+defaultProvider: claudecode
+
+providers:
+  claudecode:
+    provider: claudecode
+    model: claude-sonnet-4-6
+    model_flash: claude-haiku-4-5-20251001
+    # No API key needed — uses your existing `claude login` session
+
+  anthropic:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    model_flash: claude-haiku-4-5-20251001
+    # Requires env var: CCS_ANTHROPIC_API_KEY
+
+  codex:
+    provider: codex_cli
+    model: default
+    model_flash: default
+    sandbox: read-only
+    approval: never
+    # No API key needed — uses your existing `codex login` session
+
+  openai:
+    provider: openai
+    model: gpt-4o
+    model_flash: gpt-4o-mini
+    # Requires env var: CCS_OPENAI_API_KEY
+
+  gemini:
+    provider: gemini
+    model: gemini-3.1-pro-preview
+    model_flash: gemini-3.1-flash-lite-preview
+    # Requires env var: CCS_GEMINI_API_KEY
