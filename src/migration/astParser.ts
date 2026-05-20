@@ -341,6 +341,56 @@ export function isAstParserAvailable(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Import path extraction — for dependency graph construction in ScannerAgent.
+//
+// Walks ImportDeclaration and require() CallExpression nodes to collect the
+// raw module specifier strings. Only returns relative imports (start with ".").
+// ---------------------------------------------------------------------------
+
+export function extractImportPathsAST(
+  file: { path: string; content: string },
+): string[] {
+  const ts = getTypeScript();
+  const sourceFile = parseFile(file);
+  if (!ts || !sourceFile) return [];
+
+  const paths: string[] = [];
+
+  walk(sourceFile, (node) => {
+    // import ... from './foo'
+    if (node.kind === ts.SyntaxKind.ImportDeclaration) {
+      const specifier = node.moduleSpecifier;
+      const value = specifier ? textOf(sourceFile, specifier) : "";
+      if (value.startsWith(".")) paths.push(value);
+      return;
+    }
+
+    // export ... from './foo'
+    if (node.kind === ts.SyntaxKind.ExportDeclaration && node.moduleSpecifier) {
+      const value = textOf(sourceFile, node.moduleSpecifier);
+      if (value.startsWith(".")) paths.push(value);
+      return;
+    }
+
+    // const x = require('./foo')  |  await import('./foo')
+    if (node.kind === ts.SyntaxKind.CallExpression) {
+      const expr = node.expression;
+      const isRequire =
+        expr?.kind === ts.SyntaxKind.Identifier && textOf(sourceFile, expr) === "require";
+      const isDynamicImport = expr?.kind === ts.SyntaxKind.ImportKeyword;
+      if ((isRequire || isDynamicImport) && node.arguments?.length > 0) {
+        const arg = node.arguments[0];
+        const value = textOf(sourceFile, arg);
+        if (value && value.startsWith(".")) paths.push(value);
+      }
+    }
+  });
+
+  // Deduplicate
+  return [...new Set(paths)];
+}
+
+// ---------------------------------------------------------------------------
 // Type-flow: heritage clause extraction (implements / extends)
 // ---------------------------------------------------------------------------
 

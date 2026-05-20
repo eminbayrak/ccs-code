@@ -5,7 +5,7 @@ import { trace } from "../migration/tracer.js";
 import { analyze } from "../migration/rewriteTracer.js";
 import { loadPlugins, listPlugins } from "../migration/pluginLoader.js";
 import * as statusTracker from "../migration/statusTracker.js";
-import { loadConfig } from "../llm/index.js";
+import { loadConfig, providerFromConfig } from "../llm/index.js";
 import {
   routeIntent,
   decisionToSlashCommand,
@@ -16,6 +16,7 @@ import { analyzeDbStatic, runLiveInterrogation, renderStaticDbSection } from "..
 import { promises as fs } from "fs";
 import { checkCodexCliSetup } from "../llm/providers/codexCli.js";
 import { openInDefaultBrowser } from "../utils/platform.js";
+import { planMigration, runMigration } from "../migration/agents/orchestrator.js";
 
 type MigrationRunFolder = {
   name: string;
@@ -1295,6 +1296,140 @@ async function handleReport(
 }
 
 // ---------------------------------------------------------------------------
+// /migrate plan --repo <path> --do "<transformation>" [--build <cmd>] [--src <dir>]
+// Scans the repo, finds the best prompt, writes .ccs/migration-run.json
+// ---------------------------------------------------------------------------
+
+async function handlePlan(args: string[], onProgress?: (msg: string) => void): Promise<string> {
+  let repoDir = process.cwd();
+  let transformation = "";
+  let buildCommand: string | undefined;
+  let sourceDir: string | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === "--repo" || a === "-r") && args[i + 1]) repoDir = args[++i] ?? repoDir;
+    if ((a === "--do" || a === "--transform" || a === "-t") && args[i + 1]) transformation = args[++i] ?? "";
+    if ((a === "--build" || a === "-b") && args[i + 1]) buildCommand = args[++i];
+    if ((a === "--src" || a === "--source") && args[i + 1]) sourceDir = args[++i];
+  }
+
+  if (!transformation) {
+    return [
+      "Usage: /migrate plan --do \"<transformation>\" [options]",
+      "",
+      "Scans your codebase, selects the best migration prompt, and writes a plan.",
+      "Run `/migrate run` afterwards to execute it.",
+      "",
+      "Options:",
+      "  --repo <path>     Repo to migrate (default: current directory)",
+      "  --do <desc>       What to migrate, e.g. \"commonjs to ESM\" (required)",
+      "  --build <cmd>     Build command used for validation (auto-detected if omitted)",
+      "  --src <dir>       Source subdirectory to scan (default: src/)",
+      "",
+      "Examples:",
+      "  /migrate plan --do \"migrate CommonJS require() calls to ESM imports\"",
+      "  /migrate plan --repo ~/myproject --do \"convert React class components to hooks\"",
+      "  /migrate plan --do \"callbacks to async/await\" --build \"npm run typecheck\"",
+    ].join("\n");
+  }
+
+  const config = await loadConfig();
+  const provider = providerFromConfig(config);
+
+  try {
+    const { planFile, fileCount } = await planMigration({
+      repoDir,
+      transformation,
+      provider,
+      buildCommand,
+      sourceDir,
+      onProgress,
+    });
+
+    return [
+      `## ✓ Migration Plan Created`,
+      "",
+      `**Transformation:** ${transformation}`,
+      `**Files to migrate:** ${fileCount}`,
+      `**Plan file:** \`${planFile}\``,
+      "",
+      "Run `/migrate run` to start the migration.",
+      "Run `/migrate run --dry-run` to preview what would happen.",
+    ].join("\n");
+  } catch (e) {
+    return `### Plan Failed\n\n${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /migrate run [--repo <path>] [--filter <substr>] [--fail-fast] [--dry-run]
+// Executes the plan in .ccs/migration-run.json file by file.
+// ---------------------------------------------------------------------------
+
+async function handleRun(args: string[], onProgress?: (msg: string) => void): Promise<string> {
+  let repoDir = process.cwd();
+  let fileFilter: string | undefined;
+  let failFast = false;
+  let dryRun = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if ((a === "--repo" || a === "-r") && args[i + 1]) repoDir = args[++i] ?? repoDir;
+    if ((a === "--filter" || a === "-f") && args[i + 1]) fileFilter = args[++i];
+    if (a === "--fail-fast") failFast = true;
+    if (a === "--dry-run") dryRun = true;
+  }
+
+  const config = await loadConfig();
+  const provider = providerFromConfig(config);
+
+  try {
+    const result = await runMigration({
+      repoDir,
+      provider,
+      onProgress,
+      failFast,
+      fileFilter,
+      dryRun,
+    });
+
+    const lines = [
+      result.ok ? "## ✓ Migration Complete" : "## ⚠ Migration Finished with Errors",
+      "",
+      result.summary,
+      "",
+      `| | |`,
+      `|---|---|`,
+      `| Files done | ${result.filesDone} |`,
+      `| Files errored | ${result.filesError} |`,
+      `| Files skipped | ${result.filesSkipped} |`,
+      `| Total | ${result.filesTotal} |`,
+    ];
+
+    if (result.filesError > 0) {
+      lines.push(
+        "",
+        "Files with errors still have backups at `<file>.ccs-bak`.",
+        "Check `.ccs/migration-run.json` for per-file error details.",
+      );
+    }
+
+    if (result.verifierPassed === false) {
+      lines.push(
+        "",
+        "⚠ **Verification failed** — some forbidden patterns may still remain.",
+        "Check the verification output above for details.",
+      );
+    }
+
+    return lines.join("\n");
+  } catch (e) {
+    return `### Run Failed\n\n${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main command handler — exported for App.tsx
 // ---------------------------------------------------------------------------
 
@@ -1306,6 +1441,8 @@ export async function handleMigrateCommand(
   const [subcommand, ...rest] = args;
 
   switch (subcommand) {
+    case "plan":    return handlePlan(rest, onProgress);
+    case "run":     return handleRun(rest, onProgress);
     case "scan":    return handleScan(rest, onProgress);
     case "rewrite": return handleRewrite(rest, onProgress);
     case "reverse-eng":
@@ -1364,7 +1501,10 @@ export async function handleMigrateCommand(
         "",
         "| Action | Command |",
         "| --- | --- |",
-        "| Analyze a repo | `/migrate rewrite --repo <url> --to <lang> --yes` |",
+        "| Plan a local migration | `/migrate plan --do \"<transformation>\"` |",
+        "| Run the migration plan | `/migrate run` |",
+        "| Dry-run (no writes) | `/migrate run --dry-run` |",
+        "| Analyze a remote repo | `/migrate rewrite --repo <url> --to <lang> --yes` |",
         "| List all reports | `/migrate report` |",
         "| Open a specific report | `/migrate report <run-name>` |",
         "| Regenerate all dashboards | `/migrate report --all` |",
@@ -1377,7 +1517,7 @@ export async function handleMigrateCommand(
         "",
         "### More commands",
         "",
-        "`/migrate report` · `/migrate reverse-eng` · `/migrate status` · `/migrate verify` · `/migrate db` · `/migrate plugin list`",
+        "`/migrate plan` · `/migrate run` · `/migrate report` · `/migrate reverse-eng` · `/migrate status` · `/migrate verify` · `/migrate db` · `/migrate plugin list`",
         "",
         "Run `/guide` for the full walkthrough.",
       ].join("\n");

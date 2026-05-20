@@ -193,7 +193,7 @@ export async function saveDefaultProvider(key: string): Promise<void> {
  * tier: "flash" (faster/cheaper) or "pro" (smarter/complex).
  * Priority: config.model_flash/pro -> config.model (only for pro) -> tier default.
  */
-function providerFromConfig(config: CCSConfig, tier: LLMTier = "pro"): LLMProvider {
+export function providerFromConfig(config: CCSConfig, tier: LLMTier = "pro"): LLMProvider {
   switch (config.provider) {
     case "codex_cli": {
       const model = (tier === "flash")
